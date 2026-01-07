@@ -1,0 +1,17 @@
+# Blender
+*.blend
+*.blend1
+*.blend2
+*.blend@
+__pycache__/
+*.pyc
+*.pyo
+
+# OS generated
+.DS_Store
+Thumbs.db
+
+# Project specific
+PRD.txt
+*.zip
+*.bak

@@ -15,6 +15,14 @@ STYLE_ITEMS = [
     ('INDUSTRIAL', 'Industrial', 'Wide low sheds, high windows and large doors'),
     ('SUBURBAN', 'Suburban House', 'Small pitched-roof houses set back from the street'),
 ]
+INTERIOR_PROFILE = {
+    'DOWNTOWN': 'OFFICE',
+    'OLD_TOWN': 'STOREFRONT',
+    'RESIDENTIAL': 'RESIDENTIAL',
+    'BRUTALIST': 'OFFICE',
+    'INDUSTRIAL': 'WAREHOUSE',
+    'SUBURBAN': 'HOUSE',
+}
 STYLE_CONDITIONS = ('INTACT', 'WEATHERED', 'SEMI_COLLAPSED', 'RUBBLE_FILLED',
                     'PARTIAL_FILLED', 'LOWER_FLOORS', 'SHELL', 'WALL_RING',
                     'COLLAPSED')
@@ -40,7 +48,7 @@ def building_recipe(style, width, depth, floors, seed, damage=0, interiors=False
         pilaster_style='CORNERS', pilaster_sides='FRONT',
         roof_parapet=True, parapet_height=.35,
         has_patio=False,
-        building_profile='RESIDENTIAL' if interiors else 'NONE',
+        building_profile=INTERIOR_PROFILE.get(style, 'RESIDENTIAL') if interiors else 'NONE',
         exterior_stairs=False, interior_fill='NONE', exterior_rubble=False,
         enable_damage=damage > 0, damage_amount=damage,
         damage_pointiness=.4, damage_resolution=1.0,

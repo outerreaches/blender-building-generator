@@ -1,5 +1,14 @@
 # Procedural Building Shell Generator
 
+## v0.9.4: Interior fit-out
+
+Interiors now use solid, capped wall boxes with real door openings and headers.
+Apartment, office, house, storefront, warehouse and bar profiles place their own
+walls on every floor; the stair core gets a double-flight switchback with a
+turning landing, solid steps and a matching floor-slab opening. Partitions that
+would land in an exterior door or window are pulled clear instead of vanishing,
+and the stair treads and wall caps survive mesh cleanup.
+
 ## v0.9.3: Failure-model ruins
 
 New **Add → Mesh → Generate City** and **Generate Building by Style** commands
@@ -36,7 +45,7 @@ A Blender 4.5+ addon for generating game-ready building shells with customizable
 - **Procedural Building Generation** - Create 1-10 floor urban building shells with a single click
 - **Customizable Windows & Doors** - Control window types, sizes, spacing, and door placement
 - **Storefront Mode** - Large display windows for ground floor retail spaces
-- **Interior Layouts** - Optional room divisions, stairs, and multiple building profiles (Storefront, Warehouse, Residential, Bar)
+- **Interior Layouts** - Optional room divisions, stairs, and multiple building profiles (Storefront, Warehouse, Residential, Office, House, Bar)
 - **Damage System** - Post-apocalyptic weathering with irregular edges and wall collapses
 - **Facade Decoration** - Pilasters, roof parapets, and patios
 - **Bulk Generation** - Generate multiple buildings with randomized parameters

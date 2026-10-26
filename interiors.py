@@ -9,6 +9,8 @@
 # 5. Every room needs at least one doorway
 # 6. Stair zones are consistent across all floors (vertical alignment)
 
+import math
+
 import bmesh
 from mathutils import Vector
 from . import util
@@ -29,15 +31,18 @@ MAT_RUBBLE = 7
 # =============================================================================
 
 # Standard dimensions (meters)
-STAIR_WIDTH = 1.0           # Width of staircase
-STAIR_DEPTH = 2.8           # Depth needed for a stair run
-STAIR_LANDING = 1.0         # Landing depth at top/bottom
-STAIR_ZONE_WIDTH = 1.2      # Total width including margins
-STAIR_ZONE_DEPTH = 3.2      # Total depth including landing
+STAIR_WIDTH = 1.05          # Width of one flight
+STAIR_WELL = 0.12           # Gap between the two flights
+STAIR_LANDING = 1.0         # Landing strip at the entry and the turn
+STAIR_ZONE_WIDTH = 2.4      # Switchback core: two flights + well
+STAIR_ZONE_DEPTH = 4.4      # Entry landing + run + turning landing
+STAIR_RISER = 0.19          # Maximum riser
+STAIR_TREAD = 0.24          # Minimum tread
 MIN_ROOM_SIZE = 2.5         # Minimum room dimension for usability
 MIN_ROOM_AREA = 6.0         # Minimum room area (sq meters)
 MIN_WALL_OFFSET = 1.5       # Minimum distance of interior wall from exterior wall
 DOOR_WIDTH = 0.9            # Standard interior door width
+FLOOR_SLAB_THICKNESS = 0.15 # Matches mesh_builder.build_floor_slab
 EXTERIOR_DOOR_WIDTH = 1.0   # Exterior door width
 WALL_CLEARANCE = 0.3        # Minimum clearance from windows/doors for wall attachment
 
@@ -415,104 +420,94 @@ def validate_and_adjust_cardinal_wall(wall_start: Vector, wall_end: Vector,
         adjusted_start.y = wall_y
         adjusted_end.y = wall_y
         
-        # Check if start.x touches left exterior wall
+        # Pull a blocked end back from the exterior opening instead of dropping
+        # the whole partition: the wall becomes free-standing at that end.
+        inset = max(wall_thickness + 0.1, 0.3)
         if abs(wall_start.x - ix_min) < 0.01:
             if is_position_blocked_by_opening(wall_y, 'left', window_positions):
-                # Can't attach to exterior wall here - skip this wall
-                return None, None
-        
-        # Check if end.x touches right exterior wall
+                adjusted_start.x += inset
         if abs(wall_end.x - ix_max) < 0.01:
             if is_position_blocked_by_opening(wall_y, 'right', window_positions):
-                return None, None
-        
+                adjusted_end.x -= inset
+
     else:
         # Wall runs north-south (along Y), X should be constant
         wall_x = (wall_start.x + wall_end.x) / 2  # Average X to straighten
         adjusted_start.x = wall_x
         adjusted_end.x = wall_x
-        
-        # Check if start.y touches front exterior wall
+
+        inset = max(wall_thickness + 0.1, 0.3)
         if abs(wall_start.y - iy_min) < 0.01:
             if is_position_blocked_by_opening(wall_x, 'front', window_positions):
-                return None, None
-        
-        # Check if end.y touches back exterior wall
+                adjusted_start.y += inset
         if abs(wall_end.y - iy_max) < 0.01:
             if is_position_blocked_by_opening(wall_x, 'back', window_positions):
-                return None, None
-    
+                adjusted_end.y -= inset
+
     return adjusted_start, adjusted_end
 
 
-def get_stair_zone(width: float, depth: float, wall_thickness: float, 
-                   position: str = 'back_right') -> dict:
-    """
-    Calculate the stair zone - a reserved area for stairs that is consistent across all floors.
-    
-    Args:
-        width: Building width
-        depth: Building depth
-        wall_thickness: Exterior wall thickness
-        position: Where to place stairs ('back_right', 'back_left', 'back_center', 'front_right', etc.)
-    
-    Returns:
-        Dict with 'x_min', 'y_min', 'x_max', 'y_max' defining the stair zone
+def get_stair_zone(width: float, depth: float, wall_thickness: float,
+                   position: str = 'back_right', floor_height: float = 3.5) -> dict:
+    """Switchback stair core, consistent on every floor.
+
+    Two flights run on either side of a central well between an entry landing
+    (front) and a turning landing (back). The core depth is derived from the
+    floor height so a 0.24 m tread is possible; it is clamped to the interior
+    for small footprints.
     """
     ix_min, iy_min, ix_max, iy_max = get_interior_bounds(width, depth, wall_thickness)
     interior_width = ix_max - ix_min
     interior_depth = iy_max - iy_min
-    
-    # Default stair zone dimensions
-    zone_width = min(STAIR_ZONE_WIDTH, interior_width * 0.25)
-    zone_depth = min(STAIR_ZONE_DEPTH, interior_depth * 0.4)
-    
-    # Minimum margin from walls to ensure floor slab extends to all walls
-    wall_margin = 0.3
-    
-    # Position the stair zone (with margin from walls)
+
+    risers = max(6, math.ceil(floor_height / STAIR_RISER))
+    half = (risers + 1) // 2
+    wanted_run = max(1.8, half * STAIR_TREAD)
+    landing = STAIR_LANDING
+    zone_width = min(STAIR_ZONE_WIDTH, max(1.8, interior_width - .6))
+    zone_depth = min(wanted_run + 2 * landing, max(2.6, interior_depth - .6))
+    landing = min(landing, max(.6, (zone_depth - 1.0) / 2))
+    run = max(1.0, zone_depth - 2 * landing)
+    flight_width = max(.7, (zone_width - STAIR_WELL) / 2)
+
+    margin = .3
     if 'right' in position:
-        x_max = ix_max - wall_margin
+        x_max = ix_max - margin
         x_min = x_max - zone_width
     elif 'left' in position:
-        x_min = ix_min + wall_margin
+        x_min = ix_min + margin
         x_max = x_min + zone_width
-    else:  # center
+    else:
         x_min = ix_min + (interior_width - zone_width) / 2
         x_max = x_min + zone_width
-    
     if 'front' in position:
-        y_min = iy_min + wall_margin
+        y_min = iy_min + margin
         y_max = y_min + zone_depth
-    else:  # back (default)
-        y_max = iy_max - wall_margin
+    else:
+        y_max = iy_max - margin
         y_min = y_max - zone_depth
-    
+
     return {
-        'x_min': x_min,
-        'y_min': y_min,
-        'x_max': x_max,
-        'y_max': y_max
+        'x_min': x_min, 'y_min': y_min, 'x_max': x_max, 'y_max': y_max,
+        'landing': landing, 'run': run, 'flight_width': flight_width,
     }
 
 
 def get_floor_opening(width: float, depth: float, wall_thickness: float,
-                      stair_position: str = 'back_right') -> dict:
+                      stair_position: str = 'back_right',
+                      floor_height: float = 3.5) -> dict:
+    """Slab opening over the stair run and turning landing.
+
+    The front landing strip stays as slab: the stair emerges onto it at the
+    upper floor, so the top landing is supported by the floor plate.
     """
-    Get the floor slab opening for stair access. This is used for ALL multi-floor buildings.
-    
-    Returns:
-        Dict with 'x_min', 'y_min', 'x_max', 'y_max' for the opening
-    """
-    stair_zone = get_stair_zone(width, depth, wall_thickness, stair_position)
-    
-    # Opening is slightly smaller than stair zone (allow for framing)
-    margin = 0.1
+    zone = get_stair_zone(width, depth, wall_thickness, stair_position, floor_height)
+    inset = wall_thickness / 2 + .03
     return {
-        'x_min': stair_zone['x_min'] + margin,
-        'y_min': stair_zone['y_min'] + margin,
-        'x_max': stair_zone['x_max'] - margin,
-        'y_max': stair_zone['y_max'] - margin
+        'x_min': zone['x_min'] + inset,
+        'y_min': zone['y_min'] + zone['landing'],
+        'x_max': zone['x_max'] - inset,
+        'y_max': zone['y_max'],
     }
 
 
@@ -610,13 +605,17 @@ class BuildingProfile:
     def get_stair_zone(cls, width: float, depth: float, params: dict) -> dict:
         """Get the stair zone for this profile."""
         wall_thickness = params.get('wall_thickness', 0.25)
-        return get_stair_zone(width, depth, wall_thickness, cls.stair_position)
+        floor_height = params.get('floor_height', 3.5)
+        return get_stair_zone(width, depth, wall_thickness, cls.stair_position,
+                              floor_height)
     
     @classmethod
     def get_floor_opening(cls, width: float, depth: float, params: dict) -> dict:
         """Get the floor opening for stair access."""
         wall_thickness = params.get('wall_thickness', 0.25)
-        return get_floor_opening(width, depth, wall_thickness, cls.stair_position)
+        floor_height = params.get('floor_height', 3.5)
+        return get_floor_opening(width, depth, wall_thickness, cls.stair_position,
+                                 floor_height)
     
     @classmethod
     def get_ground_floor_layout(cls, width: float, depth: float, params: dict) -> dict:
@@ -1232,12 +1231,102 @@ class BarProfile(BuildingProfile):
         }
 
 
+class OfficeProfile(BuildingProfile):
+    """Open office plates around an enclosed stair core."""
+
+    name = "office"
+    description = "Open office floor with a stair core and a meeting room"
+    stair_position = "back_right"
+
+    @classmethod
+    def get_ground_floor_layout(cls, width: float, depth: float, params: dict) -> dict:
+        return {'rooms': [], 'walls': [], 'exterior_door': None}
+
+    @classmethod
+    def get_upper_floor_layout(cls, width: float, depth: float, floor_idx: int,
+                               params: dict) -> dict:
+        wall_thickness = params.get('wall_thickness', 0.25)
+        floor_height = params.get('floor_height', 3.5)
+        ix_min, iy_min, ix_max, iy_max = get_interior_bounds(width, depth, wall_thickness)
+        plate_width = ix_max - ix_min
+        plate_depth = iy_max - iy_min
+        walls = []
+        rooms = []
+        if plate_width < 8 or plate_depth < 8:
+            return {'rooms': rooms, 'walls': walls}
+        room_width = min(4.0, plate_width * .28)
+        room_depth = min(3.5, plate_depth * .28)
+        x1 = ix_min + room_width
+        y1 = iy_min + room_depth
+        rooms.append({'name': f'meeting_{floor_idx}',
+                      'bounds': (ix_min, iy_min, x1, y1), 'type': 'meeting'})
+        # Door gap on the long wall; merge_door_gaps turns it into an opening.
+        walls.append({'start': Vector((x1, iy_min, 0)),
+                      'end': Vector((x1, iy_min + 1.4, 0)),
+                      'height': floor_height, 'thickness': wall_thickness,
+                      'openings': []})
+        walls.append({'start': Vector((x1, iy_min + 2.3, 0)),
+                      'end': Vector((x1, y1, 0)),
+                      'height': floor_height, 'thickness': wall_thickness,
+                      'openings': []})
+        walls.append({'start': Vector((x1, y1, 0)),
+                      'end': Vector((ix_min, y1, 0)),
+                      'height': floor_height, 'thickness': wall_thickness,
+                      'openings': []})
+        return {'rooms': rooms, 'walls': walls}
+
+
+class HouseProfile(BuildingProfile):
+    """Small detached house: stair core plus one room divider per floor."""
+
+    name = "house"
+    description = "House with a stair core and a room divider"
+    stair_position = "back_right"
+
+    @classmethod
+    def get_ground_floor_layout(cls, width: float, depth: float, params: dict) -> dict:
+        return cls._layout(width, depth, params, 0)
+
+    @classmethod
+    def get_upper_floor_layout(cls, width: float, depth: float, floor_idx: int,
+                               params: dict) -> dict:
+        return cls._layout(width, depth, params, floor_idx)
+
+    @classmethod
+    def _layout(cls, width: float, depth: float, params: dict, floor_idx: int) -> dict:
+        wall_thickness = params.get('wall_thickness', 0.25)
+        floor_height = params.get('floor_height', 3.5)
+        ix_min, iy_min, ix_max, iy_max = get_interior_bounds(width, depth, wall_thickness)
+        plate_width = ix_max - ix_min
+        plate_depth = iy_max - iy_min
+        walls = []
+        rooms = []
+        if plate_width < 6.5 or plate_depth < 6.0:
+            return {'rooms': rooms, 'walls': walls}
+        divider_x = ix_min + plate_width * (.52 if floor_idx % 2 == 0 else .46)
+        rooms.append({'name': f'room_a_{floor_idx}',
+                      'bounds': (ix_min, iy_min, divider_x, iy_max), 'type': 'living'})
+        rooms.append({'name': f'room_b_{floor_idx}',
+                      'bounds': (divider_x, iy_min, ix_max, iy_max), 'type': 'living'})
+        walls.append({'start': Vector((divider_x, iy_min, 0)),
+                      'end': Vector((divider_x, iy_min + 1.2, 0)),
+                      'height': floor_height, 'thickness': wall_thickness,
+                      'openings': []})
+        walls.append({'start': Vector((divider_x, iy_min + 2.1, 0)),
+                      'end': Vector((divider_x, iy_max, 0)),
+                      'height': floor_height, 'thickness': wall_thickness,
+                      'openings': []})
+        return {'rooms': rooms, 'walls': walls}
+
+
 # Profile registry
 BUILDING_PROFILES = {
     'NONE': BuildingProfile,
     'STOREFRONT': StorefrontProfile,
     'WAREHOUSE': WarehouseProfile,
     'RESIDENTIAL': ResidentialProfile,
+    'OFFICE': OfficeProfile,
+    'HOUSE': HouseProfile,
     'BAR': BarProfile,
 }
 
@@ -1246,348 +1335,289 @@ BUILDING_PROFILES = {
 # Interior Geometry Generation
 # =============================================================================
 
-def build_interior_wall(bm: bmesh.types.BMesh, wall_def: dict, base_z: float) -> list:
-    """
-    Build an interior wall segment.
-    
-    Walls are forced to be cardinal (along X or Y axis only).
-    """
+def _wall_box(bm, x0, y0, x1, y1, z0, z1, material=MAT_INTERIOR_WALL):
+    vertices = [bm.verts.new((x, y, z))
+                for z in (z0, z1) for y in (y0, y1) for x in (x0, x1)]
     faces = []
-    
+    for corners in ((0, 2, 3, 1), (4, 5, 7, 6), (0, 1, 5, 4),
+                    (1, 3, 7, 5), (3, 2, 6, 7), (2, 0, 4, 6)):
+        face = bm.faces.new([vertices[index] for index in corners])
+        face.material_index = material
+        faces.append(face)
+    return faces
+
+
+def build_interior_wall(bm: bmesh.types.BMesh, wall_def: dict, base_z: float) -> list:
+    """Build a cardinal interior wall, cutting real door openings with a header.
+
+    ``wall_def['openings']`` entries are ``{'offset', 'width', 'height'}``
+    measured from the wall start. Segments beside an opening are full height;
+    above the opening a lintel closes the wall to the ceiling line.
+    """
     start = wall_def['start'].copy()
     end = wall_def['end'].copy()
     height = wall_def['height']
     thickness = wall_def['thickness']
-    
-    # Skip very short walls
     if (end - start).length < 0.2:
-        return faces
-    
-    # Force wall to be cardinal - determine primary direction
-    dx = abs(end.x - start.x)
-    dy = abs(end.y - start.y)
-    half_thickness = thickness / 2
-    
-    # Track wall direction for correct face winding
-    is_x_axis_wall = dx > dy
-    
+        return []
+
+    is_x_axis_wall = abs(end.x - start.x) > abs(end.y - start.y)
+    half = thickness / 2
     if is_x_axis_wall:
-        # Wall runs east-west (along X axis)
-        # Force both endpoints to same Y value
-        avg_y = (start.y + end.y) / 2
-        start.y = avg_y
-        end.y = avg_y
-        # Normal points in Y direction
-        offset = Vector((0, half_thickness, 0))
+        axis_start = min(start.x, end.x)
+        axis_end = max(start.x, end.x)
+        fixed = (start.y + end.y) / 2
+
+        def segment(a, b, z0, z1):
+            return _wall_box(bm, axis_start + a, fixed - half, axis_start + b,
+                             fixed + half, base_z + z0, base_z + z1)
     else:
-        # Wall runs north-south (along Y axis)
-        # Force both endpoints to same X value
-        avg_x = (start.x + end.x) / 2
-        start.x = avg_x
-        end.x = avg_x
-        # Normal points in X direction
-        offset = Vector((half_thickness, 0, 0))
-    
-    # Create wall box vertices
-    # v0-v3: -offset side, v4-v7: +offset side
-    v0 = bm.verts.new(start - offset + Vector((0, 0, base_z)))
-    v1 = bm.verts.new(end - offset + Vector((0, 0, base_z)))
-    v2 = bm.verts.new(end - offset + Vector((0, 0, base_z + height)))
-    v3 = bm.verts.new(start - offset + Vector((0, 0, base_z + height)))
-    
-    v4 = bm.verts.new(start + offset + Vector((0, 0, base_z)))
-    v5 = bm.verts.new(end + offset + Vector((0, 0, base_z)))
-    v6 = bm.verts.new(end + offset + Vector((0, 0, base_z + height)))
-    v7 = bm.verts.new(start + offset + Vector((0, 0, base_z + height)))
-    
-    # Face winding depends on wall direction
-    # For X-axis walls: -offset side is at -Y, so front face should point -Y
-    # For Y-axis walls: -offset side is at -X, so front face should point -X
-    # The winding [v0, v1, v2, v3] gives -Y normal for X-axis walls but +X for Y-axis walls
-    # So Y-axis walls need reversed winding
-    
-    if is_x_axis_wall:
-        # Front face (points -Y)
-        f = bm.faces.new([v0, v1, v2, v3])
-        f.material_index = MAT_INTERIOR_WALL
-        faces.append(f)
-        
-        # Back face (points +Y)
-        f = bm.faces.new([v5, v4, v7, v6])
-        f.material_index = MAT_INTERIOR_WALL
-        faces.append(f)
-        
-        # Top cap (points +Z)
-        f = bm.faces.new([v3, v2, v6, v7])
-        f.material_index = MAT_INTERIOR_WALL
-        faces.append(f)
-        
-        # Start end cap (points -X)
-        f = bm.faces.new([v4, v0, v3, v7])
-        f.material_index = MAT_INTERIOR_WALL
-        faces.append(f)
-        
-        # End end cap (points +X)
-        f = bm.faces.new([v1, v5, v6, v2])
-        f.material_index = MAT_INTERIOR_WALL
-        faces.append(f)
-        
-        # Bottom cap (points -Z)
-        f = bm.faces.new([v0, v4, v5, v1])
-        f.material_index = MAT_INTERIOR_WALL
-        faces.append(f)
-    else:
-        # Y-axis wall - all faces need adjusted winding
-        
-        # Front face (points -X)
-        f = bm.faces.new([v0, v3, v2, v1])
-        f.material_index = MAT_INTERIOR_WALL
-        faces.append(f)
-        
-        # Back face (points +X)
-        f = bm.faces.new([v5, v6, v7, v4])
-        f.material_index = MAT_INTERIOR_WALL
-        faces.append(f)
-        
-        # Top cap (points +Z) - adjusted winding
-        f = bm.faces.new([v3, v7, v6, v2])
-        f.material_index = MAT_INTERIOR_WALL
-        faces.append(f)
-        
-        # Start end cap (points -Y) - adjusted winding
-        f = bm.faces.new([v4, v7, v3, v0])
-        f.material_index = MAT_INTERIOR_WALL
-        faces.append(f)
-        
-        # End end cap (points +Y) - adjusted winding
-        f = bm.faces.new([v1, v2, v6, v5])
-        f.material_index = MAT_INTERIOR_WALL
-        faces.append(f)
-        
-        # Bottom cap (points -Z) - adjusted winding
-        f = bm.faces.new([v0, v1, v5, v4])
-        f.material_index = MAT_INTERIOR_WALL
-        faces.append(f)
-    
+        axis_start = min(start.y, end.y)
+        axis_end = max(start.y, end.y)
+        fixed = (start.x + end.x) / 2
+
+        def segment(a, b, z0, z1):
+            return _wall_box(bm, fixed - half, axis_start + a, fixed + half,
+                             axis_start + b, base_z + z0, base_z + z1)
+
+    length = axis_end - axis_start
+    openings = sorted(wall_def.get('openings', []), key=lambda item: item['offset'])
+    faces = []
+    cursor = 0.0
+    for opening in openings:
+        low = max(0.0, min(length, opening['offset']))
+        high = max(low, min(length, opening['offset'] + opening['width']))
+        door_height = min(height, opening.get('height', 2.1))
+        if low > cursor + 0.01:
+            faces.extend(segment(cursor, low, 0, height))
+        if high > low + 0.01 and door_height < height - 0.01:
+            faces.extend(segment(low, high, door_height, height))
+        cursor = max(cursor, high)
+    if cursor < length - 0.01:
+        faces.extend(segment(cursor, length, 0, height))
+    return faces
+
+
+def merge_door_gaps(walls: list) -> list:
+    """Turn collinear wall segments separated by a door gap into one wall with an opening."""
+    result = list(walls)
+    changed = True
+    while changed:
+        changed = False
+        for first in range(len(result)):
+            for second in range(first + 1, len(result)):
+                a, b = result[first], result[second]
+                if a.get('openings') or b.get('openings'):
+                    continue
+                if abs(a['height'] - b['height']) > 1e-6 or abs(a['thickness'] - b['thickness']) > 1e-6:
+                    continue
+                horizontal = (abs(a['start'].y - a['end'].y) < 1e-6 and
+                              abs(b['start'].y - b['end'].y) < 1e-6 and
+                              abs(a['start'].y - b['start'].y) < .01)
+                vertical = (abs(a['start'].x - a['end'].x) < 1e-6 and
+                            abs(b['start'].x - b['end'].x) < 1e-6 and
+                            abs(a['start'].x - b['start'].x) < .01)
+                if not horizontal and not vertical:
+                    continue
+                if horizontal:
+                    a0, a1 = sorted((a['start'].x, a['end'].x))
+                    b0, b1 = sorted((b['start'].x, b['end'].x))
+                    fixed = a['start'].y
+                else:
+                    a0, a1 = sorted((a['start'].y, a['end'].y))
+                    b0, b1 = sorted((b['start'].y, b['end'].y))
+                    fixed = a['start'].x
+                if a1 <= b0:
+                    gap, start_pos = b0 - a1, a1
+                elif b1 <= a0:
+                    gap, start_pos = a0 - b1, b1
+                else:
+                    continue
+                if not .6 <= gap <= 1.3:
+                    continue
+                merged = dict(a)
+                if horizontal:
+                    merged['start'] = Vector((min(a0, b0), fixed, 0))
+                    merged['end'] = Vector((max(a1, b1), fixed, 0))
+                else:
+                    merged['start'] = Vector((fixed, min(a0, b0), 0))
+                    merged['end'] = Vector((fixed, max(a1, b1), 0))
+                merged['openings'] = [{'offset': start_pos - min(a0, b0),
+                                       'width': gap, 'height': 2.1}]
+                result[first] = merged
+                result.pop(second)
+                changed = True
+                break
+            if changed:
+                break
+    return result
+
+
+def _stair_box(bm, x0, y0, z0, x1, y1, z1):
+    vertices = [bm.verts.new((x, y, z))
+                for z in (z0, z1) for y in (y0, y1) for x in (x0, x1)]
+    faces = []
+    for corners in ((0, 2, 3, 1), (4, 5, 7, 6), (0, 1, 5, 4),
+                    (1, 3, 7, 5), (3, 2, 6, 7), (2, 0, 4, 6)):
+        face = bm.faces.new([vertices[index] for index in corners])
+        face.material_index = MAT_STAIRS
+        faces.append(face)
     return faces
 
 
 def build_interior_stairs(bm: bmesh.types.BMesh, stair_zone: dict, floor_height: float,
                           base_z: float) -> list:
-    """
-    Build interior stairs within the designated stair zone.
-    Stairs go from base_z to base_z + floor_height.
+    """Switchback stair: two solid flights and a mid landing.
+
+    The lower flight climbs the left half to a turning landing at the back; the
+    upper flight climbs the right half back to the entry side and meets the
+    floor slab strip. Steps are solid down to the flight base, so nothing
+    hovers. Treads target 0.24 m at a <=0.19 m riser; the core depth is sized
+    for that, and clamped only in small footprints.
     """
     faces = []
-    
-    x_min = stair_zone['x_min']
-    y_min = stair_zone['y_min']
-    x_max = stair_zone['x_max']
-    y_max = stair_zone['y_max']
-    
-    stair_width = x_max - x_min
-    stair_depth = y_max - y_min - STAIR_LANDING  # Reserve space for landing
-    
-    num_steps = max(1, int(floor_height / 0.2))
-    step_height = floor_height / num_steps
-    step_depth = stair_depth / num_steps
-    step_thickness = 0.12
-    
-    # Build each step as a solid box
-    for i in range(num_steps):
-        step_top_z = base_z + (i + 1) * step_height
-        step_bottom_z = step_top_z - step_thickness
-        step_y = y_min + i * step_depth
-        
-        # Step vertices
-        t0 = bm.verts.new(Vector((x_min, step_y, step_top_z)))
-        t1 = bm.verts.new(Vector((x_max, step_y, step_top_z)))
-        t2 = bm.verts.new(Vector((x_max, step_y + step_depth, step_top_z)))
-        t3 = bm.verts.new(Vector((x_min, step_y + step_depth, step_top_z)))
-        
-        b0 = bm.verts.new(Vector((x_min, step_y, step_bottom_z)))
-        b1 = bm.verts.new(Vector((x_max, step_y, step_bottom_z)))
-        b2 = bm.verts.new(Vector((x_max, step_y + step_depth, step_bottom_z)))
-        b3 = bm.verts.new(Vector((x_min, step_y + step_depth, step_bottom_z)))
-        
-        # Create all 6 faces
-        f = bm.faces.new([t0, t1, t2, t3])  # Top
-        f.material_index = MAT_STAIRS
-        faces.append(f)
-        
-        f = bm.faces.new([b3, b2, b1, b0])  # Bottom
-        f.material_index = MAT_STAIRS
-        faces.append(f)
-        
-        f = bm.faces.new([b0, b1, t1, t0])  # Front
-        f.material_index = MAT_STAIRS
-        faces.append(f)
-        
-        f = bm.faces.new([b2, b3, t3, t2])  # Back
-        f.material_index = MAT_STAIRS
-        faces.append(f)
-        
-        f = bm.faces.new([b3, b0, t0, t3])  # Left
-        f.material_index = MAT_STAIRS
-        faces.append(f)
-        
-        f = bm.faces.new([b1, b2, t2, t1])  # Right
-        f.material_index = MAT_STAIRS
-        faces.append(f)
-    
-    # Top landing
-    landing_z = base_z + floor_height
-    landing_thickness = 0.15
-    
-    lt0 = bm.verts.new(Vector((x_min, y_max - STAIR_LANDING, landing_z)))
-    lt1 = bm.verts.new(Vector((x_max, y_max - STAIR_LANDING, landing_z)))
-    lt2 = bm.verts.new(Vector((x_max, y_max, landing_z)))
-    lt3 = bm.verts.new(Vector((x_min, y_max, landing_z)))
-    
-    lb0 = bm.verts.new(Vector((x_min, y_max - STAIR_LANDING, landing_z - landing_thickness)))
-    lb1 = bm.verts.new(Vector((x_max, y_max - STAIR_LANDING, landing_z - landing_thickness)))
-    lb2 = bm.verts.new(Vector((x_max, y_max, landing_z - landing_thickness)))
-    lb3 = bm.verts.new(Vector((x_min, y_max, landing_z - landing_thickness)))
-    
-    f = bm.faces.new([lt0, lt1, lt2, lt3])
-    f.material_index = MAT_STAIRS
-    faces.append(f)
-    
-    f = bm.faces.new([lb3, lb2, lb1, lb0])
-    f.material_index = MAT_STAIRS
-    faces.append(f)
-    
-    f = bm.faces.new([lb0, lb1, lt1, lt0])
-    f.material_index = MAT_STAIRS
-    faces.append(f)
-    
-    f = bm.faces.new([lb2, lb3, lt3, lt2])
-    f.material_index = MAT_STAIRS
-    faces.append(f)
-    
-    f = bm.faces.new([lb3, lb0, lt0, lt3])
-    f.material_index = MAT_STAIRS
-    faces.append(f)
-    
-    f = bm.faces.new([lb1, lb2, lt2, lt1])
-    f.material_index = MAT_STAIRS
-    faces.append(f)
-    
+    x_min, y_min, x_max, y_max = (stair_zone[key] for key in
+                                  ('x_min', 'y_min', 'x_max', 'y_max'))
+    landing = stair_zone.get('landing', STAIR_LANDING)
+    run = stair_zone.get('run', 2.0)
+    flight = stair_zone.get('flight_width', STAIR_WIDTH)
+
+    risers = max(6, math.ceil(floor_height / STAIR_RISER))
+    riser = floor_height / risers
+    first = (risers + 1) // 2
+    second = risers - first
+    tread_first = run / first
+    tread_second = run / second
+    mid_z = base_z + first * riser
+    entry_y = y_min + landing
+
+    left0, left1 = x_min, x_min + flight
+    for index in range(first):
+        faces.extend(_stair_box(
+            bm, left0, entry_y + index * tread_first, base_z,
+            left1, entry_y + (index + 1) * tread_first,
+            base_z + (index + 1) * riser))
+
+    faces.extend(_stair_box(
+        bm, x_min, y_max - landing, mid_z - 0.15,
+        x_max, y_max, mid_z))
+
+    right0, right1 = x_max - flight, x_max
+    for index in range(second):
+        faces.extend(_stair_box(
+            bm, right0, entry_y + run - (index + 1) * tread_second, mid_z,
+            right1, entry_y + run - index * tread_second,
+            mid_z + (index + 1) * riser))
     return faces
 
 
+def _prepare_interior_walls(wall_defs, width, depth, wall_thickness,
+                            window_positions, stair_zone):
+    prepared = []
+    for wall_def in wall_defs:
+        adjusted_start, adjusted_end = validate_and_adjust_cardinal_wall(
+            wall_def['start'], wall_def['end'],
+            width, depth, wall_thickness, window_positions)
+        if adjusted_start is None or adjusted_end is None:
+            continue
+        wall = dict(wall_def)
+        wall['start'] = adjusted_start
+        wall['end'] = adjusted_end
+        if (adjusted_end - adjusted_start).length < 0.3:
+            continue
+        pieces = (adjust_wall_for_stair_zone(wall, stair_zone)
+                  if stair_zone else [wall])
+        prepared.extend(pieces)
+    return merge_door_gaps(prepared)
+
+
+def _core_wall_defs(stair_zone, wall_thickness, floor_height):
+    """Enclose the stair core: two side walls and a front wall with a door."""
+    x_min, y_min, x_max, y_max = (stair_zone[key] for key in
+                                  ('x_min', 'y_min', 'x_max', 'y_max'))
+    width = x_max - x_min
+    door = min(DOOR_WIDTH, max(.8, width - 1.0))
+    return [
+        {'start': Vector((x_min, y_min, 0)), 'end': Vector((x_min, y_max, 0)),
+         'height': floor_height, 'thickness': wall_thickness, 'openings': []},
+        {'start': Vector((x_max, y_min, 0)), 'end': Vector((x_max, y_max, 0)),
+         'height': floor_height, 'thickness': wall_thickness, 'openings': []},
+        {'start': Vector((x_min, y_min, 0)), 'end': Vector((x_max, y_min, 0)),
+         'height': floor_height, 'thickness': wall_thickness,
+         'openings': [{'offset': (width - door) / 2, 'width': door, 'height': 2.1}]},
+    ]
+
+
 def generate_interior_layout(bm: bmesh.types.BMesh, params: dict) -> list:
-    """
-    Generate complete interior layout based on building profile.
-    
-    Architectural validations:
-    - Interior walls only attach to solid exterior wall sections (not windows/doors)
-    - Stairs only generated if floor_slabs are enabled (stairs need something to rest on)
-    - Walls avoid stair zones
-    - Upper floor walls ONLY generated if floor slabs exist (walls need floor to stand on)
-    - Upper floor walls use same layout as ground floor for structural consistency
-    - Damage-aware: walls and stairs only built below damage line
+    """Generate rooms per building use, an enclosed stair core and its stairs.
+
+    Ground and upper floors use their own profile layouts (no more copying the
+    ground floor upwards). Walls are validated against exterior openings and
+    the stair core; collinear segments separated by a door gap are merged into
+    a single wall with a real opening and header. Interiors stop at the damage
+    line; stairs only run where the slab above exists.
     """
     faces = []
-    
     profile_name = params.get('building_profile', 'NONE')
-    profile_class = BUILDING_PROFILES.get(profile_name, BuildingProfile)
-    
     if profile_name == 'NONE':
         return faces
-    
+    profile_class = BUILDING_PROFILES.get(profile_name, BuildingProfile)
+
     width = params['width']
     depth = params['depth']
     floors = params['floors']
     floor_height = params['floor_height']
     wall_thickness = params.get('wall_thickness', 0.25)
     floor_slabs_enabled = params.get('floor_slabs', True)
-    
-    # Check for damage - limit interior elements to below damage line
     damage_min_height = params.get('damage_min_height', None)
     total_height = floors * floor_height
-    
-    # Calculate max floor index that is below damage
+
     if damage_min_height is not None and damage_min_height < total_height:
-        # Only build interiors for floors completely below damage
         max_interior_floor = int(damage_min_height / floor_height)
     else:
         max_interior_floor = floors
-    
-    # Check for patio - don't generate interior walls on patio floor (top floor)
-    has_patio = params.get('has_patio', False) and floors >= 2
-    if has_patio:
-        # Don't generate interior walls on the top floor (patio floor)
+    if params.get('has_patio', False) and floors >= 2:
         max_interior_floor = min(max_interior_floor, floors - 1)
-    
-    # Get window/door positions for wall attachment validation
+
     window_positions = get_window_positions(width, depth, params)
-    
-    # Get stair zone (consistent across all floors)
-    # Only create stair zone if we have floor slabs to support stairs
     stair_zone = None
     if floors > 1 and floor_slabs_enabled:
         stair_zone = profile_class.get_stair_zone(width, depth, params)
-    
-    # Get ground floor layout - used as the base for all floors
-    ground_floor_layout = profile_class.get_ground_floor_layout(width, depth, params)
-    
-    # Build validated ground floor walls list (reused for upper floors for structural support)
-    validated_ground_walls = []
-    for wall_def in ground_floor_layout.get('walls', []):
-        adjusted_start, adjusted_end = validate_and_adjust_cardinal_wall(
-            wall_def['start'], wall_def['end'],
-            width, depth, wall_thickness, window_positions
-        )
-        
-        if adjusted_start is None or adjusted_end is None:
-            continue
-        
-        adjusted_wall = wall_def.copy()
-        adjusted_wall['start'] = adjusted_start
-        adjusted_wall['end'] = adjusted_end
-        
-        if (adjusted_end - adjusted_start).length < 0.3:
-            continue
-        
-        validated_ground_walls.append(adjusted_wall)
-    
-    # Generate interior walls for each floor (limited by damage)
+
+    ground_layout = profile_class.get_ground_floor_layout(width, depth, params)
+    ground_walls = _prepare_interior_walls(
+        ground_layout.get('walls', []), width, depth, wall_thickness,
+        window_positions, stair_zone)
+    core_walls = (_core_wall_defs(stair_zone, wall_thickness, floor_height)
+                  if stair_zone else [])
+
     for floor_idx in range(min(floors, max_interior_floor)):
         floor_base_z = floor_idx * floor_height
-        
         if floor_idx == 0:
-            # Ground floor: use the validated ground floor walls
-            for wall_def in validated_ground_walls:
-                faces.extend(build_interior_wall(bm, wall_def, floor_base_z))
+            walls = ground_walls
         else:
-            # Upper floors: ONLY generate walls if floor slabs are enabled
-            # (walls need floor slab to stand on)
             if not floor_slabs_enabled:
-                continue  # Skip upper floor walls - nothing to support them
-            
-            # Upper floors use SAME wall layout as ground floor for structural consistency
-            # This ensures walls are stacked directly on top of each other
-            for wall_def in validated_ground_walls:
-                faces.extend(build_interior_wall(bm, wall_def, floor_base_z))
-    
-    # Generate interior stairs ONLY if:
-    # 1. Multi-floor building
-    # 2. Floor slabs are enabled (stairs need floor to rest on)
-    # 3. Not using exterior stairs only
-    # 4. Below damage line (stairs can't go above damaged areas)
-    if floors > 1 and stair_zone and floor_slabs_enabled and not params.get('exterior_stairs', False):
-        # Calculate max stair floor - stairs can go up to patio even if interior walls don't
-        # But stairs should still respect damage
+                continue
+            layout = profile_class.get_upper_floor_layout(
+                width, depth, floor_idx, params)
+            walls = _prepare_interior_walls(
+                layout.get('walls', []), width, depth, wall_thickness,
+                window_positions, stair_zone)
+        for wall_def in walls:
+            faces.extend(build_interior_wall(bm, wall_def, floor_base_z))
+        for wall_def in core_walls:
+            faces.extend(build_interior_wall(bm, wall_def, floor_base_z))
+
+    if (floors > 1 and stair_zone and floor_slabs_enabled and
+            not params.get('exterior_stairs', False)):
         if damage_min_height is not None and damage_min_height < total_height:
             max_stair_floor = int(damage_min_height / floor_height) - 1
         else:
             max_stair_floor = floors - 1
-        
         for floor_idx in range(max(0, max_stair_floor)):
-            floor_base_z = floor_idx * floor_height
-            faces.extend(build_interior_stairs(bm, stair_zone, floor_height, floor_base_z))
-    
+            faces.extend(build_interior_stairs(
+                bm, stair_zone, floor_height,
+                floor_idx * floor_height + FLOOR_SLAB_THICKNESS))
     return faces
 
 

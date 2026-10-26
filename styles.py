@@ -13,12 +13,15 @@ STYLE_ITEMS = [
     ('INDUSTRIAL', 'Industrial', 'Wide low sheds, high windows and large doors'),
     ('SUBURBAN', 'Suburban House', 'Small pitched-roof houses set back from the street'),
 ]
+STYLE_CONDITIONS = ('INTACT', 'WEATHERED', 'SEMI_COLLAPSED', 'RUBBLE_FILLED',
+                    'LOWER_FLOORS', 'SHELL', 'COLLAPSED')
 STYLE_COLORS = {'DOWNTOWN': (.42, .47, .52, 1), 'OLD_TOWN': (.48, .30, .20, 1),
                 'RESIDENTIAL': (.62, .58, .44, 1), 'BRUTALIST': (.48, .48, .46, 1),
                 'INDUSTRIAL': (.32, .39, .42, 1), 'SUBURBAN': (.66, .55, .42, 1)}
 
 
-def building_recipe(style, width, depth, floors, seed, damage=0, interiors=False):
+def building_recipe(style, width, depth, floors, seed, damage=0, interiors=False,
+                    condition='INTACT'):
     if style not in STYLE_COLORS:
         raise ValueError(f'Unknown building style: {style}')
     profile = dict(
@@ -63,6 +66,20 @@ def building_recipe(style, width, depth, floors, seed, damage=0, interiors=False
                        door_width=1.1, door_height=2.4, roof_parapet=False,
                        flat_roof=False, roof_kind='GABLE', roof_height=2.2,
                        roof_overhang=.45)
+    if condition == 'RUBBLE_FILLED':
+        profile.update(interior_fill='FILLED', building_profile='NONE')
+    elif condition == 'SHELL':
+        profile.update(flat_roof=False, floor_slabs=True, exterior_rubble=True,
+                       building_profile='NONE', roof_parapet=False, roof_box=None)
+    elif condition == 'SEMI_COLLAPSED':
+        profile.update(corner_cut=True, exterior_rubble=True, rubble_spread=2.5,
+                       exterior_rubble_piles=6)
+    elif condition == 'LOWER_FLOORS':
+        profile.update(damage_amount=1.0, enable_damage=True)
+    elif condition == 'COLLAPSED':
+        profile.update(building_profile='NONE', interior_fill='NONE')
+    if condition in ('RUBBLE_FILLED', 'SHELL', 'COLLAPSED'):
+        profile['building_profile'] = 'NONE'
     profile['windows_per_floor'] = max(
         1, int((width - 2) / (profile['window_width'] + 1)))
     profile['ground_floor_window_count'] = max(1, int((width - 3) / 3))

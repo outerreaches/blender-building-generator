@@ -1,6 +1,6 @@
 # Procedural Building Shell Generator
 
-## v0.7: Metro scale and open wasteland
+## v0.8: Ruined districts and interior budget
 
 New **Add → Mesh → Generate City** and **Generate Building by Style** commands
 add seeded city growth, six district archetypes, connected road tiers, driving
@@ -11,20 +11,16 @@ junctions are the union of the curved corridors with no overlapping faces.
 The existing single
 and bulk building commands remain available.
 
-The ground now extends far past the city as open wasteland (default 2000 m,
-adjustable), so the horizon reads as empty land while the game keeps the player
-inside invisible walls. The radius control scales the city from a district to a
-metro: the demo scene uses radius 18 (about 2 km across). Downtown gets tall
-glazed towers with rooftop plant; the midtown ring keeps old town, residential
-and brutalist blocks; industrial edges get wide low sheds; and denser suburbs
-get small pitched-roof houses with yards. Districts also change parcel size,
-density, local street growth, corner radii and damage, not just the palette.
-
-See [the city guide](CITY_GENERATOR.md) for controls, architecture, verification,
-and [ROADMAP.md](ROADMAP.md) for the planned city dressing work,
-and prototype limits. Roads curve and junction shapes vary with the incident
-streets, but parcels and block edges are still axis-aligned; bridges, terrain
-routing, and highway interchanges are future milestones.
+Buildings now carry a condition: intact, weathered, semi-collapsed with a
+missing corner and debris, rubble-filled, lower-floors-only, roofless shell, or
+fully collapsed. District weights decide how often each appears, and only a
+configurable fraction of enterable buildings get full interior layouts. The
+ground extends far past the city as open wasteland (default 12 km), so the
+horizon reads as empty land while the game keeps the player inside invisible
+walls. The radius control scales the city from a district to a metro; the demo
+scene uses radius 14 (about 1.6 km across). Downtown gets tall glazed towers,
+the midtown ring keeps old town, residential and brutalist blocks, industrial
+edges get wide low sheds, and denser suburbs get small pitched-roof houses.
 
 A Blender 4.5+ addon for generating game-ready building shells with customizable windows, doors, and optional post-apocalyptic damage. Perfect for creating urban environments for games.
 

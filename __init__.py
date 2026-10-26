@@ -4,7 +4,7 @@
 bl_info = {
     "name": "Procedural Building Shell Generator",
     "author": "Ares Project",
-    "version": (0, 7, 0),
+    "version": (0, 8, 0),
     "blender": (4, 5, 0),
     "location": "View3D > Add > Mesh > Procedural Building Shell",
     "description": "Generate customizable, game-ready building shells with windows, doors, and optional damage",

@@ -3,10 +3,10 @@
 import math
 import bpy
 from bpy.props import BoolProperty, EnumProperty, FloatProperty, IntProperty
-from .city_plan import VERSION, CitySettings, STYLE_PROFILE, generate_city, stream
+from .city_plan import CONDITIONS, VERSION, CitySettings, generate_city, stream
 from .streets import build_street_mesh, build_ground_mesh, junctions
 from .styles import STYLE_ITEMS, STYLE_COLORS, building_recipe
-from .building_assets import create_shell, material
+from .building_assets import create_rubble, create_shell, material
 
 
 def mesh_object(name, vertices, faces, collection, mat):
@@ -245,14 +245,15 @@ class MESH_OT_generate_city(bpy.types.Operator):
     setback: FloatProperty(name='Minimum Road Setback (m)', default=2, min=1, max=8)
     sidewalk_width: FloatProperty(name='Sidewalk Width (m)', default=2, min=1.2, max=5)
     curb_height: FloatProperty(name='Curb Height (m)', default=.15, min=0, max=.25)
-    wasteland: FloatProperty(name='Wasteland Extent (m)', default=6000, min=0, max=20000,
+    wasteland: FloatProperty(name='Wasteland Extent (m)', default=12000, min=0, max=20000,
                              description='Open ground beyond the city edge; the city itself stays inside the invisible walls')
     damage: FloatProperty(name='Building Damage', default=.35, min=0, max=1)
     max_buildings: IntProperty(name='Building Budget', default=600, min=1, max=10000)
     style: EnumProperty(name='Architecture', items=[('MIXED', 'Mixed Districts', 'Styles vary by primary location')] + STYLE_ITEMS)
     detail: EnumProperty(name='Output', items=[('PREVIEW', 'Layout Preview', 'Fast building masses for planning'),
                                                ('SHELLS', 'Detailed Shells', 'Generate windows, doors and damage')])
-    interiors: BoolProperty(name='Generate Interiors', default=False)
+    interior_ratio: FloatProperty(name='Interior Ratio', default=.25, min=0, max=1,
+                                 description='Fraction of enterable buildings that get full interior layouts')
     route_guides: BoolProperty(name='Show Driving Route Guides', default=False)
     lane_markings: BoolProperty(name='Worn Lane Markings', default=True)
 
@@ -275,7 +276,7 @@ class MESH_OT_generate_city(bpy.types.Operator):
             for name in names:
                 group.prop(self, name)
         if self.detail == 'SHELLS':
-            layout.prop(self, 'interiors')
+            layout.prop(self, 'interior_ratio')
         layout.prop(self, 'lane_markings')
         layout.prop(self, 'route_guides')
         layout.label(text='Flat terrain; at-grade road junctions.', icon='INFO')
@@ -292,7 +293,7 @@ class MESH_OT_generate_city(bpy.types.Operator):
             root['city_seed'] = self.seed
             root['generator_version'] = VERSION
             root['output_detail'] = self.detail
-            root['interiors'] = self.interiors
+            root['interior_ratio'] = self.interior_ratio
             root['lane_markings'] = self.lane_markings
             root['route_guides'] = self.route_guides
             origin = context.scene.cursor.location.copy()
@@ -325,16 +326,22 @@ class MESH_OT_generate_city(bpy.types.Operator):
             context.window_manager.progress_begin(0, max(1, len(plan.lots)))
             for index, lot in enumerate(plan.lots):
                 col = districts[lot.district]
-                params = building_recipe(
-                    lot.style, lot.width, lot.depth, lot.floors, lot.seed,
-                    min(1.0, self.damage * STYLE_PROFILE[lot.style]['damage']),
-                    self.interiors)
+                params = building_recipe(lot.style, lot.width, lot.depth, lot.floors,
+                                         lot.seed, lot.damage, lot.interiors,
+                                         lot.condition)
                 if self.detail == 'SHELLS':
-                    obj = create_shell(lot.id, params, col)
+                    if lot.condition == 'COLLAPSED':
+                        obj = create_rubble(lot.id, params, col)
+                    else:
+                        obj = create_shell(lot.id, params, col)
                     obj.data.materials[0] = material(f'City_{lot.style}', STYLE_COLORS[lot.style])
                 else:
-                    obj = box(lot.id, lot.width, lot.depth, lot.floors * params['floor_height'],
+                    height = (2.2 if lot.condition == 'COLLAPSED'
+                              else lot.floors * params['floor_height'])
+                    obj = box(lot.id, lot.width, lot.depth, height,
                               col, material(f'City_{lot.style}', STYLE_COLORS[lot.style]))
+                obj['condition'] = lot.condition
+                obj['interiors'] = lot.interiors
                 obj.location = (origin.x + lot.center[0], origin.y + lot.center[1], origin.z + self.curb_height)
                 obj.rotation_euler.z = lot.rotation
                 obj['city_style'], obj['asset_seed'], obj['district'] = lot.style, lot.seed, lot.district
@@ -376,6 +383,9 @@ class MESH_OT_building_style(bpy.types.Operator):
     seed: IntProperty(name='Seed', default=42)
     damage: FloatProperty(name='Damage', default=.35, min=0, max=1)
     interiors: BoolProperty(name='Interiors', default=False)
+    condition: EnumProperty(name='Condition',
+                            items=[(condition, condition.replace('_', ' ').title(), '')
+                                   for condition in CONDITIONS])
 
     @classmethod
     def poll(cls, context):
@@ -389,8 +399,12 @@ class MESH_OT_building_style(bpy.types.Operator):
         context.collection.children.link(collection)
         try:
             params = building_recipe(self.style, self.width, self.depth, self.floors,
-                                     self.seed, self.damage, self.interiors)
-            obj = create_shell(self.style, params, collection)
+                                     self.seed, self.damage, self.interiors,
+                                     self.condition)
+            if self.condition == 'COLLAPSED':
+                obj = create_rubble(self.style, params, collection)
+            else:
+                obj = create_shell(self.style, params, collection)
             obj.location = context.scene.cursor.location
             obj.data.materials[0] = material(f'City_{self.style}', STYLE_COLORS[self.style])
             obj['architecture_style'] = self.style

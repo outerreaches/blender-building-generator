@@ -3,6 +3,9 @@
 Planned work after v0.7 (metro scale + wasteland). Each phase is a separate
 shippable step with its own tests, renders and release.
 
+**Phase 1 shipped in v0.8**: interior ratio, condition model, corner shear,
+rubble mound and the condition sheet render.
+
 ## Requirements
 
 ### R1 — Interior budget
@@ -118,7 +121,7 @@ culling keep working.
 
 ## Phases
 
-### Phase 1 — Interior budget and conditions (next)
+### Phase 1 — Interior budget and conditions — shipped in v0.8
 Plan v4, `interior_ratio`, condition weights, damage mapping, corner shear,
 rubble mound, shell/lower-floor/filled variants, adapter cutover, condition-sheet
 render. Acceptance: every condition occurs at the proposed frequency across
@@ -146,7 +149,7 @@ suburbs, metro renders updated.
 ## Open decisions
 - Confirm the condition weights above (they are data, cheap to tune).
 - POIs replace whole blocks (proposed) rather than sharing a block.
-- Default interior ratio 0.25.
+- Default interior ratio 0.25 (shipped).
 - Which POIs need enterable interiors: proposed big box, mall, repair, fast
   food, gas kiosk; parks/plazas/parking are outdoors only.
 - Mall count by radius: proposed 1 for radius 6–11, 2 for radius ≥ 12.

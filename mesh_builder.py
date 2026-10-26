@@ -754,7 +754,8 @@ class BuildingShellBuilder:
                 min_intact_height=min_intact_height,
                 pointiness=pointiness,
                 resolution=resolution,
-                seed=self.params.get('seed', 0)
+                seed=self.params.get('seed', 0),
+                max_height=self.params.get('damage_cap_height')
             )
             min_damage_height = damage_profile.get('min_height', total_height)
             intact_floors = damage_module.get_intact_floor_count(min_damage_height, floor_height)

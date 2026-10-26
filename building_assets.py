@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Shared Blender material and shell creation services."""
+import math
 import random
 import bmesh
 import bpy
@@ -89,50 +90,48 @@ def add_collapse_debris(bm, params, sign_x, sign_y):
                 rng.choice((7, 7, 2)))
 
 
-def _box_geometry(vertices, faces, materials, x0, y0, z0, x1, y1, z1, material):
-    base = len(vertices)
-    vertices.extend((x, y, z) for z in (z0, z1) for y in (y0, y1) for x in (x0, x1))
-    faces.extend(tuple(base + index for index in face) for face in
-                 ((0, 3, 2, 1), (4, 5, 6, 7), (0, 1, 5, 4),
-                  (1, 2, 6, 5), (2, 3, 7, 6), (3, 0, 4, 7)))
-    materials.extend((material,) * 6)
-
-
 def create_rubble(name, params, collection):
-    """Collapsed lot: rubble field, wall stumps and a few slab chunks."""
+    """Collapsed lot: overlapping low mounds of rubble on the pad."""
     rng = random.Random(params.get('seed', 0) ^ 0xC011A95E)
     width, depth = params['width'], params['depth']
-    half_w, half_d = width / 2, depth / 2
-    vertices, faces, materials = [], [], []
+    vertices, faces = [], []
 
-    # Standing wall stumps along the lot edges.
-    for _ in range(rng.randint(1, 3)):
-        side = rng.randrange(4)
-        length = rng.uniform(.25, .6) * (width if side < 2 else depth)
-        height = rng.uniform(1.0, 3.2)
-        thickness = rng.uniform(.35, .6)
-        offset = rng.uniform(-.5, .5) * ((width if side < 2 else depth) - length) / 2
-        if side == 0:
-            box = (offset - length / 2, -half_d, 0, offset + length / 2, -half_d + thickness, height)
-        elif side == 1:
-            box = (offset - length / 2, half_d - thickness, 0, offset + length / 2, half_d, height)
-        elif side == 2:
-            box = (-half_w, offset - length / 2, 0, -half_w + thickness, offset + length / 2, height)
-        else:
-            box = (half_w - thickness, offset - length / 2, 0, half_w, offset + length / 2, height)
-        _box_geometry(vertices, faces, materials, *box, 0)
+    def mound(centre_x, centre_y, radius_x, radius_y, peak, segments=12, rings=3):
+        jitter = [rng.uniform(.82, 1.18) for _ in range(segments)]
+        angles = [2 * math.pi * index / segments for index in range(segments)]
+        apex = len(vertices)
+        vertices.append((centre_x + rng.uniform(-.15, .15),
+                         centre_y + rng.uniform(-.15, .15), peak))
+        ring_start = len(vertices)
+        for ring in range(1, rings + 1):
+            t = ring / rings
+            height = peak * (1 - t) ** 1.35
+            for index, angle in enumerate(angles):
+                radius = t * jitter[index]
+                vertices.append((centre_x + math.cos(angle) * radius_x * radius,
+                                 centre_y + math.sin(angle) * radius_y * radius,
+                                 max(0.0, height + rng.uniform(-.08, .08) * peak)))
+        for index in range(segments):
+            following = (index + 1) % segments
+            faces.append((apex, ring_start + index, ring_start + following))
+        for ring in range(1, rings):
+            inner = ring_start + (ring - 1) * segments
+            outer = inner + segments
+            for index in range(segments):
+                following = (index + 1) % segments
+                faces.append((inner + index, outer + index,
+                              outer + following, inner + following))
 
-    # Debris mound: small blocks and a few slab chunks.
-    for _ in range(rng.randint(10, 18)):
-        size_x = rng.uniform(.5, max(1.0, width * .22))
-        size_y = rng.uniform(.5, max(1.0, depth * .22))
-        size_z = rng.uniform(.3, 1.6)
-        x = rng.uniform(-half_w + size_x / 2, half_w - size_x / 2)
-        y = rng.uniform(-half_d + size_y / 2, half_d - size_y / 2)
-        material = rng.choice((7, 7, 7, 2, 0))
-        _box_geometry(vertices, faces, materials,
-                      x - size_x / 2, y - size_y / 2, 0,
-                      x + size_x / 2, y + size_y / 2, size_z, material)
+    radius_scale = rng.uniform(.38, .5)
+    mound(rng.uniform(-.06, .06) * width, rng.uniform(-.06, .06) * depth,
+          width * radius_scale, depth * radius_scale, rng.uniform(2.0, 3.4))
+    mound(rng.uniform(-.2, .2) * width, rng.uniform(-.2, .2) * depth,
+          width * radius_scale * rng.uniform(.45, .65),
+          depth * radius_scale * rng.uniform(.45, .65), rng.uniform(.8, 1.6))
+    if rng.random() < .6:
+        mound(rng.uniform(-.24, .24) * width, rng.uniform(-.24, .24) * depth,
+              width * radius_scale * rng.uniform(.3, .5),
+              depth * radius_scale * rng.uniform(.3, .5), rng.uniform(.5, 1.1))
 
     mesh = bpy.data.meshes.new(name)
     mesh.from_pydata(vertices, [], faces)
@@ -140,8 +139,8 @@ def create_rubble(name, params, collection):
     obj = bpy.data.objects.new(name, mesh)
     collection.objects.link(obj)
     add_material_slots(obj)
-    for polygon, material in zip(mesh.polygons, materials):
-        polygon.material_index = material
+    for polygon in mesh.polygons:
+        polygon.material_index = 7
     return obj
 
 

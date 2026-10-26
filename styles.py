@@ -75,7 +75,8 @@ def building_recipe(style, width, depth, floors, seed, damage=0, interiors=False
         profile.update(corner_cut=True, exterior_rubble=True, rubble_spread=2.5,
                        exterior_rubble_piles=6)
     elif condition == 'LOWER_FLOORS':
-        profile.update(damage_amount=1.0, enable_damage=True)
+        profile.update(damage_amount=1.0, enable_damage=True,
+                       damage_cap_height=profile['floor_height'] * 2.6)
     elif condition == 'COLLAPSED':
         profile.update(building_profile='NONE', interior_fill='NONE')
     if condition in ('RUBBLE_FILLED', 'SHELL', 'COLLAPSED'):

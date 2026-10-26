@@ -2,6 +2,7 @@
 """Shared Blender material and shell creation services."""
 import math
 import random
+from collections import Counter
 import bmesh
 import bpy
 from mathutils import Vector
@@ -58,7 +59,7 @@ def _delete_box(bm, x0, x1, y0, y1, z0, z1):
 
 
 def _cap_wall_box(bm, params, x0, x1, y0, y1, z):
-    """Close the wall thickness at a horizontal cut (chunk base or bay top)."""
+    """Close the wall thickness at a horizontal cut (chunk base)."""
     width, depth = params['width'], params['depth']
     thickness = params.get('wall_thickness', .25)
     caps = []
@@ -78,6 +79,143 @@ def _cap_wall_box(bm, params, x0, x1, y0, y1, z):
         vertices = [bm.verts.new((x, y, z))
                     for x, y in ((cx0, cy0), (cx1, cy0), (cx1, cy1), (cx0, cy1))]
         _face(bm, vertices, 0)
+
+
+def _bisect_plane(bm, axis, value):
+    """Split faces exactly on an axis plane so cut caps can be built."""
+    centre = [0.0, 0.0, 0.0]
+    normal = [0.0, 0.0, 0.0]
+    centre[axis] = value
+    normal[axis] = 1.0
+    bmesh.ops.bisect_plane(
+        bm, geom=bm.verts[:] + bm.edges[:] + bm.faces[:], dist=1e-6,
+        plane_co=Vector(centre), plane_no=Vector(normal),
+        clear_outer=False, clear_inner=False)
+
+
+def _plane_cap_loops(bm, axis, value, low, high, max_thickness):
+    """Boundary loops on an axis plane inside the given other-axis bounds."""
+    eps = 1e-5
+    edges = []
+    for edge in bm.edges:
+        if not edge.is_boundary:
+            continue
+        if any(abs(v.co[axis] - value) > eps for v in edge.verts):
+            continue
+        if any(not (low[i] - eps <= v.co[i] <= high[i] + eps)
+               for v in edge.verts for i in range(3) if i != axis):
+            continue
+        edges.append(edge)
+    if not edges:
+        return []
+    adjacency = {}
+    for edge in edges:
+        for vert in edge.verts:
+            adjacency.setdefault(vert, []).append(edge)
+    remaining = set(edges)
+    loops = []
+    while remaining:
+        edge = remaining.pop()
+        start = edge.verts[0]
+        vert = edge.verts[1]
+        loop = [edge]
+        ordered = [start, vert]
+        closed = False
+        while True:
+            candidates = [e for e in adjacency.get(vert, ()) if e in remaining]
+            if not candidates:
+                closed = vert == start
+                break
+            following = candidates[0]
+            remaining.remove(following)
+            loop.append(following)
+            vert = following.verts[1] if following.verts[0] == vert else following.verts[0]
+            if vert == start:
+                closed = True
+                break
+            ordered.append(vert)
+            if len(loop) > 10000:
+                break
+        if closed and len(ordered) >= 3:
+            extents = []
+            for i in range(3):
+                if i == axis:
+                    continue
+                values = [v.co[i] for v in ordered]
+                extents.append(max(values) - min(values))
+            if not extents or min(extents) > max_thickness:
+                continue
+            materials = Counter()
+            for item in loop:
+                for face in item.link_faces:
+                    materials[face.material_index] += 1
+            if not materials:
+                continue
+            material = materials.most_common(1)[0][0]
+            if material not in (1, 5, 6):
+                continue
+            loops.append((ordered, material))
+    return loops
+
+
+def _cut_box_with_caps(bm, params, x0, x1, y0, y1, z0):
+    """Remove an upper box and cap every solid cross-section on the cut.
+
+    Bisecting at the box planes makes the removal exact; filling the resulting
+    boundary loops leaves wall thickness, floor-slab edges and interior walls
+    capped instead of showing their hollow interiors.
+    """
+    width, depth = params['width'], params['depth']
+    top = params['floors'] * params['floor_height'] + 1.0
+    eps = 1e-5
+
+    # Split only interior planes; outer planes are already the building skin.
+    if eps < x0 < width - eps:
+        _bisect_plane(bm, 0, x0)
+    if eps < x1 < width - eps:
+        _bisect_plane(bm, 0, x1)
+    if eps < y0 < depth - eps:
+        _bisect_plane(bm, 1, y0)
+    if eps < y1 < depth - eps:
+        _bisect_plane(bm, 1, y1)
+    _bisect_plane(bm, 2, z0)
+
+    doomed = []
+    for face in bm.faces:
+        centre = face.calc_center_median()
+        if (x0 + eps < centre.x < x1 - eps and
+                y0 + eps < centre.y < y1 - eps and centre.z > z0 + eps):
+            doomed.append(face)
+    if doomed:
+        bmesh.ops.delete(bm, geom=doomed, context='FACES')
+
+    plane_specs = []
+    if eps < x0 < width - eps:
+        plane_specs.append((0, x0, (y0, y1, z0), (y0, y1, top), Vector((1, 0, 0))))
+    if eps < x1 < width - eps:
+        plane_specs.append((0, x1, (y0, y1, z0), (y0, y1, top), Vector((-1, 0, 0))))
+    if eps < y0 < depth - eps:
+        plane_specs.append((1, y0, (x0, x1, z0), (x0, x1, top), Vector((0, 1, 0))))
+    if eps < y1 < depth - eps:
+        plane_specs.append((1, y1, (x0, x1, z0), (x0, x1, top), Vector((0, -1, 0))))
+    plane_specs.append((2, z0, (x0, y0, 0), (x1, y1, top), Vector((0, 0, 1))))
+
+    max_thickness = max(params.get('wall_thickness', .25), .2) + .1
+    caps = []
+    for axis, value, low, high, outward in plane_specs:
+        for vertices, material in _plane_cap_loops(
+                bm, axis, value, low, high, max_thickness):
+            caps.append((vertices, material, outward))
+
+    for vertices, material, outward in caps:
+        try:
+            face = bm.faces.new(vertices)
+        except ValueError:
+            continue
+        face.material_index = material
+        face.normal_update()
+        if face.normal.dot(outward) < 0:
+            face.normal_flip()
 
 
 def expose_fill_bay(bm, params):
@@ -150,8 +288,7 @@ def subtract_chunks(bm, params):
             box = (width * rng.uniform(.55, .8), width, by0, by0 + depth * bite)
         cuts.append((box[0], box[1], box[2], box[3], base))
     for xa, xb, ya, yb, z in cuts:
-        _delete_box(bm, xa, xb, ya, yb, z, total + 1)
-    for xa, xb, ya, yb, z in cuts:
+        _cut_box_with_caps(bm, params, xa, xb, ya, yb, z)
         _cap_wall_box(bm, params, xa, xb, ya, yb, z)
     return sign_x, sign_y
 

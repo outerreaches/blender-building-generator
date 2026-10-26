@@ -1,5 +1,11 @@
 # Procedural Building Shell Generator
 
+## v0.9.6: Capped chunk cuts
+
+Chunk removals are bisected exactly at their cut planes. Exposed floor-slab
+edges, interior partitions and stair sections get cut caps; the exterior wall
+thickness keeps its shelf cap, while open rooms intentionally stay open.
+
 ## v0.9.5: Window-clear interiors
 
 Stair cores keep a 1 m aisle from side facades and stop 0.6 m clear of the

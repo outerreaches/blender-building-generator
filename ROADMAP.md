@@ -3,8 +3,9 @@
 Planned work after v0.7 (metro scale + wasteland). Each phase is a separate
 shippable step with its own tests, renders and release.
 
-**Phase 1 shipped in v0.8**: interior ratio, condition model, corner shear,
-rubble mound and the condition sheet render.
+**Phase 1 shipped in v0.8, extended in v0.9**: interior ratio, failure-model
+conditions (including partial fills and wall rings), chunk removal, rubble
+mounds and the condition sheet render.
 
 ## Requirements
 

@@ -1,10 +1,10 @@
-# City generator — v0.8.2 interior budget and collapse conditions
+# City generator — v0.9.0 failure-model ruins
 
 This generator supplies the main static environment for a low-poly first-person Unity game. Existing signs, ruined cars and other props remain separate assets.
 
 ## Try it
 
-Install `output/procedural_building_shell_v0.8.2.zip` as a Blender add-on. Use **Shift+A → Mesh → Generate City** or **Generate Building by Style**. Start with **Layout Preview**; select **Detailed Shells** for windows, doors, floors, damage and optional interiors. Both modes use the same plan. Each run creates a new collection at the 3D cursor. Undo removes that run; failure rolls back its own objects.
+Install `output/procedural_building_shell_v0.9.0.zip` as a Blender add-on. Use **Shift+A → Mesh → Generate City** or **Generate Building by Style**. Start with **Layout Preview**; select **Detailed Shells** for windows, doors, floors, damage and optional interiors. Both modes use the same plan. Each run creates a new collection at the 3D cursor. Undo removes that run; failure rolls back its own objects.
 
 The original single-building and bulk operators remain available. Architecture uses six district archetypes built from rectangular shells:
 
@@ -83,6 +83,28 @@ Each district changes all of the following, not just the material colour:
 
 ## Building conditions
 
+### How these buildings fail
+
+A neglected tower fails from the envelope inward and from the top down. Roof
+membranes, parapets and window seals go first; water and freeze–thaw rot the top
+slabs until one drops, its debris load takes the next, and rubble accumulates
+inside the facade. Corners and facade bays fail as vertical slices (two free
+edges, wind and water), and a lost slice takes its support above with it, so
+failures run out through the roof rather than leaving floating holes. The
+perimeter usually outlives the floor plates, and the ground floor is the last
+part to go, acting as the plinth that holds the pile.
+
+The condition set follows those stages:
+
+- **Weathered** — envelope and top slabs degraded; the facade keeps its height and detail.
+- **Semi-collapsed** — one or two vertical corner/bay slices missing through the top.
+- **Rubble-filled** — top floors pancaked; the interior is a solid fill behind the facade, opened by a ground-floor bay and upper cut.
+- **Partial-filled** — only the lower floors pancaked; upper floors are open.
+- **Lower floors only** — the upper structure is gone, leaving one to three enterable storeys.
+- **Shell** — floor plates and roof gone, the facade standing.
+- **Wall ring** — only a low perimeter stands, with a rubble mound inside.
+- **Collapsed** — nothing but a mound.
+
 Every lot receives a condition from its district weights. The condition sets a
 minimum damage and the geometry treatment:
 
@@ -91,15 +113,18 @@ minimum damage and the geometry treatment:
 | Intact | Clean shell; interior only when the lot is in the interior budget |
 | Weathered | Fine irregular collapsed top (median-smoothed, slope-limited, no needles); interiors only below the damage line |
 | Semi-collapsed | Whole upper chunks removed (corner block plus a mid-height facade bite), exposed slabs and debris around the cut |
-| Rubble-filled | Interior packed solid; no interior layout |
+| Rubble-filled | Interior packed solid; a ground-floor bay and an upper cut expose the fill; no interior layout |
+| Partial-filled | Lower floors packed with rubble, upper floors open; exposed bay and upper cut; no interior layout |
 | Lower floors only | Full damage so the cut lands in the first few storeys; enterable |
-| Shell | No roof; floor slabs exposed; one upper chunk removed; no interior |
+| Shell | No roof; floor slabs exposed; one vertical slice removed; no interior |
+| Wall ring | Low perimeter walls (2–4 storeys), no roof or upper slabs, rubble mound inside |
 | Collapsed | No shell; a low faceted rubble mound on the pad |
 
 `Interior Ratio` (default 0.25) is the fraction of enterable conditions (intact,
 weathered, semi-collapsed, lower floors) that get a full interior layout. The
 flag is stored per lot in the plan, so a regenerated city is deterministic.
-Collapsed, shell and rubble-filled lots never get interiors. The proposed
+Rubble-filled, partial-filled, shell, wall-ring and collapsed lots never get
+interiors; the filled states are solid or half-solid by design. The proposed
 weights per district are in [ROADMAP.md](ROADMAP.md); downtown, for example,
 runs 20% intact, 26% weathered, 20% semi-collapsed, 12% rubble-filled, 6% lower
 floors, 10% shell and 6% collapsed.
@@ -135,7 +160,7 @@ Workspace `output` examples:
 - `map_seed7.blend` and `map_seed7_*.png`: review map (seed 7, radius 14) generated with `tests/render_map.py`.
 - `ares_metro.blend`: radius 14 (about 1.6 km across), 854 shells, 12000 m wasteland; the scale demo.
 - `metro_overview.png`, `metro_plan.png`, `metro_wasteland.png`: metro view, plan view and the highway running into the wasteland.
-- `conditions.png`, `conditions_shaded.png`, `conditions_plan.png`: one building per condition, elevation, shaded elevation and plan.
+- `conditions.png`, `conditions_shaded.png`, `conditions_plan.png`: one building per condition (nine states), elevation, shaded elevation and plan.
 
 The base scene's `City_Streets` mesh is 64.9k vertices / 101.5k polygons at 113 buildings; `City_Ground` is 1.6k polygons. The metro scene is 1.85M polygons in 1711 mesh objects; its ground spans about 25.6 km. A JSON text datablock stores the versioned plan. Coordinates are relative to the collection's stored `origin`; road nodes multiply by `block_size`, while lot positions/dimensions and path points are metres. Schema version 4 adds `kind`, `condition`, `interiors` and `damage` to each lot alongside the version-3 `paths`: one entry per continuous same-tier route with its lattice `nodes`, flattened metre-space `points` and `width`. Locations and lots carry their district `style`; the per-style profile table is code (`STYLE_PROFILE`), not part of the file. v0.8 lot positions, conditions and interior flags differ from v0.7 with the same seed. No legacy-plan or game-side importer is included.
 
@@ -164,4 +189,4 @@ See [ROADMAP.md](ROADMAP.md) for the city dressing plan: interior budget, collap
 3. **Asset variety:** the six archetypes cover massing and roofs, but civic landmarks (courthouse, station, hospital), authored facade kits, rooftop clutter and per-district palettes remain.
 4. **Game delivery:** chunk/LOD export, collision proxies, navigation checks, vehicle swept-clearance tests and connected ruin/vegetation dressing.
 
-Street surfaces have open bottoms below ground; they are not watertight solids. The 1.5 m surface sampling is a fixed budget decision: a tighter grid would reduce the ~0.5 m concave-corner deviation at the cost of roughly quadratic triangle growth. Roof extras are skipped when damage cuts the top floors, so a ruined shell keeps its jagged demolition silhouette. Corner collapse removes a footprint quadrant above a seeded base height; it is a ruin silhouette, not a structural simulation. Damage tops use the original fine facade profile, median-smoothed and slope-limited so isolated needles disappear while broad variation remains. Collapsed variants subtract whole upper volumes from the standing shell; the cut boundary follows existing wall/window vertices, so it is blocky rather than a clean planar cut. The collapsed lot is a low faceted mound, not individual debris chunks. Fixed-style runs change the street network because district road factors no longer vary. Legacy damaged shells/interiors are not certified manifold or fully navigable. Generation is synchronous; preview and conservative budgets are recommended for large cities.
+Street surfaces have open bottoms below ground; they are not watertight solids. The 1.5 m surface sampling is a fixed budget decision: a tighter grid would reduce the ~0.5 m concave-corner deviation at the cost of roughly quadratic triangle growth. Roof extras are skipped when damage cuts the top floors, so a ruined shell keeps its jagged demolition silhouette. Corner collapse removes a footprint quadrant above a seeded base height; it is a ruin silhouette, not a structural simulation. Damage tops use the original fine facade profile, median-smoothed and slope-limited so isolated needles disappear while broad variation remains. Collapsed variants subtract whole upper volumes as vertical slices that run out through the roof; the cut boundary follows existing wall/window vertices, so it is blocky rather than a clean planar cut. Filled interiors keep their rubble faces when a cut is made, which is what exposes them. The collapsed lot is a low faceted mound. Fixed-style runs change the street network because district road factors no longer vary. Legacy damaged shells/interiors are not certified manifold or fully navigable. Generation is synchronous; preview and conservative budgets are recommended for large cities.

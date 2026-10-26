@@ -14,7 +14,8 @@ STYLE_ITEMS = [
     ('SUBURBAN', 'Suburban House', 'Small pitched-roof houses set back from the street'),
 ]
 STYLE_CONDITIONS = ('INTACT', 'WEATHERED', 'SEMI_COLLAPSED', 'RUBBLE_FILLED',
-                    'LOWER_FLOORS', 'SHELL', 'COLLAPSED')
+                    'PARTIAL_FILLED', 'LOWER_FLOORS', 'SHELL', 'WALL_RING',
+                    'COLLAPSED')
 STYLE_COLORS = {'DOWNTOWN': (.42, .47, .52, 1), 'OLD_TOWN': (.48, .30, .20, 1),
                 'RESIDENTIAL': (.62, .58, .44, 1), 'BRUTALIST': (.48, .48, .46, 1),
                 'INDUSTRIAL': (.32, .39, .42, 1), 'SUBURBAN': (.66, .55, .42, 1)}
@@ -67,7 +68,12 @@ def building_recipe(style, width, depth, floors, seed, damage=0, interiors=False
                        flat_roof=False, roof_kind='GABLE', roof_height=2.2,
                        roof_overhang=.45)
     if condition == 'RUBBLE_FILLED':
-        profile.update(interior_fill='FILLED', building_profile='NONE')
+        profile.update(interior_fill='FILLED', building_profile='NONE',
+                       chunk_cut=True, expose_fill=True)
+    elif condition == 'PARTIAL_FILLED':
+        profile.update(interior_fill='PARTIAL',
+                       fill_floors=max(1, min(3, floors // 3 + 1)),
+                       building_profile='NONE', chunk_cut=True, expose_fill=True)
     elif condition == 'SHELL':
         profile.update(flat_roof=False, floor_slabs=True, exterior_rubble=True,
                        building_profile='NONE', roof_parapet=False, roof_box=None,
@@ -80,7 +86,13 @@ def building_recipe(style, width, depth, floors, seed, damage=0, interiors=False
                        damage_cap_height=profile['floor_height'] * 2.6)
     elif condition == 'COLLAPSED':
         profile.update(building_profile='NONE', interior_fill='NONE')
-    if condition in ('RUBBLE_FILLED', 'SHELL', 'COLLAPSED'):
+    elif condition == 'WALL_RING':
+        profile.update(floors=min(floors, 4), flat_roof=False, floor_slabs=False,
+                       roof_parapet=False, building_profile='NONE',
+                       interior_mound=True, exterior_rubble=True,
+                       chunk_cut=False, roof_box=None)
+    if condition in ('RUBBLE_FILLED', 'PARTIAL_FILLED', 'SHELL', 'WALL_RING',
+                     'COLLAPSED'):
         profile['building_profile'] = 'NONE'
     profile['windows_per_floor'] = max(
         1, int((width - 2) / (profile['window_width'] + 1)))

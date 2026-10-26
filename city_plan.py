@@ -35,36 +35,38 @@ STYLES = tuple(STYLE_PROFILE)
 MIDTOWN_STYLES = ('OLD_TOWN', 'RESIDENTIAL', 'BRUTALIST')
 
 CONDITIONS = ('INTACT', 'WEATHERED', 'SEMI_COLLAPSED', 'RUBBLE_FILLED',
-              'LOWER_FLOORS', 'SHELL', 'COLLAPSED')
+              'PARTIAL_FILLED', 'LOWER_FLOORS', 'SHELL', 'WALL_RING', 'COLLAPSED')
 # Multipliers on the city damage setting; the minimums make the rarer states
 # read even on a low-damage map. LOWER_FLOORS deliberately uses full damage so
 # the cut lands in the first few storeys.
 CONDITION_DAMAGE = {'INTACT': 1.0, 'WEATHERED': 1.3, 'SEMI_COLLAPSED': 1.7,
-                    'RUBBLE_FILLED': 1.0, 'LOWER_FLOORS': 1.0, 'SHELL': 1.5,
+                    'RUBBLE_FILLED': 1.0, 'PARTIAL_FILLED': 1.2,
+                    'LOWER_FLOORS': 1.0, 'SHELL': 1.5, 'WALL_RING': 1.2,
                     'COLLAPSED': 1.0}
 CONDITION_MIN_DAMAGE = {'INTACT': 0.0, 'WEATHERED': 0.0, 'SEMI_COLLAPSED': .72,
-                        'RUBBLE_FILLED': 0.0, 'LOWER_FLOORS': 1.0, 'SHELL': .65,
+                        'RUBBLE_FILLED': .35, 'PARTIAL_FILLED': .5,
+                        'LOWER_FLOORS': 1.0, 'SHELL': .65, 'WALL_RING': .5,
                         'COLLAPSED': 0.0}
 INTERIOR_CONDITIONS = ('INTACT', 'WEATHERED', 'SEMI_COLLAPSED', 'LOWER_FLOORS')
 CONDITION_WEIGHTS = {
-    'DOWNTOWN': (('INTACT', 20), ('WEATHERED', 26), ('SEMI_COLLAPSED', 20),
-                 ('RUBBLE_FILLED', 12), ('LOWER_FLOORS', 6), ('SHELL', 10),
-                 ('COLLAPSED', 6)),
-    'OLD_TOWN': (('INTACT', 40), ('WEATHERED', 30), ('SEMI_COLLAPSED', 10),
-                 ('RUBBLE_FILLED', 8), ('LOWER_FLOORS', 4), ('SHELL', 4),
-                 ('COLLAPSED', 4)),
-    'RESIDENTIAL': (('INTACT', 45), ('WEATHERED', 30), ('SEMI_COLLAPSED', 8),
-                    ('RUBBLE_FILLED', 8), ('LOWER_FLOORS', 4), ('SHELL', 3),
-                    ('COLLAPSED', 2)),
-    'BRUTALIST': (('INTACT', 30), ('WEATHERED', 30), ('SEMI_COLLAPSED', 14),
-                  ('RUBBLE_FILLED', 10), ('LOWER_FLOORS', 6), ('SHELL', 6),
-                  ('COLLAPSED', 4)),
-    'INDUSTRIAL': (('INTACT', 35), ('WEATHERED', 25), ('SEMI_COLLAPSED', 8),
-                   ('RUBBLE_FILLED', 8), ('LOWER_FLOORS', 4), ('SHELL', 12),
-                   ('COLLAPSED', 8)),
-    'SUBURBAN': (('INTACT', 60), ('WEATHERED', 25), ('SEMI_COLLAPSED', 5),
-                 ('RUBBLE_FILLED', 4), ('LOWER_FLOORS', 2), ('SHELL', 2),
-                 ('COLLAPSED', 2)),
+    'DOWNTOWN': (('INTACT', 16), ('WEATHERED', 24), ('SEMI_COLLAPSED', 20),
+                 ('RUBBLE_FILLED', 10), ('PARTIAL_FILLED', 10), ('LOWER_FLOORS', 6),
+                 ('SHELL', 8), ('WALL_RING', 3), ('COLLAPSED', 3)),
+    'OLD_TOWN': (('INTACT', 36), ('WEATHERED', 28), ('SEMI_COLLAPSED', 10),
+                 ('RUBBLE_FILLED', 8), ('PARTIAL_FILLED', 8), ('LOWER_FLOORS', 4),
+                 ('SHELL', 3), ('WALL_RING', 2), ('COLLAPSED', 1)),
+    'RESIDENTIAL': (('INTACT', 42), ('WEATHERED', 28), ('SEMI_COLLAPSED', 8),
+                    ('RUBBLE_FILLED', 7), ('PARTIAL_FILLED', 7), ('LOWER_FLOORS', 4),
+                    ('SHELL', 2), ('WALL_RING', 1), ('COLLAPSED', 1)),
+    'BRUTALIST': (('INTACT', 28), ('WEATHERED', 28), ('SEMI_COLLAPSED', 14),
+                  ('RUBBLE_FILLED', 9), ('PARTIAL_FILLED', 8), ('LOWER_FLOORS', 6),
+                  ('SHELL', 5), ('WALL_RING', 1), ('COLLAPSED', 1)),
+    'INDUSTRIAL': (('INTACT', 32), ('WEATHERED', 24), ('SEMI_COLLAPSED', 8),
+                   ('RUBBLE_FILLED', 8), ('PARTIAL_FILLED', 8), ('LOWER_FLOORS', 4),
+                   ('SHELL', 10), ('WALL_RING', 4), ('COLLAPSED', 2)),
+    'SUBURBAN': (('INTACT', 58), ('WEATHERED', 24), ('SEMI_COLLAPSED', 5),
+                 ('RUBBLE_FILLED', 4), ('PARTIAL_FILLED', 4), ('LOWER_FLOORS', 2),
+                 ('SHELL', 1), ('WALL_RING', 1), ('COLLAPSED', 1)),
 }
 
 
@@ -584,11 +586,13 @@ def _place_lots(settings, locations, roads):
                         cy = cell_low_y + sy / 2
                     else:
                         cy = cell_high_y - sy / 2
-                    floors = rng.randint(*profile['floors'])
-                    width, depth = (sy, sx) if side in "WE" else (sx, sy)
-                    rotation = {"S": 0, "E": math.pi / 2, "N": math.pi, "W": -math.pi / 2}[side]
                     condition_rng = stream(settings.seed, "condition", ident)
                     condition = _pick_condition(district.style, condition_rng)
+                    floors = rng.randint(*profile['floors'])
+                    if condition == 'WALL_RING':
+                        floors = min(floors, rng.randint(2, 4))
+                    width, depth = (sy, sx) if side in "WE" else (sx, sy)
+                    rotation = {"S": 0, "E": math.pi / 2, "N": math.pi, "W": -math.pi / 2}[side]
                     damage = min(1.0, max(
                         settings.damage * profile['damage'] * CONDITION_DAMAGE[condition],
                         CONDITION_MIN_DAMAGE[condition]))

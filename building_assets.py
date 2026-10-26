@@ -45,11 +45,37 @@ def _face(bm, vertices, material):
 
 
 def _delete_box(bm, x0, x1, y0, y1, z0, z1):
-    doomed = [vertex for vertex in bm.verts
-              if x0 < vertex.co.x < x1 and y0 < vertex.co.y < y1
-              and z0 < vertex.co.z < z1]
+    """Remove walls, slabs and glazing inside a box; keep rubble fill visible."""
+    doomed = []
+    for face in bm.faces:
+        if face.material_index == 7:
+            continue
+        centre = face.calc_center_median()
+        if x0 < centre.x < x1 and y0 < centre.y < y1 and z0 < centre.z < z1:
+            doomed.append(face)
     if doomed:
-        bmesh.ops.delete(bm, geom=doomed, context='VERTS')
+        bmesh.ops.delete(bm, geom=doomed, context='FACES')
+
+
+def expose_fill_bay(bm, params):
+    """Open a ground-floor bay so a solid or half-filled interior is visible."""
+    rng = random.Random(params.get('seed', 0) ^ 0x3F11)
+    width, depth = params['width'], params['depth']
+    floor_height = params['floor_height']
+    bay_width = width * rng.uniform(.22, .38)
+    bay_depth = depth * rng.uniform(.35, .6)
+    height = floor_height * rng.uniform(1.6, 2.4)
+    side = rng.randrange(4)
+    if side == 0:
+        _delete_box(bm, width * .08, width * .08 + bay_width, 0, bay_depth, 0, height)
+    elif side == 1:
+        _delete_box(bm, width * .08, width * .08 + bay_width,
+                    depth - bay_depth, depth, 0, height)
+    elif side == 2:
+        _delete_box(bm, 0, bay_depth, depth * .08, depth * .08 + bay_width, 0, height)
+    else:
+        _delete_box(bm, width - bay_depth, width,
+                    depth * .08, depth * .08 + bay_width, 0, height)
 
 
 def subtract_chunks(bm, params):
@@ -73,28 +99,28 @@ def subtract_chunks(bm, params):
     y0, y1 = ((0, chunk_depth) if sign_y < 0 else (depth - chunk_depth, depth))
     _delete_box(bm, x0, x1, y0, y1, chunk_base, total + 1)
 
-    if params['floors'] >= 4 and rng.random() < .65:
+    if params['floors'] >= 4 and rng.random() < .6:
+        # A second failure is a vertical bay removal that runs out through the
+        # top, not a floating hole: lost slices take their support above with them.
         side = rng.randrange(4)
-        bite = rng.uniform(.25, .45)
-        height = floor_height * rng.uniform(1.5, 3.0)
-        top = total * rng.uniform(.55, .88)
-        base = max(floor_height * 1.2, top - height)
+        bite = rng.uniform(.25, .4)
+        base = total * rng.uniform(.25, .5)
         if side == 0:
-            bx0 = width * rng.uniform(.05, .25)
-            _delete_box(bm, bx0, bx0 + width * bite, 0, depth * rng.uniform(.18, .42),
-                        base, top)
+            bx0 = width * rng.uniform(.05, .3)
+            _delete_box(bm, bx0, bx0 + width * bite, 0,
+                        depth * rng.uniform(.2, .45), base, total + 1)
         elif side == 1:
-            bx0 = width * rng.uniform(.05, .25)
+            bx0 = width * rng.uniform(.05, .3)
             _delete_box(bm, bx0, bx0 + width * bite,
-                        depth * rng.uniform(.58, .82), depth, base, top)
+                        depth * rng.uniform(.55, .8), depth, base, total + 1)
         elif side == 2:
-            by0 = depth * rng.uniform(.05, .25)
-            _delete_box(bm, 0, width * rng.uniform(.18, .42),
-                        by0, by0 + depth * bite, base, top)
+            by0 = depth * rng.uniform(.05, .3)
+            _delete_box(bm, 0, width * rng.uniform(.2, .45),
+                        by0, by0 + depth * bite, base, total + 1)
         else:
-            by0 = depth * rng.uniform(.05, .25)
-            _delete_box(bm, width * rng.uniform(.58, .82), width,
-                        by0, by0 + depth * bite, base, top)
+            by0 = depth * rng.uniform(.05, .3)
+            _delete_box(bm, width * rng.uniform(.55, .8), width,
+                        by0, by0 + depth * bite, base, total + 1)
     return sign_x, sign_y
 
 
@@ -103,6 +129,40 @@ def _bm_box(bm, x0, y0, z0, x1, y1, z1, material):
     for face in ((0, 3, 2, 1), (4, 5, 6, 7), (0, 1, 5, 4),
                  (1, 2, 6, 5), (2, 3, 7, 6), (3, 0, 4, 7)):
         _face(bm, tuple(corner[index] for index in face), material)
+
+
+def add_interior_mound(bm, params):
+    """Rubble mound inside a standing wall ring, visible from above."""
+    rng = random.Random(params.get('seed', 0) ^ 0x1A0D)
+    width, depth = params['width'], params['depth']
+    wall = params.get('wall_thickness', .25)
+    radius_x = max(1.5, width / 2 - wall - .5)
+    radius_y = max(1.5, depth / 2 - wall - .5)
+    peak = min(params['floors'] * params['floor_height'] * .55,
+               rng.uniform(1.8, 3.6))
+    centre_x, centre_y = width / 2, depth / 2
+    segments, rings = 10, 3
+    angles = [2 * math.pi * index / segments for index in range(segments)]
+    jitter = [rng.uniform(.82, 1.15) for _ in range(segments)]
+    apex = bm.verts.new((centre_x, centre_y, peak))
+    ring_verts = []
+    for ring in range(1, rings + 1):
+        t = ring / rings
+        height = peak * (1 - t) ** 1.3
+        ring_verts.append([bm.verts.new(
+            (centre_x + math.cos(angle) * radius_x * t * jitter[index],
+             centre_y + math.sin(angle) * radius_y * t * jitter[index],
+             max(0.0, height + rng.uniform(-.08, .08) * peak)))
+            for index, angle in enumerate(angles)])
+    for index in range(segments):
+        following = (index + 1) % segments
+        _face(bm, (apex, ring_verts[0][index], ring_verts[0][following]), 7)
+    for ring in range(1, rings):
+        inner, outer = ring_verts[ring - 1], ring_verts[ring]
+        for index in range(segments):
+            following = (index + 1) % segments
+            _face(bm, (inner[index], outer[index], outer[following],
+                       inner[following]), 7)
 
 
 def add_collapse_debris(bm, params, sign_x, sign_y):
@@ -220,6 +280,10 @@ def create_shell(name, params, collection):
         bm = builder.build()
         if params.get('chunk_cut'):
             add_collapse_debris(bm, params, *subtract_chunks(bm, params))
+        if params.get('expose_fill'):
+            expose_fill_bay(bm, params)
+        if params.get('interior_mound'):
+            add_interior_mound(bm, params)
         # Roof extras only belong on an intact top; a damaged shell already has
         # an irregular silhouette where the upper floors were cut away.
         total_height = params['floors'] * params['floor_height']

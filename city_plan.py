@@ -43,15 +43,15 @@ CONDITION_DAMAGE = {'INTACT': 1.0, 'WEATHERED': 1.3, 'SEMI_COLLAPSED': 1.7,
                     'RUBBLE_FILLED': 1.0, 'PARTIAL_FILLED': 1.2,
                     'LOWER_FLOORS': 1.0, 'SHELL': 1.5, 'WALL_RING': 1.2,
                     'COLLAPSED': 1.0}
-CONDITION_MIN_DAMAGE = {'INTACT': 0.0, 'WEATHERED': 0.0, 'SEMI_COLLAPSED': .72,
+CONDITION_MIN_DAMAGE = {'INTACT': 0.0, 'WEATHERED': 0.0, 'SEMI_COLLAPSED': .78,
                         'RUBBLE_FILLED': .35, 'PARTIAL_FILLED': .5,
-                        'LOWER_FLOORS': 1.0, 'SHELL': .65, 'WALL_RING': .5,
+                        'LOWER_FLOORS': 1.0, 'SHELL': .7, 'WALL_RING': .5,
                         'COLLAPSED': 0.0}
 INTERIOR_CONDITIONS = ('INTACT', 'WEATHERED', 'SEMI_COLLAPSED', 'LOWER_FLOORS')
 CONDITION_WEIGHTS = {
-    'DOWNTOWN': (('INTACT', 16), ('WEATHERED', 24), ('SEMI_COLLAPSED', 20),
+    'DOWNTOWN': (('INTACT', 8), ('WEATHERED', 20), ('SEMI_COLLAPSED', 28),
                  ('RUBBLE_FILLED', 10), ('PARTIAL_FILLED', 10), ('LOWER_FLOORS', 6),
-                 ('SHELL', 8), ('WALL_RING', 3), ('COLLAPSED', 3)),
+                 ('SHELL', 12), ('WALL_RING', 3), ('COLLAPSED', 3)),
     'OLD_TOWN': (('INTACT', 36), ('WEATHERED', 28), ('SEMI_COLLAPSED', 10),
                  ('RUBBLE_FILLED', 8), ('PARTIAL_FILLED', 8), ('LOWER_FLOORS', 4),
                  ('SHELL', 3), ('WALL_RING', 2), ('COLLAPSED', 1)),
@@ -596,6 +596,9 @@ def _place_lots(settings, locations, roads):
                     damage = min(1.0, max(
                         settings.damage * profile['damage'] * CONDITION_DAMAGE[condition],
                         CONDITION_MIN_DAMAGE[condition]))
+                    if floors > 8:
+                        # Tall towers carry more visible damage than low-rise blocks.
+                        damage = min(1.0, damage * (1 + min(.5, (floors - 8) * .045)))
                     interiors = (condition in INTERIOR_CONDITIONS and
                                  condition_rng.random() < settings.interior_ratio)
                     lots.append(Lot(ident, (cx, cy), width, depth, rotation,

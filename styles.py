@@ -5,6 +5,8 @@ Each style is a district archetype, not only a palette: downtown towers are tall
 and finely glazed, industrial sheds are wide with high windows and lorry doors,
 and suburban houses are small with a pitched roof.
 """
+import random
+
 STYLE_ITEMS = [
     ('DOWNTOWN', 'Downtown Tower', 'Tall glazed offices with a rooftop plant box'),
     ('OLD_TOWN', 'Old Town / Masonry', 'Narrow tall windows, pilasters and parapets'),
@@ -75,12 +77,11 @@ def building_recipe(style, width, depth, floors, seed, damage=0, interiors=False
                        fill_floors=max(1, min(3, floors // 3 + 1)),
                        building_profile='NONE', chunk_cut=True, expose_fill=True)
     elif condition == 'SHELL':
-        profile.update(flat_roof=False, floor_slabs=True, exterior_rubble=True,
+        profile.update(flat_roof=False, floor_slabs=True,
                        building_profile='NONE', roof_parapet=False, roof_box=None,
                        chunk_cut=True)
     elif condition == 'SEMI_COLLAPSED':
-        profile.update(chunk_cut=True, exterior_rubble=True, rubble_spread=2.5,
-                       exterior_rubble_piles=6)
+        profile.update(chunk_cut=True)
     elif condition == 'LOWER_FLOORS':
         profile.update(damage_amount=1.0, enable_damage=True,
                        damage_cap_height=profile['floor_height'] * 2.6)
@@ -89,11 +90,13 @@ def building_recipe(style, width, depth, floors, seed, damage=0, interiors=False
     elif condition == 'WALL_RING':
         profile.update(floors=min(floors, 4), flat_roof=False, floor_slabs=False,
                        roof_parapet=False, building_profile='NONE',
-                       interior_mound=True, exterior_rubble=True,
-                       chunk_cut=False, roof_box=None)
+                       interior_mound=True, chunk_cut=False, roof_box=None)
     if condition in ('RUBBLE_FILLED', 'PARTIAL_FILLED', 'SHELL', 'WALL_RING',
                      'COLLAPSED'):
         profile['building_profile'] = 'NONE'
+    if (condition == 'WEATHERED' and floors >= 10 and
+            random.Random(seed ^ 0x5EED).random() < .55):
+        profile['chunk_cut'] = True
     profile['windows_per_floor'] = max(
         1, int((width - 2) / (profile['window_width'] + 1)))
     profile['ground_floor_window_count'] = max(1, int((width - 3) / 3))

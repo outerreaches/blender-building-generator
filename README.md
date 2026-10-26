@@ -1,6 +1,6 @@
 # Procedural Building Shell Generator
 
-## v0.9.0: Failure-model ruins
+## v0.9.1: Failure-model ruins
 
 New **Add → Mesh → Generate City** and **Generate Building by Style** commands
 add seeded city growth, six district archetypes, connected road tiers, driving
@@ -14,8 +14,9 @@ and bulk building commands remain available.
 Buildings now fail the way neglected towers do: weathered tops, vertical
 corner/bay slices, solid rubble fills behind intact facades, half-filled lower
 floors, roofless shells, low wall rings with a mound inside, and full rubble
-mounds. Filled states expose their rubble through a ground-floor bay and an
-upper cut instead of looking like empty interiors. District weights decide how often each appears, and only a
+mounds. Loose debris is replaced by rubble mounds at cut bases and inside wall
+rings, tall towers carry heavier damage, and filled states expose their rubble
+through a ground-floor bay and an upper cut instead of looking empty. District weights decide how often each appears, and only a
 configurable fraction of enterable buildings get full interior layouts. The
 ground extends far past the city as open wasteland (default 12 km), so the
 horizon reads as empty land while the game keeps the player inside invisible

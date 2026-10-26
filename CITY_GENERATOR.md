@@ -1,10 +1,10 @@
-# City generator — v0.9.0 failure-model ruins
+# City generator — v0.9.1 failure-model ruins
 
 This generator supplies the main static environment for a low-poly first-person Unity game. Existing signs, ruined cars and other props remain separate assets.
 
 ## Try it
 
-Install `output/procedural_building_shell_v0.9.0.zip` as a Blender add-on. Use **Shift+A → Mesh → Generate City** or **Generate Building by Style**. Start with **Layout Preview**; select **Detailed Shells** for windows, doors, floors, damage and optional interiors. Both modes use the same plan. Each run creates a new collection at the 3D cursor. Undo removes that run; failure rolls back its own objects.
+Install `output/procedural_building_shell_v0.9.1.zip` as a Blender add-on. Use **Shift+A → Mesh → Generate City** or **Generate Building by Style**. Start with **Layout Preview**; select **Detailed Shells** for windows, doors, floors, damage and optional interiors. Both modes use the same plan. Each run creates a new collection at the 3D cursor. Undo removes that run; failure rolls back its own objects.
 
 The original single-building and bulk operators remain available. Architecture uses six district archetypes built from rectangular shells:
 
@@ -96,7 +96,7 @@ part to go, acting as the plinth that holds the pile.
 
 The condition set follows those stages:
 
-- **Weathered** — envelope and top slabs degraded; the facade keeps its height and detail.
+- **Weathered** — envelope and top slabs degraded; the facade keeps its height and detail, and tall weathered towers may also lose one bay.
 - **Semi-collapsed** — one or two vertical corner/bay slices missing through the top.
 - **Rubble-filled** — top floors pancaked; the interior is a solid fill behind the facade, opened by a ground-floor bay and upper cut.
 - **Partial-filled** — only the lower floors pancaked; upper floors are open.
@@ -112,11 +112,11 @@ minimum damage and the geometry treatment:
 | --- | --- |
 | Intact | Clean shell; interior only when the lot is in the interior budget |
 | Weathered | Fine irregular collapsed top (median-smoothed, slope-limited, no needles); interiors only below the damage line |
-| Semi-collapsed | Whole upper chunks removed (corner block plus a mid-height facade bite), exposed slabs and debris around the cut |
+| Semi-collapsed | Whole upper chunks removed (corner block plus a vertical bay slice through the roof), exposed slabs and a rubble mound at the cut base |
 | Rubble-filled | Interior packed solid; a ground-floor bay and an upper cut expose the fill; no interior layout |
 | Partial-filled | Lower floors packed with rubble, upper floors open; exposed bay and upper cut; no interior layout |
 | Lower floors only | Full damage so the cut lands in the first few storeys; enterable |
-| Shell | No roof; floor slabs exposed; one vertical slice removed; no interior |
+| Shell | No roof; floor slabs exposed; one vertical slice removed with a corner mound; no interior |
 | Wall ring | Low perimeter walls (2–4 storeys), no roof or upper slabs, rubble mound inside |
 | Collapsed | No shell; a low faceted rubble mound on the pad |
 
@@ -189,4 +189,4 @@ See [ROADMAP.md](ROADMAP.md) for the city dressing plan: interior budget, collap
 3. **Asset variety:** the six archetypes cover massing and roofs, but civic landmarks (courthouse, station, hospital), authored facade kits, rooftop clutter and per-district palettes remain.
 4. **Game delivery:** chunk/LOD export, collision proxies, navigation checks, vehicle swept-clearance tests and connected ruin/vegetation dressing.
 
-Street surfaces have open bottoms below ground; they are not watertight solids. The 1.5 m surface sampling is a fixed budget decision: a tighter grid would reduce the ~0.5 m concave-corner deviation at the cost of roughly quadratic triangle growth. Roof extras are skipped when damage cuts the top floors, so a ruined shell keeps its jagged demolition silhouette. Corner collapse removes a footprint quadrant above a seeded base height; it is a ruin silhouette, not a structural simulation. Damage tops use the original fine facade profile, median-smoothed and slope-limited so isolated needles disappear while broad variation remains. Collapsed variants subtract whole upper volumes as vertical slices that run out through the roof; the cut boundary follows existing wall/window vertices, so it is blocky rather than a clean planar cut. Filled interiors keep their rubble faces when a cut is made, which is what exposes them. The collapsed lot is a low faceted mound. Fixed-style runs change the street network because district road factors no longer vary. Legacy damaged shells/interiors are not certified manifold or fully navigable. Generation is synchronous; preview and conservative budgets are recommended for large cities.
+Street surfaces have open bottoms below ground; they are not watertight solids. The 1.5 m surface sampling is a fixed budget decision: a tighter grid would reduce the ~0.5 m concave-corner deviation at the cost of roughly quadratic triangle growth. Roof extras are skipped when damage cuts the top floors, so a ruined shell keeps its jagged demolition silhouette. Corner collapse removes a footprint quadrant above a seeded base height; it is a ruin silhouette, not a structural simulation. Damage tops use the original fine facade profile, median-smoothed and slope-limited so isolated needles disappear while broad variation remains. Collapsed variants subtract whole upper volumes as vertical slices that run out through the roof; the cut boundary follows existing wall/window vertices, so it is blocky rather than a clean planar cut. Loose debris is gone: cuts leave a rubble mound at their base, wall rings hold an interior mound, and collapsed lots are mounds. Tall towers get an additional damage boost and larger slices. Filled interiors keep their rubble faces when a cut is made, which is what exposes them. Fixed-style runs change the street network because district road factors no longer vary. Legacy damaged shells/interiors are not certified manifold or fully navigable. Generation is synchronous; preview and conservative budgets are recommended for large cities.

@@ -91,20 +91,28 @@ def subtract_chunks(bm, params):
     floor_height = params['floor_height']
     total = params['floors'] * floor_height
     sign_x, sign_y = rng.choice((-1, 1)), rng.choice((-1, 1))
+    aggressive = params['floors'] >= 8
+    very_tall = params['floors'] >= 12
 
-    chunk_width = width * rng.uniform(.32, .52)
-    chunk_depth = depth * rng.uniform(.32, .52)
-    chunk_base = total * rng.uniform(.45, .68)
+    chunk_width = (width * rng.uniform(.45, .7) if very_tall else
+                   width * rng.uniform(.38, .6) if aggressive else
+                   width * rng.uniform(.32, .52))
+    chunk_depth = (depth * rng.uniform(.45, .7) if very_tall else
+                   depth * rng.uniform(.38, .6) if aggressive else
+                   depth * rng.uniform(.32, .52))
+    chunk_base = total * (rng.uniform(.28, .5) if very_tall else
+                          rng.uniform(.3, .52) if aggressive else
+                          rng.uniform(.45, .68))
     x0, x1 = ((0, chunk_width) if sign_x < 0 else (width - chunk_width, width))
     y0, y1 = ((0, chunk_depth) if sign_y < 0 else (depth - chunk_depth, depth))
     _delete_box(bm, x0, x1, y0, y1, chunk_base, total + 1)
 
-    if params['floors'] >= 4 and rng.random() < .6:
+    if params['floors'] >= 4 and (aggressive or rng.random() < .6):
         # A second failure is a vertical bay removal that runs out through the
         # top, not a floating hole: lost slices take their support above with them.
         side = rng.randrange(4)
-        bite = rng.uniform(.25, .4)
-        base = total * rng.uniform(.25, .5)
+        bite = rng.uniform(.3, .5) if aggressive else rng.uniform(.25, .4)
+        base = total * (rng.uniform(.18, .42) if aggressive else rng.uniform(.25, .5))
         if side == 0:
             bx0 = width * rng.uniform(.05, .3)
             _delete_box(bm, bx0, bx0 + width * bite, 0,
@@ -124,24 +132,8 @@ def subtract_chunks(bm, params):
     return sign_x, sign_y
 
 
-def _bm_box(bm, x0, y0, z0, x1, y1, z1, material):
-    corner = [bm.verts.new((x, y, z)) for z in (z0, z1) for y in (y0, y1) for x in (x0, x1)]
-    for face in ((0, 3, 2, 1), (4, 5, 6, 7), (0, 1, 5, 4),
-                 (1, 2, 6, 5), (2, 3, 7, 6), (3, 0, 4, 7)):
-        _face(bm, tuple(corner[index] for index in face), material)
-
-
-def add_interior_mound(bm, params):
-    """Rubble mound inside a standing wall ring, visible from above."""
-    rng = random.Random(params.get('seed', 0) ^ 0x1A0D)
-    width, depth = params['width'], params['depth']
-    wall = params.get('wall_thickness', .25)
-    radius_x = max(1.5, width / 2 - wall - .5)
-    radius_y = max(1.5, depth / 2 - wall - .5)
-    peak = min(params['floors'] * params['floor_height'] * .55,
-               rng.uniform(1.8, 3.6))
-    centre_x, centre_y = width / 2, depth / 2
-    segments, rings = 10, 3
+def _bm_mound(bm, centre_x, centre_y, radius_x, radius_y, peak, rng,
+              segments=10, rings=3):
     angles = [2 * math.pi * index / segments for index in range(segments)]
     jitter = [rng.uniform(.82, 1.15) for _ in range(segments)]
     apex = bm.verts.new((centre_x, centre_y, peak))
@@ -165,21 +157,29 @@ def add_interior_mound(bm, params):
                        inner[following]), 7)
 
 
-def add_collapse_debris(bm, params, sign_x, sign_y):
-    """Larger debris around the sheared corner, beyond the standard rubble piles."""
-    rng = random.Random(params.get('seed', 0) ^ 0xD3B715)
+def add_interior_mound(bm, params):
+    """Rubble mound inside a standing wall ring, visible from above."""
+    rng = random.Random(params.get('seed', 0) ^ 0x1A0D)
     width, depth = params['width'], params['depth']
-    centre_x = width / 2 + sign_x * width * .32
-    centre_y = depth / 2 + sign_y * depth * .32
-    for _ in range(rng.randint(7, 12)):
-        size_x = rng.uniform(.6, 2.6)
-        size_y = rng.uniform(.6, 2.6)
-        size_z = rng.uniform(.3, 1.6)
-        x = centre_x + sign_x * rng.uniform(-2.5, 3.5)
-        y = centre_y + sign_y * rng.uniform(-2.5, 3.5)
-        _bm_box(bm, x - size_x / 2, y - size_y / 2, 0,
-                x + size_x / 2, y + size_y / 2, size_z,
-                rng.choice((7, 7, 2)))
+    wall = params.get('wall_thickness', .25)
+    radius_x = max(1.5, width / 2 - wall - .5)
+    radius_y = max(1.5, depth / 2 - wall - .5)
+    peak = min(params['floors'] * params['floor_height'] * .55,
+               rng.uniform(1.8, 3.6))
+    _bm_mound(bm, width / 2, depth / 2, radius_x, radius_y, peak, rng)
+
+
+def add_corner_mound(bm, params, sign_x, sign_y):
+    """Mound at the base of a removed corner/bay; replaces scattered debris."""
+    rng = random.Random(params.get('seed', 0) ^ 0x5EED)
+    width, depth = params['width'], params['depth']
+    centre_x = (0 if sign_x < 0 else width) - sign_x * width * .12
+    centre_y = (0 if sign_y < 0 else depth) - sign_y * depth * .12
+    radius_x = width * rng.uniform(.2, .34)
+    radius_y = depth * rng.uniform(.2, .34)
+    peak = rng.uniform(1.4, 3.0)
+    _bm_mound(bm, centre_x, centre_y, radius_x, radius_y, peak, rng,
+              segments=9, rings=3)
 
 
 def create_rubble(name, params, collection):
@@ -250,10 +250,10 @@ def add_gable_roof(bm, params, base):
     d = bm.verts.new((x0, y1, base))
     r0 = bm.verts.new((x0, ridge_y, ridge_z))
     r1 = bm.verts.new((x1, ridge_y, ridge_z))
-    _face(bm, (a, b, r1, r0), 2)  # south slope
-    _face(bm, (c, d, r0, r1), 2)  # north slope
-    _face(bm, (a, r0, d), 2)      # west gable
-    _face(bm, (b, c, r1), 2)      # east gable
+    _face(bm, (a, b, r1, r0), 2)
+    _face(bm, (c, d, r0, r1), 2)
+    _face(bm, (a, r0, d), 2)
+    _face(bm, (b, c, r1), 2)
 
 
 def add_roof_box(bm, params, base):
@@ -279,7 +279,7 @@ def create_shell(name, params, collection):
     try:
         bm = builder.build()
         if params.get('chunk_cut'):
-            add_collapse_debris(bm, params, *subtract_chunks(bm, params))
+            add_corner_mound(bm, params, *subtract_chunks(bm, params))
         if params.get('expose_fill'):
             expose_fill_bay(bm, params)
         if params.get('interior_mound'):

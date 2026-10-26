@@ -1,5 +1,12 @@
 # Procedural Building Shell Generator
 
+## v0.9.5: Window-clear interiors
+
+Stair cores keep a 1 m aisle from side facades and stop 0.6 m clear of the
+front/back window planes. Interior partitions are pulled 0.6 m clear of every
+exterior opening, so office and storefront walls no longer sit in or directly
+behind window reveals.
+
 ## v0.9.4: Interior fit-out
 
 Interiors now use solid, capped wall boxes with real door openings and headers.

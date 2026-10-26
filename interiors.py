@@ -44,7 +44,9 @@ MIN_WALL_OFFSET = 1.5       # Minimum distance of interior wall from exterior wa
 DOOR_WIDTH = 0.9            # Standard interior door width
 FLOOR_SLAB_THICKNESS = 0.15 # Matches mesh_builder.build_floor_slab
 EXTERIOR_DOOR_WIDTH = 1.0   # Exterior door width
-WALL_CLEARANCE = 0.3        # Minimum clearance from windows/doors for wall attachment
+WALL_CLEARANCE = 0.5        # Minimum centerline clearance from exterior openings
+CORE_EXTERIOR_AISLE = 1.0   # Clear aisle between a side stair core and the facade
+ENDPOINT_CLEARANCE = 0.6  # Keep interior wall ends clear of exterior openings
 
 
 # =============================================================================
@@ -422,7 +424,7 @@ def validate_and_adjust_cardinal_wall(wall_start: Vector, wall_end: Vector,
         
         # Pull a blocked end back from the exterior opening instead of dropping
         # the whole partition: the wall becomes free-standing at that end.
-        inset = max(wall_thickness + 0.1, 0.3)
+        inset = max(ENDPOINT_CLEARANCE, wall_thickness / 2 + 0.4)
         if abs(wall_start.x - ix_min) < 0.01:
             if is_position_blocked_by_opening(wall_y, 'left', window_positions):
                 adjusted_start.x += inset
@@ -436,7 +438,7 @@ def validate_and_adjust_cardinal_wall(wall_start: Vector, wall_end: Vector,
         adjusted_start.x = wall_x
         adjusted_end.x = wall_x
 
-        inset = max(wall_thickness + 0.1, 0.3)
+        inset = max(ENDPOINT_CLEARANCE, wall_thickness / 2 + 0.4)
         if abs(wall_start.y - iy_min) < 0.01:
             if is_position_blocked_by_opening(wall_x, 'front', window_positions):
                 adjusted_start.y += inset
@@ -470,21 +472,27 @@ def get_stair_zone(width: float, depth: float, wall_thickness: float,
     run = max(1.0, zone_depth - 2 * landing)
     flight_width = max(.7, (zone_width - STAIR_WELL) / 2)
 
-    margin = .3
-    if 'right' in position:
-        x_max = ix_max - margin
-        x_min = x_max - zone_width
-    elif 'left' in position:
-        x_min = ix_min + margin
-        x_max = x_min + zone_width
+    margin_y = ENDPOINT_CLEARANCE
+    if 'right' in position or 'left' in position:
+        # Keep a real aisle between the core wall and the facade; otherwise a
+        # side window looks straight into the stair wall.
+        desired = wall_thickness / 2 + CORE_EXTERIOR_AISLE
+        max_margin = max(.3, interior_width - zone_width - .3)
+        margin_x = max(.3, min(desired, max_margin))
+        if 'right' in position:
+            x_max = ix_max - margin_x
+            x_min = x_max - zone_width
+        else:
+            x_min = ix_min + margin_x
+            x_max = x_min + zone_width
     else:
         x_min = ix_min + (interior_width - zone_width) / 2
         x_max = x_min + zone_width
     if 'front' in position:
-        y_min = iy_min + margin
+        y_min = iy_min + margin_y
         y_max = y_min + zone_depth
     else:
-        y_max = iy_max - margin
+        y_max = iy_max - margin_y
         y_min = y_max - zone_depth
 
     return {

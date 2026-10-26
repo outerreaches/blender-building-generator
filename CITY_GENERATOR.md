@@ -181,7 +181,7 @@ blender --background --factory-startup --python-exit-code 1 --python tests/rende
 
 The third script regenerates the district and corner QA renders from the scene saved by the second. `tests/render_conditions.py` renders one building per condition. `tests/render_metro.py` separately builds the radius-14 metro scene and its three renders (about a minute; not part of the default loop).
 
-Verified on Blender 5.1.2. The first script covers registration, original operators, styles/interiors/damage, mesh validation and rollback. The second covers UVs, city-only export, selection restoration, triangulation, and world bounds after FBX reimport, then renders examples. `blender_interiors.py` verifies the switchback stair treads, wall caps and the house/office partitions. The declared Blender 4.5 minimum is not separately tested. Unity import/play-mode tests are pending.
+Verified on Blender 5.1.2. The first script covers registration, original operators, styles/interiors/damage, mesh validation and rollback. The second covers UVs, city-only export, selection restoration, triangulation, and world bounds after FBX reimport, then renders examples. `blender_interiors.py` verifies the switchback stair treads, wall caps, the house/office partitions and a >0.5 m interior-wall/window clearance. The declared Blender 4.5 minimum is not separately tested. Unity import/play-mode tests are pending.
 
 ## Next milestones and limits
 

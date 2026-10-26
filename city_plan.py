@@ -8,9 +8,11 @@ import json
 import math
 import random
 
-VERSION = 2
+VERSION = 3
 ROAD_WIDTHS = {"HIGHWAY": 20.0, "ARTERIAL": 12.0, "COLLECTOR": 8.0, "LOCAL": 6.0}
 ROAD_RANK = {name: i for i, name in enumerate(ROAD_WIDTHS)}
+# Corner radius at a route bend, before the curve_radius multiplier and clamping.
+BEND_RADII = {"HIGHWAY": 26.0, "ARTERIAL": 18.0, "COLLECTOR": 12.0, "LOCAL": 8.0}
 STYLES = ("OLD_TOWN", "RESIDENTIAL", "INDUSTRIAL", "BRUTALIST")
 
 
@@ -32,6 +34,7 @@ class CitySettings:
     core_density: float = 0.95
     outskirts_density: float = 0.15
     road_density: float = 0.55
+    curve_radius: float = 0.6  # Fraction of the tier bend radius; 0 keeps square corners.
     setback: float = 2.0
     sidewalk_width: float = 2.0
     curb_height: float = 0.15
@@ -50,7 +53,8 @@ class CitySettings:
             raise ValueError("seed must be an integer")
         for name, lo, hi in (("block_size", 48, 120), ("core_radius", .05, 1),
                              ("core_density", 0, 1), ("outskirts_density", 0, 1),
-                             ("road_density", 0, 1), ("damage", 0, 1), ("setback", 1, 8),
+                             ("road_density", 0, 1), ("curve_radius", 0, 1),
+                             ("damage", 0, 1), ("setback", 1, 8),
                              ("sidewalk_width", 1.2, 5), ("curb_height", 0, .25)):
             value = getattr(self, name)
             if not math.isfinite(value) or not lo <= value <= hi:
@@ -97,6 +101,7 @@ class CityPlan:
     settings: CitySettings
     locations: list
     roads: list
+    paths: list
     lots: list
     eligible_lots: int
     driving_loops: list
@@ -170,7 +175,8 @@ def _add_driving_loops(settings, locations, roads):
     """Connect highway entry/exit pairs through districts without retracing a road.
 
     These are explicit multi-tier circuits, not merely a count of tiny grid cells.
-    Geometry remains orthogonal; bridges and banked/curved roads are separate work.
+    Only topology is built here; corner geometry comes from the route fillets,
+    and bridges or banked roads are separate work.
     """
     if settings.driving_loop_count == 0:
         return []
@@ -216,6 +222,105 @@ def _add_driving_loops(settings, locations, roads):
         if len(circuits) == settings.driving_loop_count:
             break
     return circuits
+
+
+def _unit(a, b):
+    dx, dy = b[0] - a[0], b[1] - a[1]
+    length = math.hypot(dx, dy)
+    return (dx / length, dy / length) if length else (0.0, 0.0)
+
+
+def _fillet_points(nodes, size, tier, curve_radius):
+    """Flatten corner arcs into a metre-space centreline for one route.
+
+    Tangent length is capped at 45% of each adjacent edge, so two bends on one
+    block never meet. The route therefore keeps its lattice topology while every
+    interior corner becomes an arc of ``BEND_RADII[tier] * curve_radius``.
+    """
+    base = [(n[0] * size, n[1] * size) for n in nodes]
+    radius = BEND_RADII[tier] * curve_radius
+    if radius <= 0:
+        points = list(base)
+    else:
+        points = [base[0]]
+        for index in range(1, len(base) - 1):
+            previous, corner, following = base[index - 1], base[index], base[index + 1]
+            ux, uy = _unit(previous, corner)
+            vx, vy = _unit(corner, following)
+            turn = math.acos(max(-1.0, min(1.0, ux * vx + uy * vy)))
+            cross = ux * vy - uy * vx
+            if turn < 1e-4 or abs(cross) < 1e-9:
+                continue
+            tangent = radius * math.tan(turn / 2)
+            limit = 0.45 * min(math.dist(previous, corner), math.dist(corner, following))
+            if tangent > limit:
+                tangent = limit
+                arc_radius = tangent / math.tan(turn / 2)
+            else:
+                arc_radius = radius
+            sign = 1 if cross > 0 else -1
+            start = (corner[0] - ux * tangent, corner[1] - uy * tangent)
+            end = (corner[0] + vx * tangent, corner[1] + vy * tangent)
+            centre = (start[0] - uy * arc_radius * sign,
+                      start[1] + ux * arc_radius * sign)
+            angle = math.atan2(start[1] - centre[1], start[0] - centre[0])
+            steps = max(2, math.ceil(turn / math.radians(12)))
+            points.append(start)
+            for step in range(1, steps):
+                theta = angle + sign * turn * step / steps
+                points.append((centre[0] + arc_radius * math.cos(theta),
+                               centre[1] + arc_radius * math.sin(theta)))
+            points.append(end)
+        points.append(base[-1])
+    return points
+
+
+def _build_paths(settings, roads):
+    """Group lattice edges into continuous same-tier routes, then round corners."""
+    adjacency = {}
+    for (a, b), tier in roads.items():
+        adjacency.setdefault(a, []).append((b, tier))
+        adjacency.setdefault(b, []).append((a, tier))
+    for node in adjacency:
+        adjacency[node].sort()
+    used = set()
+    paths = []
+
+    def continuation(path, tier, forward):
+        end, inner = (path[-1], path[-2]) if forward else (path[0], path[1])
+        ux, uy = _unit(inner, end)
+        options = [(other, other_tier) for other, other_tier in adjacency[end]
+                   if other_tier == tier and edge(end, other) not in used]
+        if not options:
+            return None
+        # Straightest continuation wins; coordinates break exact ties.
+        return min(options, key=lambda item: (-(ux * _unit(end, item[0])[0] +
+                                                uy * _unit(end, item[0])[1]), item[0]))
+
+    for a, b in sorted(roads):
+        key = edge(a, b)
+        if key in used:
+            continue
+        tier = roads[key]
+        used.add(key)
+        nodes = [a, b]
+        while True:
+            option = continuation(nodes, tier, True)
+            if option is None:
+                break
+            used.add(edge(nodes[-1], option[0]))
+            nodes.append(option[0])
+        while True:
+            option = continuation(nodes, tier, False)
+            if option is None:
+                break
+            used.add(edge(nodes[0], option[0]))
+            nodes.insert(0, option[0])
+        points = _fillet_points(nodes, settings.block_size, tier, settings.curve_radius)
+        paths.append({'id': f'road_path_{len(paths)}', 'tier': tier,
+                      'width': ROAD_WIDTHS[tier], 'nodes': nodes,
+                      'points': points})
+    return paths
 
 
 def generate_city(settings=CitySettings()):
@@ -288,12 +393,13 @@ def generate_city(settings=CitySettings()):
                     frontier.append(other)
 
     road_list = [Road(a, b, tier) for (a, b), tier in sorted(roads.items())]
+    paths = _build_paths(settings, roads)
     lots = _place_lots(settings, locations, roads)
     # Stable priority sampling avoids truncating one geographical side of the city.
     lots.sort(key=lambda lot: stream(settings.seed, "budget", lot.id).random())
     eligible = len(lots)
     lots = sorted(lots[:settings.max_buildings], key=lambda lot: lot.id)
-    return CityPlan(settings, locations, road_list, lots, eligible, driving_loops)
+    return CityPlan(settings, locations, road_list, paths, lots, eligible, driving_loops)
 
 
 def _place_lots(settings, locations, roads):

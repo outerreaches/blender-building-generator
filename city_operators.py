@@ -78,30 +78,53 @@ def build_frontage(lot, plan, collection):
     return obj
 
 
+def polyline_sample(points, distance):
+    """Point and unit tangent at an arc length along a polyline."""
+    for a, b in zip(points, points[1:]):
+        length = math.dist(a, b)
+        if length and distance <= length:
+            t = distance / length
+            return ((a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t),
+                    ((b[0] - a[0]) / length, (b[1] - a[1]) / length))
+        distance -= length
+    a, b = points[-2], points[-1]
+    length = math.dist(a, b) or 1
+    return (b[0], b[1]), ((b[0] - a[0]) / length, (b[1] - a[1]) / length)
+
+
 def build_markings(plan, collection):
     vertices, faces = [], []
-    nodes = junctions(plan)
-    for road in plan.roads:
-        if road.tier == 'LOCAL':
+    size = plan.settings.block_size
+    halves = junctions(plan)
+    for path in plan.paths:
+        if path['tier'] == 'LOCAL':
             continue
-        size = plan.settings.block_size
-        length = size - nodes[road.a] - nodes[road.b] - 4
-        rng = stream(plan.settings.seed, 'paint', road.a, road.b)
-        offsets = (0, -road.width / 4, road.width / 4) if road.width >= 12 else (0,)
-        for offset in offsets:
-            for index in range(int(length / 7)):
-                if rng.random() < .2:
-                    continue
-                start = nodes[road.a] + 2 + index * 7
-                points = [(start, offset - .06), (start + 3, offset - .06),
-                          (start + 3, offset + .06), (start, offset + .06)]
-                base = len(vertices)
-                for u, v in points:
-                    if road.a[1] == road.b[1]:
-                        vertices.append((road.a[0] * size + u, road.a[1] * size + v, .004))
-                    else:
-                        vertices.append((road.a[0] * size - v, road.a[1] * size + u, .004))
+        points = [tuple(point) for point in path['points']]
+        total = sum(math.dist(a, b) for a, b in zip(points, points[1:]))
+        offsets = (0, -path['width'] / 4, path['width'] / 4) if path['width'] >= 12 else (0,)
+        nodes = [(node[0] * size, node[1] * size) for node in path['nodes']]
+        rng = stream(plan.settings.seed, 'paint', path['id'])
+        start = 6
+        while start + 3 < total - 6:
+            middle, _ = polyline_sample(points, start + 1.5)
+            clearance = min(math.dist(middle, node) - halves[node] -
+                            plan.settings.sidewalk_width for node in path['nodes'])
+            if clearance < 4 or rng.random() < .2:
+                start += 7
+                continue
+            (x0, y0), t0 = polyline_sample(points, start)
+            (x1, y1), t1 = polyline_sample(points, start + 3)
+            normal0 = (-t0[1], t0[0])
+            normal1 = (-t1[1], t1[0])
+            base = len(vertices)
+            for offset in offsets:
+                for point, normal, side in (((x0, y0), normal0, -1), ((x1, y1), normal1, -1),
+                                            ((x1, y1), normal1, 1), ((x0, y0), normal0, 1)):
+                    vertices.append((point[0] + normal[0] * (offset + side * .06),
+                                     point[1] + normal[1] * (offset + side * .06), .004))
                 faces.append(tuple(range(base, base + 4)))
+                base += 4
+            start += 7
     if not faces:
         return None
     obj = mesh_object('City_LanePaint', vertices, faces, collection,
@@ -110,18 +133,75 @@ def build_markings(plan, collection):
     return obj
 
 
+def path_section(path, start, end):
+    """Polyline between two nodes, projected onto the route centreline."""
+    points = path['points']
+
+    def projection(node):
+        best_distance, best_length = math.inf, 0.0
+        offset = 0.0
+        for a, b in zip(points, points[1:]):
+            dx, dy = b[0] - a[0], b[1] - a[1]
+            length = math.hypot(dx, dy)
+            if length:
+                t = max(0.0, min(1.0, ((node[0] - a[0]) * dx +
+                                       (node[1] - a[1]) * dy) / (length * length)))
+                distance = math.dist(node, (a[0] + dx * t, a[1] + dy * t))
+                if distance < best_distance:
+                    best_distance, best_length = distance, offset + length * t
+            offset += length
+        return best_length
+
+    start_length, end_length = projection(start), projection(end)
+    low, high = sorted((start_length, end_length))
+    section = [polyline_sample(points, low)[0]]
+    offset = 0.0
+    for a, b in zip(points, points[1:]):
+        length = math.dist(a, b)
+        if low < offset + length < high:
+            section.append(b)
+        offset += length
+    section.append(polyline_sample(points, high)[0])
+    if end_length < start_length:
+        section.reverse()
+    return section
+
+
+def route_sections(plan):
+    sections = {}
+    for path in plan.paths:
+        nodes = [tuple(node) for node in path['nodes']]
+        for index in range(len(nodes) - 1):
+            sections[tuple(sorted((nodes[index], nodes[index + 1])))] = path
+    return sections
+
+
 def build_route_guides(plan, collection, origin):
     colors = ((.95, .18, .08, 1), (.08, .45, 1, 1), (.1, .85, .3, 1))
+    size = plan.settings.block_size
+    sections = route_sections(plan)
     for index, route in enumerate(plan.driving_loops):
+        nodes = [tuple(node) for node in route['nodes']]
+        points = []
+        for a, b in zip(nodes, nodes[1:]):
+            path = sections.get(tuple(sorted((a, b))))
+            if path is None:
+                continue
+            part = path_section(path, (a[0] * size, a[1] * size),
+                                (b[0] * size, b[1] * size))
+            if points and math.dist(points[-1], part[0]) < 1e-6:
+                part = part[1:]
+            points.extend(part)
+        if len(points) < 2:
+            points = [(node[0] * size, node[1] * size) for node in nodes]
         curve = bpy.data.curves.new(route['id'], 'CURVE')
         curve.dimensions = '3D'
         curve.bevel_depth = .18
         curve.bevel_resolution = 0
         spline = curve.splines.new('POLY')
-        spline.points.add(len(route['nodes']) - 1)
-        for point, node in zip(spline.points, route['nodes']):
-            point.co = (node[0] * plan.settings.block_size,
-                        node[1] * plan.settings.block_size, .25 + index * .25, 1)
+        spline.points.add(len(points) - 1)
+        for point, (x, y) in zip(spline.points, points):
+            point.co = (x, y, .25 + index * .25, 1)
         obj = bpy.data.objects.new(route['id'], curve)
         collection.objects.link(obj)
         obj.location = origin
@@ -160,6 +240,8 @@ class MESH_OT_generate_city(bpy.types.Operator):
     core_density: FloatProperty(name='Core Density', default=.95, min=0, max=1)
     outskirts_density: FloatProperty(name='Outskirts Density', default=.15, min=0, max=1)
     road_density: FloatProperty(name='Local Road Density', default=.55, min=0, max=1)
+    curve_radius: FloatProperty(name='Road Corner Radius', default=.6, min=0, max=1,
+                                description='Fraction of the tier corner radius; 0 keeps square turns')
     setback: FloatProperty(name='Minimum Road Setback (m)', default=2, min=1, max=8)
     sidewalk_width: FloatProperty(name='Sidewalk Width (m)', default=2, min=1.2, max=5)
     curb_height: FloatProperty(name='Curb Height (m)', default=.15, min=0, max=.25)
@@ -183,7 +265,7 @@ class MESH_OT_generate_city(bpy.types.Operator):
         layout = self.layout
         for title, names in (
             ('City Growth', ('seed', 'radius', 'block_size', 'primary_count', 'secondary_count', 'driving_loop_count')),
-            ('Density and Access', ('core_radius', 'core_density', 'outskirts_density', 'road_density', 'setback', 'sidewalk_width', 'curb_height')),
+            ('Density and Access', ('curve_radius', 'core_radius', 'core_density', 'outskirts_density', 'road_density', 'setback', 'sidewalk_width', 'curb_height')),
             ('Buildings', ('style', 'damage', 'max_buildings', 'detail')),
         ):
             group = layout.box()

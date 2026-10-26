@@ -131,6 +131,8 @@ Verified on Blender 5.1.2. The first script covers registration, original operat
 
 ## Next milestones and limits
 
+See [ROADMAP.md](ROADMAP.md) for the city dressing plan: interior budget, collapse conditions, common locations and street patterns, split into shippable phases.
+
 1. **Parcels and block structure:** parcels are still axis-aligned sub-cells of a square lattice, so block edges and building rows remain rectilinear even though the streets curve. Downtown already uses one tower per block and the suburbs set houses well back, but L/U/courtyard footprints, curved frontages and irregular block subdivision are the next step.
 2. **Vertical routes:** bridges, ramps, interchanges and terrain obstacles with slope/headroom constraints. Highway currently means a wide at-grade corridor; no bridges exist yet.
 3. **Asset variety:** the six archetypes cover massing and roofs, but civic landmarks (courthouse, station, hospital), authored facade kits, rooftop clutter and per-district palettes remain.

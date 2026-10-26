@@ -21,6 +21,7 @@ get small pitched-roof houses with yards. Districts also change parcel size,
 density, local street growth, corner radii and damage, not just the palette.
 
 See [the city guide](CITY_GENERATOR.md) for controls, architecture, verification,
+and [ROADMAP.md](ROADMAP.md) for the planned city dressing work,
 and prototype limits. Roads curve and junction shapes vary with the incident
 streets, but parcels and block edges are still axis-aligned; bridges, terrain
 routing, and highway interchanges are future milestones.

@@ -254,8 +254,10 @@ def build_street_mesh(plan):
 
 
 def build_ground_mesh(plan):
-    """Unpaved terrain: skip only cells the street surface fully covers."""
-    extent = plan.settings.radius * plan.settings.block_size + 20
+    """Unpaved terrain under and around the city, out to the wasteland edge."""
+    settings = plan.settings
+    extent = settings.radius * settings.block_size + 20
+    far = extent + settings.wasteland
     covered = Field(plan).covered_cells()
     per = int(round(GROUND_CELL / SAMPLE))
     vertices, faces, ids = [], [], {}
@@ -279,4 +281,14 @@ def build_ground_mesh(plan):
             if x1 <= x0 or y1 <= y0:
                 continue
             faces.append((vertex(x0, y0), vertex(x1, y0), vertex(x1, y1), vertex(x0, y1)))
+    if settings.wasteland > 0:
+        # Flat framing quads far outside the detailed city ground. Four faces are
+        # enough because nothing is cut out there; the game keeps the player in
+        # with invisible walls while the horizon stays open.
+        for corners in (
+                ((-far, -far), (-extent, -far), (-extent, far), (-far, far)),
+                ((extent, -far), (far, -far), (far, far), (extent, far)),
+                ((-extent, extent), (extent, extent), (extent, far), (-extent, far)),
+                ((-extent, -far), (extent, -far), (extent, -extent), (-extent, -extent))):
+            faces.append(tuple(vertex(x, y) for x, y in corners))
     return vertices, faces

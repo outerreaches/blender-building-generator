@@ -245,6 +245,8 @@ class MESH_OT_generate_city(bpy.types.Operator):
     setback: FloatProperty(name='Minimum Road Setback (m)', default=2, min=1, max=8)
     sidewalk_width: FloatProperty(name='Sidewalk Width (m)', default=2, min=1.2, max=5)
     curb_height: FloatProperty(name='Curb Height (m)', default=.15, min=0, max=.25)
+    wasteland: FloatProperty(name='Wasteland Extent (m)', default=6000, min=0, max=20000,
+                             description='Open ground beyond the city edge; the city itself stays inside the invisible walls')
     damage: FloatProperty(name='Building Damage', default=.35, min=0, max=1)
     max_buildings: IntProperty(name='Building Budget', default=600, min=1, max=10000)
     style: EnumProperty(name='Architecture', items=[('MIXED', 'Mixed Districts', 'Styles vary by primary location')] + STYLE_ITEMS)
@@ -265,7 +267,7 @@ class MESH_OT_generate_city(bpy.types.Operator):
         layout = self.layout
         for title, names in (
             ('City Growth', ('seed', 'radius', 'block_size', 'primary_count', 'secondary_count', 'driving_loop_count')),
-            ('Density and Access', ('curve_radius', 'core_radius', 'core_density', 'outskirts_density', 'road_density', 'setback', 'sidewalk_width', 'curb_height')),
+            ('Density and Access', ('curve_radius', 'core_radius', 'core_density', 'outskirts_density', 'road_density', 'setback', 'sidewalk_width', 'curb_height', 'wasteland')),
             ('Buildings', ('style', 'damage', 'max_buildings', 'detail')),
         ):
             group = layout.box()

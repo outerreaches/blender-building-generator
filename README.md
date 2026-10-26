@@ -1,6 +1,6 @@
 # Procedural Building Shell Generator
 
-## v0.6: City districts
+## v0.7: Metro scale and open wasteland
 
 New **Add → Mesh → Generate City** and **Generate Building by Style** commands
 add seeded city growth, six district archetypes, connected road tiers, driving
@@ -11,11 +11,14 @@ junctions are the union of the curved corridors with no overlapping faces.
 The existing single
 and bulk building commands remain available.
 
-Downtown gets tall glazed towers with rooftop plant; the midtown ring keeps old
-town, residential and brutalist blocks; industrial edges get wide low sheds; and
-the suburbs get small pitched-roof houses with yards. Districts also change
-parcel size, density, local street growth, corner radii and damage, not just the
-palette.
+The ground now extends far past the city as open wasteland (default 2000 m,
+adjustable), so the horizon reads as empty land while the game keeps the player
+inside invisible walls. The radius control scales the city from a district to a
+metro: the demo scene uses radius 18 (about 2 km across). Downtown gets tall
+glazed towers with rooftop plant; the midtown ring keeps old town, residential
+and brutalist blocks; industrial edges get wide low sheds; and denser suburbs
+get small pitched-roof houses with yards. Districts also change parcel size,
+density, local street growth, corner radii and damage, not just the palette.
 
 See [the city guide](CITY_GENERATOR.md) for controls, architecture, verification,
 and prototype limits. Roads curve and junction shapes vary with the incident

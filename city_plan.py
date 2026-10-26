@@ -28,7 +28,7 @@ STYLE_PROFILE = {
                       setback=.5, road=.85, curve=.8, damage=.8),
     'INDUSTRIAL': dict(floors=(1, 2), parcels=1, footprint=(.75, .95), density=.8,
                        setback=2, road=.6, curve=1.3, damage=1.2),
-    'SUBURBAN': dict(floors=(1, 2), parcels=2, footprint=(.45, .65), density=.55,
+    'SUBURBAN': dict(floors=(1, 2), parcels=2, footprint=(.45, .65), density=1.0,
                      setback=3, road=.5, curve=1.4, damage=.3),
 }
 STYLES = tuple(STYLE_PROFILE)
@@ -55,6 +55,7 @@ class CitySettings:
     road_density: float = 0.55
     curve_radius: float = 0.6  # Fraction of the tier bend radius; 0 keeps square corners.
     setback: float = 2.0
+    wasteland: float = 6000.0  # Metres of open ground beyond the city edge.
     sidewalk_width: float = 2.0
     curb_height: float = 0.15
     damage: float = 0.35
@@ -73,7 +74,7 @@ class CitySettings:
         for name, lo, hi in (("block_size", 48, 120), ("core_radius", .05, 1),
                              ("core_density", 0, 1), ("outskirts_density", 0, 1),
                              ("road_density", 0, 1), ("curve_radius", 0, 1),
-                             ("damage", 0, 1), ("setback", 1, 8),
+                             ("damage", 0, 1), ("setback", 1, 8), ("wasteland", 0, 20000),
                              ("sidewalk_width", 1.2, 5), ("curb_height", 0, .25)):
             value = getattr(self, name)
             if not math.isfinite(value) or not lo <= value <= hi:

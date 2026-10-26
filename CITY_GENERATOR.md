@@ -1,10 +1,10 @@
-# City generator — v0.9.2 failure-model ruins
+# City generator — v0.9.3 failure-model ruins
 
 This generator supplies the main static environment for a low-poly first-person Unity game. Existing signs, ruined cars and other props remain separate assets.
 
 ## Try it
 
-Install `output/procedural_building_shell_v0.9.2.zip` as a Blender add-on. Use **Shift+A → Mesh → Generate City** or **Generate Building by Style**. Start with **Layout Preview**; select **Detailed Shells** for windows, doors, floors, damage and optional interiors. Both modes use the same plan. Each run creates a new collection at the 3D cursor. Undo removes that run; failure rolls back its own objects.
+Install `output/procedural_building_shell_v0.9.3.zip` as a Blender add-on. Use **Shift+A → Mesh → Generate City** or **Generate Building by Style**. Start with **Layout Preview**; select **Detailed Shells** for windows, doors, floors, damage and optional interiors. Both modes use the same plan. Each run creates a new collection at the 3D cursor. Undo removes that run; failure rolls back its own objects.
 
 The original single-building and bulk operators remain available. Architecture uses six district archetypes built from rectangular shells:
 
@@ -94,9 +94,11 @@ failures run out through the roof rather than leaving floating holes. The
 perimeter usually outlives the floor plates, and the ground floor is the last
 part to go, acting as the plinth that holds the pile.
 
+The broken top is a ragged parapet at most **one storey above the break line**: the floors below keep their windows, and deeper missing walls come only from whole-chunk cuts. This avoids tall blank fins that do not read as floors.
+
 The condition set follows those stages:
 
-- **Weathered** — envelope and top slabs degraded; the facade keeps its height and detail, and tall weathered towers may also lose one bay.
+- **Weathered** — envelope and top slabs degraded; floors keep their windows up to the break, with a ragged parapet at most one storey above it. Tall weathered towers may also lose one bay.
 - **Semi-collapsed** — one or two vertical corner/bay slices missing through the top.
 - **Rubble-filled** — top floors pancaked; the interior is a solid fill behind the facade, opened by a ground-floor bay and upper cut.
 - **Partial-filled** — only the lower floors pancaked; upper floors are open.

@@ -1,6 +1,6 @@
 # Procedural Building Shell Generator
 
-## v0.9.2: Failure-model ruins
+## v0.9.3: Failure-model ruins
 
 New **Add → Mesh → Generate City** and **Generate Building by Style** commands
 add seeded city growth, six district archetypes, connected road tiers, driving

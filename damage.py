@@ -11,7 +11,8 @@ from . import util
 def generate_damage_profile(width: float, depth: float, total_height: float,
                             damage_amount: float, min_intact_height: float = 0,
                             pointiness: float = 0.5, resolution: float = 1.0,
-                            seed: int = None, max_height: float = None) -> dict:
+                            seed: int = None, max_height: float = None,
+                            floor_height: float = None) -> dict:
     """Fine irregular wall tops, median-smoothed and slope-clamped.
 
     The original high-frequency profile gives the facade detail that reads on
@@ -34,6 +35,9 @@ def generate_damage_profile(width: float, depth: float, total_height: float,
     base_loss = total_height * 0.55 * damage_amount
     variance = base_loss * pointiness * 1.5
     absolute_min = max(min_intact_height, total_height * 0.1)
+    low = max(min_intact_height, total_height - base_loss)
+    if max_height is not None:
+        low = min(low, max_height)
     collapsed = {name: util.random_bool(damage_amount * 0.4) for name, _ in walls}
     intensity = {name: (util.random_float(1.0, 1.25) if collapsed[name] else 1.0)
                  for name, _ in walls}
@@ -83,11 +87,27 @@ def generate_damage_profile(width: float, depth: float, total_height: float,
         raw[wall_a][index_a] = shared
         raw[wall_b][index_b] = shared
 
+    # Keep the broken top to a one-floor ragged parapet above the break line.
+    # The intact floors below keep their windows; deeper missing walls come from
+    # the whole-chunk cuts, not from tall blank fins.
+    break_base = None
+    if floor_height:
+        break_floor = max(1, int(low / floor_height))
+        break_base = break_floor * floor_height
+        ceiling = break_base + floor_height
+        if max_height is not None:
+            ceiling = min(ceiling, max_height)
+        if ceiling <= break_base:
+            ceiling = break_base + .05
+
     profiles = {}
     minimum = total_height
     for name, length in walls:
         heights = raw[name]
-        if max_height is not None:
+        if break_base is not None:
+            heights = [min(max(height, break_base + .05), ceiling)
+                       for height in heights]
+        elif max_height is not None:
             heights = [min(height, max_height) for height in heights]
         if min_intact_height:
             heights = [max(height, min_intact_height) for height in heights]
@@ -95,7 +115,11 @@ def generate_damage_profile(width: float, depth: float, total_height: float,
                      for index in range(len(heights))]
         profiles[name] = list(zip(positions, heights))
         minimum = min(minimum, min(heights))
-    profiles['min_height'] = max(min_intact_height, min(minimum, max_height or total_height))
+    if break_base is not None:
+        profiles['min_height'] = max(min_intact_height, break_base)
+    else:
+        profiles['min_height'] = max(min_intact_height,
+                                     min(minimum, max_height or total_height))
     profiles['intact_height'] = min_intact_height
     return profiles
 

@@ -1,5 +1,18 @@
 # Procedural Building Shell Generator
 
+## v0.4: Street-level city foundation
+
+New **Add → Mesh → Generate City** and **Generate Building by Style** commands
+add seeded city growth, four architecture recipes, connected road tiers, driving
+circuits, sidewalks, curb ramps, foundations, density controls, and preview/detailed output.
+**File → Export → Generated City for Unity (.fbx)** exports the static city meshes.
+The existing single
+and bulk building commands remain available.
+
+See [the city guide](CITY_GENERATOR.md) for controls, architecture, verification,
+and prototype limits. City roads currently use a flat orthogonal grid; game
+navigation, terrain routing, and highway interchanges are future milestones.
+
 A Blender 4.5+ addon for generating game-ready building shells with customizable windows, doors, and optional post-apocalyptic damage. Perfect for creating urban environments for games.
 
 <p align="center">

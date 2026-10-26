@@ -2,6 +2,7 @@
 # Operators for Procedural Building Shell Generator
 
 import bpy
+from .building_assets import add_material_slots
 from bpy.props import (
     FloatProperty, IntProperty, BoolProperty, EnumProperty
 )
@@ -621,44 +622,7 @@ class MESH_OT_procedural_building_shell(bpy.types.Operator):
         }
     
     def _create_material_slots(self, obj):
-        """Create material slots for different building parts."""
-        material_names = [
-            "Building_Walls",
-            "Building_Floor",
-            "Building_Roof",
-            "Building_WindowFrame",
-            "Building_DoorFrame",
-            "Building_InteriorWall",
-            "Building_Stairs",
-            "Building_Rubble",
-        ]
-        
-        for name in material_names:
-            # Check if material already exists
-            mat = bpy.data.materials.get(name)
-            if mat is None:
-                mat = bpy.data.materials.new(name=name)
-                mat.use_nodes = True
-                
-                # Set a default color based on type
-                if "Rubble" in name:
-                    mat.diffuse_color = (0.35, 0.32, 0.28, 1.0)  # Dark brown/gray debris
-                elif "InteriorWall" in name:
-                    mat.diffuse_color = (0.85, 0.82, 0.78, 1.0)  # Off-white
-                elif "Stairs" in name:
-                    mat.diffuse_color = (0.45, 0.4, 0.35, 1.0)  # Wood brown
-                elif "Walls" in name:
-                    mat.diffuse_color = (0.7, 0.65, 0.6, 1.0)  # Concrete
-                elif "Floor" in name:
-                    mat.diffuse_color = (0.5, 0.5, 0.5, 1.0)  # Gray
-                elif "Roof" in name:
-                    mat.diffuse_color = (0.3, 0.3, 0.35, 1.0)  # Dark gray
-                elif "Window" in name:
-                    mat.diffuse_color = (0.4, 0.35, 0.3, 1.0)  # Brown frame
-                elif "Door" in name:
-                    mat.diffuse_color = (0.35, 0.25, 0.2, 1.0)  # Dark brown
-            
-            obj.data.materials.append(mat)
+        add_material_slots(obj)
     
     def draw(self, context):
         layout = self.layout
@@ -2124,42 +2088,7 @@ class MESH_OT_procedural_building_bulk(bpy.types.Operator):
         }
     
     def _create_material_slots(self, obj):
-        """Create material slots for different building parts."""
-        material_names = [
-            "Building_Walls",
-            "Building_Floor",
-            "Building_Roof",
-            "Building_WindowFrame",
-            "Building_DoorFrame",
-            "Building_InteriorWall",
-            "Building_Stairs",
-            "Building_Rubble",
-        ]
-        
-        for name in material_names:
-            mat = bpy.data.materials.get(name)
-            if mat is None:
-                mat = bpy.data.materials.new(name=name)
-                mat.use_nodes = True
-                
-                if "Rubble" in name:
-                    mat.diffuse_color = (0.35, 0.32, 0.28, 1.0)  # Dark brown/gray debris
-                elif "InteriorWall" in name:
-                    mat.diffuse_color = (0.85, 0.82, 0.78, 1.0)
-                elif "Stairs" in name:
-                    mat.diffuse_color = (0.45, 0.4, 0.35, 1.0)
-                elif "Walls" in name:
-                    mat.diffuse_color = (0.7, 0.65, 0.6, 1.0)
-                elif "Floor" in name:
-                    mat.diffuse_color = (0.5, 0.5, 0.5, 1.0)
-                elif "Roof" in name:
-                    mat.diffuse_color = (0.3, 0.3, 0.35, 1.0)
-                elif "Window" in name:
-                    mat.diffuse_color = (0.4, 0.35, 0.3, 1.0)
-                elif "Door" in name:
-                    mat.diffuse_color = (0.35, 0.25, 0.2, 1.0)
-            
-            obj.data.materials.append(mat)
+        add_material_slots(obj)
     
     def draw(self, context):
         layout = self.layout

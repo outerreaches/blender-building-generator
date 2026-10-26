@@ -13,7 +13,26 @@ ROAD_WIDTHS = {"HIGHWAY": 20.0, "ARTERIAL": 12.0, "COLLECTOR": 8.0, "LOCAL": 6.0
 ROAD_RANK = {name: i for i, name in enumerate(ROAD_WIDTHS)}
 # Corner radius at a route bend, before the curve_radius multiplier and clamping.
 BEND_RADII = {"HIGHWAY": 26.0, "ARTERIAL": 18.0, "COLLECTOR": 12.0, "LOCAL": 8.0}
-STYLES = ("OLD_TOWN", "RESIDENTIAL", "INDUSTRIAL", "BRUTALIST")
+# District character. `parcels` divides a block per axis, `footprint` is the
+# fraction of the parcel the building may use (the rest is yard/plaza), `road`
+# scales local street growth, `curve` scales corner fillets and `damage`
+# scales the city damage setting.
+STYLE_PROFILE = {
+    'DOWNTOWN': dict(floors=(8, 24), parcels=1, footprint=(.72, .92), density=1.25,
+                     setback=2, road=1.2, curve=.5, damage=1.0),
+    'OLD_TOWN': dict(floors=(2, 4), parcels=2, footprint=(.8, 1.0), density=1.0,
+                     setback=0, road=1.0, curve=1.0, damage=1.0),
+    'RESIDENTIAL': dict(floors=(2, 5), parcels=2, footprint=(.8, 1.0), density=1.0,
+                        setback=0, road=1.0, curve=1.0, damage=.9),
+    'BRUTALIST': dict(floors=(4, 8), parcels=2, footprint=(.85, 1.0), density=.95,
+                      setback=.5, road=.85, curve=.8, damage=.8),
+    'INDUSTRIAL': dict(floors=(1, 2), parcels=1, footprint=(.75, .95), density=.8,
+                       setback=2, road=.6, curve=1.3, damage=1.2),
+    'SUBURBAN': dict(floors=(1, 2), parcels=2, footprint=(.45, .65), density=.55,
+                     setback=3, road=.5, curve=1.4, damage=.3),
+}
+STYLES = tuple(STYLE_PROFILE)
+MIDTOWN_STYLES = ('OLD_TOWN', 'RESIDENTIAL', 'BRUTALIST')
 
 
 def stream(seed, *keys):
@@ -27,7 +46,7 @@ class CitySettings:
     seed: int = 42
     radius: int = 6  # Half-width in blocks.
     block_size: float = 56.0
-    primary_count: int = 5
+    primary_count: int = 6
     secondary_count: int = 12
     driving_loop_count: int = 3
     core_radius: float = 0.3  # Fraction of city half-width.
@@ -120,6 +139,40 @@ def density_at(settings, x, y):
                          max(.001, 1 - settings.core_radius)))
     blend = blend * blend * (3 - 2 * blend)
     return settings.core_density * (1 - blend) + settings.outskirts_density * blend
+
+
+def district_at(settings, x, y, locations):
+    """Nearest centre/primary location in world metres; defines the district."""
+    size = settings.block_size
+    return min((loc for loc in locations if loc.role != 'SECONDARY'),
+               key=lambda loc: math.dist((x, y), (loc.node[0] * size, loc.node[1] * size)))
+
+
+def _assign_districts(primaries):
+    """Downtown core, midtown ring, industrial and suburban edges by sector."""
+    order = sorted(primaries, key=lambda loc: (math.hypot(*loc.node), loc.node))
+    edge_count = 2 if len(order) >= 5 else (1 if len(order) >= 3 else 0)
+    core_count = 1 if len(order) >= 3 else 0
+    assigned = {loc.id: 'DOWNTOWN' for loc in order[:core_count]}
+    remaining = order[core_count:]
+    # The outermost primary anchors the industrial edge; the location farthest
+    # from it (roughly the opposite side of the map) anchors the suburbs.
+    edge = []
+    if edge_count and remaining:
+        edge.append(remaining.pop())
+    if edge_count > 1 and remaining:
+        edge.append(max(remaining, key=lambda loc: (math.dist(loc.node, edge[0].node), loc.node)))
+        remaining.remove(edge[-1])
+    if edge:
+        edge = sorted(edge, key=lambda loc: (loc.node[0], loc.node[1]))
+        if len(edge) == 1:
+            assigned[edge[0].id] = 'INDUSTRIAL' if edge[0].node[0] < 0 else 'SUBURBAN'
+        else:
+            assigned[edge[0].id] = 'INDUSTRIAL'
+            assigned[edge[-1].id] = 'SUBURBAN'
+    for index, loc in enumerate(remaining):
+        assigned[loc.id] = MIDTOWN_STYLES[index % len(MIDTOWN_STYLES)]
+    return assigned
 
 
 def _route(start, target, roads, settings, blocked=frozenset()):
@@ -230,7 +283,7 @@ def _unit(a, b):
     return (dx / length, dy / length) if length else (0.0, 0.0)
 
 
-def _fillet_points(nodes, size, tier, curve_radius):
+def _fillet_points(nodes, size, tier, curve_radius, scales=None):
     """Flatten corner arcs into a metre-space centreline for one route.
 
     Tangent length is capped at 45% of each adjacent edge, so two bends on one
@@ -238,12 +291,15 @@ def _fillet_points(nodes, size, tier, curve_radius):
     interior corner becomes an arc of ``BEND_RADII[tier] * curve_radius``.
     """
     base = [(n[0] * size, n[1] * size) for n in nodes]
-    radius = BEND_RADII[tier] * curve_radius
-    if radius <= 0:
+    base_radius = BEND_RADII[tier] * curve_radius
+    if base_radius <= 0:
         points = list(base)
     else:
         points = [base[0]]
         for index in range(1, len(base) - 1):
+            radius = base_radius * (scales[index] if scales else 1.0)
+            if radius <= 0:
+                continue
             previous, corner, following = base[index - 1], base[index], base[index + 1]
             ux, uy = _unit(previous, corner)
             vx, vy = _unit(corner, following)
@@ -275,7 +331,7 @@ def _fillet_points(nodes, size, tier, curve_radius):
     return points
 
 
-def _build_paths(settings, roads):
+def _build_paths(settings, roads, locations):
     """Group lattice edges into continuous same-tier routes, then round corners."""
     adjacency = {}
     for (a, b), tier in roads.items():
@@ -316,7 +372,11 @@ def _build_paths(settings, roads):
                 break
             used.add(edge(nodes[0], option[0]))
             nodes.insert(0, option[0])
-        points = _fillet_points(nodes, settings.block_size, tier, settings.curve_radius)
+        scales = [STYLE_PROFILE[district_at(settings, node[0] * settings.block_size,
+                                            node[1] * settings.block_size,
+                                            locations).style]['curve'] for node in nodes]
+        points = _fillet_points(nodes, settings.block_size, tier, settings.curve_radius,
+                                scales)
         paths.append({'id': f'road_path_{len(paths)}', 'tier': tier,
                       'width': ROAD_WIDTHS[tier], 'nodes': nodes,
                       'points': points})
@@ -328,7 +388,7 @@ def generate_city(settings=CitySettings()):
     roads = {}
     center = (0, 0)
     locations = [Location("center", center, "CENTER",
-                          "OLD_TOWN" if settings.style == "MIXED" else settings.style)]
+                          "DOWNTOWN" if settings.style == "MIXED" else settings.style)]
     occupied = {center}
 
     def connect(a, b, tier):
@@ -351,9 +411,15 @@ def generate_city(settings=CitySettings()):
         node = max(candidates, key=lambda p: min(math.dist(p, q) for q in occupied))
         candidates.remove(node)
         occupied.add(node)
-        style = STYLES[index % len(STYLES)] if settings.style == "MIXED" else settings.style
-        locations.append(Location(f"primary_{index}", node, "PRIMARY", style))
+        locations.append(Location(f"primary_{index}", node, "PRIMARY", settings.style))
         connect(node, center, "ARTERIAL")
+
+    # MIXED gives each district a role: downtown core, midtown ring, and
+    # industrial/suburban edges on opposite sides of the map.
+    if settings.style == "MIXED":
+        assigned = _assign_districts(locations[1:])
+        locations = [Location(loc.id, loc.node, loc.role, assigned.get(loc.id, loc.style))
+                     for loc in locations]
 
     # Regional links extend to opposite map boundaries; these are at-grade prototypes.
     for end in ((-settings.radius, 0), (settings.radius, 0)):
@@ -385,7 +451,9 @@ def generate_city(settings=CitySettings()):
                 continue
             tested.add(key)
             x, y = ((node[i] + other[i]) * settings.block_size / 2 for i in range(2))
-            chance = settings.road_density * (.2 + .8 * density_at(settings, x, y))
+            profile = STYLE_PROFILE[district_at(settings, x, y, locations).style]
+            chance = (settings.road_density * profile['road'] *
+                      (.2 + .8 * density_at(settings, x, y)))
             if stream(settings.seed, "local", key).random() <= chance:
                 roads[key] = "LOCAL"
                 if other not in reached:
@@ -393,7 +461,7 @@ def generate_city(settings=CitySettings()):
                     frontier.append(other)
 
     road_list = [Road(a, b, tier) for (a, b), tier in sorted(roads.items())]
-    paths = _build_paths(settings, roads)
+    paths = _build_paths(settings, roads, locations)
     lots = _place_lots(settings, locations, roads)
     # Stable priority sampling avoids truncating one geographical side of the city.
     lots.sort(key=lambda lot: stream(settings.seed, "budget", lot.id).random())
@@ -416,44 +484,58 @@ def _place_lots(settings, locations, roads):
                        "N": edge((x, y + 1), (x + 1, y + 1)),
                        "W": edge((x, y), (x, y + 1)),
                        "E": edge((x + 1, y), (x + 1, y + 1))}
+            district = district_at(settings, (x + .5) * size, (y + .5) * size, locations)
+            profile = STYLE_PROFILE[district.style]
+            cells = profile['parcels']
             margins = {}
             for side, (a, b) in borders.items():
                 half = max(nodes.get(a, 0), nodes.get(b, 0))
-                margins[side] = half + settings.sidewalk_width + 2 + settings.setback + .5
-            for ix in range(2):
-                for iy in range(2):
+                # District setback adds the front yard, plaza or hardstanding.
+                margins[side] = (half + settings.sidewalk_width + 2 + settings.setback +
+                                 profile['setback'] + .5)
+            low_x = x * size + margins["W"]
+            high_x = (x + 1) * size - margins["E"]
+            low_y = y * size + margins["S"]
+            high_y = (y + 1) * size - margins["N"]
+            cell_x = (high_x - low_x - 2 * (cells - 1)) / cells
+            cell_y = (high_y - low_y - 2 * (cells - 1)) / cells
+            if min(cell_x, cell_y) < 5:
+                continue
+            for ix in range(cells):
+                for iy in range(cells):
                     ident = f"lot_{x}_{y}_{ix}_{iy}"
                     rng = stream(settings.seed, ident)
-                    sides = [s for s in (("W" if ix == 0 else "E"), ("S" if iy == 0 else "N"))
-                             if borders[s] in roads and roads[borders[s]] != "HIGHWAY"]
+                    sides = []
+                    for side, available in (("W", ix == 0), ("E", ix == cells - 1),
+                                            ("S", iy == 0), ("N", iy == cells - 1)):
+                        if available and borders[side] in roads and roads[borders[side]] != "HIGHWAY":
+                            sides.append(side)
                     if not sides:
                         continue
-                    cx, cy = (x + .25 + .5 * ix) * size, (y + .25 + .5 * iy) * size
-                    if rng.random() > density_at(settings, cx, cy):
+                    cell_low_x = low_x + ix * (cell_x + 2)
+                    cell_low_y = low_y + iy * (cell_y + 2)
+                    cell_high_x = cell_low_x + cell_x
+                    cell_high_y = cell_low_y + cell_y
+                    cx, cy = (cell_low_x + cell_high_x) / 2, (cell_low_y + cell_high_y) / 2
+                    density = min(1.0, density_at(settings, cx, cy) * profile['density'])
+                    if rng.random() > density:
                         continue
                     side = rng.choice(sides)
-                    # Disjoint sub-parcels guarantee no overlapping footprints.
-                    low_x = x * size + (margins["W"] if ix == 0 else size / 2 + 1)
-                    high_x = x * size + (size / 2 - 1 if ix == 0 else size - margins["E"])
-                    low_y = y * size + (margins["S"] if iy == 0 else size / 2 + 1)
-                    high_y = y * size + (size / 2 - 1 if iy == 0 else size - margins["N"])
-                    sx, sy = (high_x - low_x) * rng.uniform(.8, 1), (high_y - low_y) * rng.uniform(.8, 1)
+                    # The unused part of the parcel is the yard, plaza or hardstanding.
+                    sx = cell_x * rng.uniform(*profile['footprint'])
+                    sy = cell_y * rng.uniform(*profile['footprint'])
                     if min(sx, sy) < 5:
                         continue
-                    cx, cy = (low_x + high_x) / 2, (low_y + high_y) / 2
                     # Align the front wall with the street-facing parcel line.
                     if side == "W":
-                        cx = low_x + sx / 2
+                        cx = cell_low_x + sx / 2
                     elif side == "E":
-                        cx = high_x - sx / 2
+                        cx = cell_high_x - sx / 2
                     elif side == "S":
-                        cy = low_y + sy / 2
+                        cy = cell_low_y + sy / 2
                     else:
-                        cy = high_y - sy / 2
-                    district = min((loc for loc in locations if loc.role != "SECONDARY"),
-                                   key=lambda loc: math.dist((cx / size, cy / size), loc.node))
-                    floors = rng.randint(*{"OLD_TOWN": (2, 4), "RESIDENTIAL": (2, 5),
-                                          "INDUSTRIAL": (1, 2), "BRUTALIST": (4, 8)}[district.style])
+                        cy = cell_high_y - sy / 2
+                    floors = rng.randint(*profile['floors'])
                     width, depth = (sy, sx) if side in "WE" else (sx, sy)
                     rotation = {"S": 0, "E": math.pi / 2, "N": math.pi, "W": -math.pi / 2}[side]
                     lots.append(Lot(ident, (cx, cy), width, depth, rotation,

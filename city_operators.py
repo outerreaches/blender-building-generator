@@ -3,7 +3,7 @@
 import math
 import bpy
 from bpy.props import BoolProperty, EnumProperty, FloatProperty, IntProperty
-from .city_plan import VERSION, CitySettings, generate_city, stream
+from .city_plan import VERSION, CitySettings, STYLE_PROFILE, generate_city, stream
 from .streets import build_street_mesh, build_ground_mesh, junctions
 from .styles import STYLE_ITEMS, STYLE_COLORS, building_recipe
 from .building_assets import create_shell, material
@@ -232,7 +232,7 @@ class MESH_OT_generate_city(bpy.types.Operator):
     seed: IntProperty(name='City Seed', default=42)
     radius: IntProperty(name='Radius (Blocks)', default=6, min=2, max=25)
     block_size: FloatProperty(name='Block Size (m)', default=56, min=48, max=120)
-    primary_count: IntProperty(name='Primary Locations', default=5, min=1, max=16)
+    primary_count: IntProperty(name='Primary Locations', default=6, min=1, max=16)
     secondary_count: IntProperty(name='Secondary Locations', default=12, min=0, max=100)
     driving_loop_count: IntProperty(name='Driving Circuits', default=3, min=0, max=8,
                                    description='Target highway-to-district loops, each at least six blocks long')
@@ -323,8 +323,10 @@ class MESH_OT_generate_city(bpy.types.Operator):
             context.window_manager.progress_begin(0, max(1, len(plan.lots)))
             for index, lot in enumerate(plan.lots):
                 col = districts[lot.district]
-                params = building_recipe(lot.style, lot.width, lot.depth, lot.floors,
-                                         lot.seed, self.damage, self.interiors)
+                params = building_recipe(
+                    lot.style, lot.width, lot.depth, lot.floors, lot.seed,
+                    min(1.0, self.damage * STYLE_PROFILE[lot.style]['damage']),
+                    self.interiors)
                 if self.detail == 'SHELLS':
                     obj = create_shell(lot.id, params, col)
                     obj.data.materials[0] = material(f'City_{lot.style}', STYLE_COLORS[lot.style])

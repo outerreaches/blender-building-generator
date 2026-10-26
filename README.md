@@ -1,15 +1,21 @@
 # Procedural Building Shell Generator
 
-## v0.5: Curved roads
+## v0.6: City districts
 
 New **Add → Mesh → Generate City** and **Generate Building by Style** commands
-add seeded city growth, four architecture recipes, connected road tiers, driving
+add seeded city growth, six district archetypes, connected road tiers, driving
 circuits, sidewalks, curved corner fillets, foundations, density controls, and
 preview/detailed output. Streets are tessellated from a distance field, so
 junctions are the union of the curved corridors with no overlapping faces.
 **File → Export → Generated City for Unity (.fbx)** exports the static city meshes.
 The existing single
 and bulk building commands remain available.
+
+Downtown gets tall glazed towers with rooftop plant; the midtown ring keeps old
+town, residential and brutalist blocks; industrial edges get wide low sheds; and
+the suburbs get small pitched-roof houses with yards. Districts also change
+parcel size, density, local street growth, corner radii and damage, not just the
+palette.
 
 See [the city guide](CITY_GENERATOR.md) for controls, architecture, verification,
 and prototype limits. Roads curve and junction shapes vary with the incident

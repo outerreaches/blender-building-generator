@@ -1,6 +1,6 @@
 # Procedural Building Shell Generator
 
-## v0.8.1: Ruined districts and interior budget
+## v0.8.2: Ruined districts and interior budget
 
 New **Add → Mesh → Generate City** and **Generate Building by Style** commands
 add seeded city growth, six district archetypes, connected road tiers, driving
@@ -11,8 +11,8 @@ junctions are the union of the curved corridors with no overlapping faces.
 The existing single
 and bulk building commands remain available.
 
-Buildings now carry a condition: intact, weathered with large polygonal
-chunks missing, semi-collapsed with a missing corner and debris, rubble-filled,
+Buildings now carry a condition: intact, weathered with a detailed irregular
+top, semi-collapsed with whole upper chunks missing and debris, rubble-filled,
 lower-floors-only, roofless shell, or fully collapsed to a rubble mound. District weights decide how often each appears, and only a
 configurable fraction of enterable buildings get full interior layouts. The
 ground extends far past the city as open wasteland (default 12 km), so the

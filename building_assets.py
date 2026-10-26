@@ -44,25 +44,57 @@ def _face(bm, vertices, material):
     return face
 
 
-def cut_corner(bm, params):
-    """Remove the upper part of one footprint quadrant: a missing building corner.
-
-    Vertices above a seeded base height in the chosen quadrant are deleted, so
-    the remaining walls end in broken edges and the exposed slabs read as a
-    collapse. Deleting by vertex (rather than a single bisect plane) keeps the
-    lower storeys intact and produces the L-shaped plan a corner failure leaves.
-    """
-    rng = random.Random(params.get('seed', 0) ^ 0x9E3779B9)
-    width, depth = params['width'], params['depth']
-    total = params['floors'] * params['floor_height']
-    sign_x, sign_y = rng.choice((-1, 1)), rng.choice((-1, 1))
-    base = total * rng.uniform(.3, .5)
+def _delete_box(bm, x0, x1, y0, y1, z0, z1):
     doomed = [vertex for vertex in bm.verts
-              if vertex.co.z > base and
-              sign_x * (vertex.co.x - width / 2) > 0 and
-              sign_y * (vertex.co.y - depth / 2) > 0]
+              if x0 < vertex.co.x < x1 and y0 < vertex.co.y < y1
+              and z0 < vertex.co.z < z1]
     if doomed:
         bmesh.ops.delete(bm, geom=doomed, context='VERTS')
+
+
+def subtract_chunks(bm, params):
+    """Remove whole upper chunks from a standing shell.
+
+    A corner chunk plus, on taller buildings, a mid-height facade bite. The
+    removed volume takes walls, slabs and glass with it, leaving open polygonal
+    cuts; debris is added at the corner afterwards. The ground floors are never
+    touched, so the building stays enterable.
+    """
+    rng = random.Random(params.get('seed', 0) ^ 0xB10C)
+    width, depth = params['width'], params['depth']
+    floor_height = params['floor_height']
+    total = params['floors'] * floor_height
+    sign_x, sign_y = rng.choice((-1, 1)), rng.choice((-1, 1))
+
+    chunk_width = width * rng.uniform(.32, .52)
+    chunk_depth = depth * rng.uniform(.32, .52)
+    chunk_base = total * rng.uniform(.45, .68)
+    x0, x1 = ((0, chunk_width) if sign_x < 0 else (width - chunk_width, width))
+    y0, y1 = ((0, chunk_depth) if sign_y < 0 else (depth - chunk_depth, depth))
+    _delete_box(bm, x0, x1, y0, y1, chunk_base, total + 1)
+
+    if params['floors'] >= 4 and rng.random() < .65:
+        side = rng.randrange(4)
+        bite = rng.uniform(.25, .45)
+        height = floor_height * rng.uniform(1.5, 3.0)
+        top = total * rng.uniform(.55, .88)
+        base = max(floor_height * 1.2, top - height)
+        if side == 0:
+            bx0 = width * rng.uniform(.05, .25)
+            _delete_box(bm, bx0, bx0 + width * bite, 0, depth * rng.uniform(.18, .42),
+                        base, top)
+        elif side == 1:
+            bx0 = width * rng.uniform(.05, .25)
+            _delete_box(bm, bx0, bx0 + width * bite,
+                        depth * rng.uniform(.58, .82), depth, base, top)
+        elif side == 2:
+            by0 = depth * rng.uniform(.05, .25)
+            _delete_box(bm, 0, width * rng.uniform(.18, .42),
+                        by0, by0 + depth * bite, base, top)
+        else:
+            by0 = depth * rng.uniform(.05, .25)
+            _delete_box(bm, width * rng.uniform(.58, .82), width,
+                        by0, by0 + depth * bite, base, top)
     return sign_x, sign_y
 
 
@@ -186,13 +218,13 @@ def create_shell(name, params, collection):
     mesh = None
     try:
         bm = builder.build()
-        if params.get('corner_cut'):
-            add_collapse_debris(bm, params, *cut_corner(bm, params))
+        if params.get('chunk_cut'):
+            add_collapse_debris(bm, params, *subtract_chunks(bm, params))
         # Roof extras only belong on an intact top; a damaged shell already has
         # an irregular silhouette where the upper floors were cut away.
         total_height = params['floors'] * params['floor_height']
         cut = builder.params.get('damage_min_height')
-        if not params.get('corner_cut') and (cut is None or cut >= total_height - 1e-6):
+        if not params.get('chunk_cut') and (cut is None or cut >= total_height - 1e-6):
             if params.get('roof_kind') == 'GABLE':
                 add_gable_roof(bm, params, total_height)
             if params.get('roof_box'):

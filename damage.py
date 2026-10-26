@@ -12,12 +12,12 @@ def generate_damage_profile(width: float, depth: float, total_height: float,
                             damage_amount: float, min_intact_height: float = 0,
                             pointiness: float = 0.5, resolution: float = 1.0,
                             seed: int = None, max_height: float = None) -> dict:
-    """Flat wall plateaus with wide notches: large polygonal chunks missing.
+    """Fine irregular wall tops, median-smoothed and slope-clamped.
 
-    Each wall keeps a remaining top level and loses one or two contiguous runs
-    of chunks down to the damage line. Corner heights are the lower of the two
-    adjoining walls, so neighbouring strips meet without thin fins. Chunks are
-    at least ~4.5 m wide; the old per-0.8 m heights produced saw-tooth tops.
+    The original high-frequency profile gives the facade detail that reads on
+    tall buildings. Isolated needles are removed with a 3-tap median filter and
+    a per-sample step limit; adjoining walls share their corner heights so the
+    strips meet without slivers. ``max_height`` caps the remaining wall top.
     """
     if seed is not None:
         util.seed_random(seed)
@@ -30,58 +30,72 @@ def generate_damage_profile(width: float, depth: float, total_height: float,
         profiles['intact_height'] = min_intact_height
         return profiles
 
-    loss = total_height * 0.85 * damage_amount
-    low = max(min_intact_height, total_height - loss)
-    span = max(0.0, total_height - low)
-    if max_height is not None:
-        low = min(low, max_height)
+    # Keep most of the tower standing; whole-chunk cuts do the heavy damage.
+    base_loss = total_height * 0.55 * damage_amount
+    variance = base_loss * pointiness * 1.5
+    absolute_min = max(min_intact_height, total_height * 0.1)
+    collapsed = {name: util.random_bool(damage_amount * 0.4) for name, _ in walls}
+    intensity = {name: (util.random_float(1.0, 1.25) if collapsed[name] else 1.0)
+                 for name, _ in walls}
 
-    wall_specs = {
-        'front': (width, 'FL', 'FR'),
-        'right': (depth, 'FR', 'BR'),
-        'back': (width, 'BR', 'BL'),
-        'left': (depth, 'BL', 'FL'),
+    raw = {}
+    for name, length in walls:
+        samples = max(3, int(round(length / 1.2 * max(resolution, 0.25))))
+        offsets = [util.random_float(0, 1) for _ in range(samples + 1)]
+        heights = []
+        for offset in offsets:
+            loss = base_loss * intensity[name] + (offset - 0.5) * variance * intensity[name]
+            height = max(absolute_min, min(total_height, total_height - max(0.0, loss)))
+            heights.append(height)
+        if len(heights) >= 3:
+            median = heights[:]
+            for index in range(1, len(heights) - 1):
+                median[index] = sorted(heights[index - 1:index + 2])[1]
+            heights = median
+        if len(heights) >= 3:
+            averaged = heights[:]
+            for index in range(1, len(heights) - 1):
+                averaged[index] = (0.25 * heights[index - 1] +
+                                   0.5 * heights[index] +
+                                   0.25 * heights[index + 1])
+            heights = averaged
+        # No isolated peak: a point may not rise more than one step above both
+        # neighbours. Broad variation survives; needles do not.
+        max_step = max(1.5, total_height * 0.06)
+        for index in range(1, len(heights) - 1):
+            heights[index] = min(heights[index],
+                                 max(heights[index - 1], heights[index + 1]) + max_step)
+        heights = [min(total_height, max(absolute_min, height)) for height in heights]
+        raw[name] = heights
+
+    # Shared corners: average the adjoining ends so neither wall keeps a fin.
+    corner_pairs = {
+        'FL': (('front', 0), ('left', 0)),
+        'FR': (('front', -1), ('right', 0)),
+        'BR': (('right', -1), ('back', 0)),
+        'BL': (('back', -1), ('left', -1)),
     }
-    generated = {}
-    for name, (length, start_corner, end_corner) in wall_specs.items():
-        chunk_width = max(4.5, 4.5 / max(resolution, .2))
-        segments = max(2, min(5, int(round(length / chunk_width))))
-        top_level = low + span * util.random_float(.45, .8)
-        if max_height is not None:
-            top_level = min(top_level, max_height)
-        levels = [top_level] * segments
-        for _ in range(util.random_int(1, 2)):
-            start = util.random_int(0, max(0, segments - 2))
-            run = util.random_int(2, max(2, segments - 1))
-            for index in range(start, min(segments, start + run)):
-                levels[index] = low
-        generated[name] = [length, segments, levels, start_corner, end_corner]
-
-    # Shared corners use the lower adjoining level; steps below make that a
-    # clean notch rather than a ramp.
-    corner_level = {}
-    for length, segments, levels, start_corner, end_corner in generated.values():
-        for corner, level in ((start_corner, levels[0]), (end_corner, levels[-1])):
-            corner_level[corner] = min(corner_level.get(corner, level), level)
-    for length, segments, levels, start_corner, end_corner in generated.values():
-        levels[0] = corner_level[start_corner]
-        levels[-1] = corner_level[end_corner]
+    for corner, ((wall_a, index_a), (wall_b, index_b)) in corner_pairs.items():
+        shared = (raw[wall_a][index_a] + raw[wall_b][index_b]) / 2
+        neighbour_a = raw[wall_a][index_a + 1 if index_a == 0 else index_a - 1]
+        neighbour_b = raw[wall_b][index_b + 1 if index_b == 0 else index_b - 1]
+        shared = min(shared, neighbour_a + max_step, neighbour_b + max_step)
+        raw[wall_a][index_a] = shared
+        raw[wall_b][index_b] = shared
 
     profiles = {}
-    for name, (length, segments, levels, start_corner, end_corner) in generated.items():
-        positions = [0.0]
-        heights = [levels[0]]
-        for index in range(segments):
-            boundary = (index + 1) * length / segments
-            if index + 1 < segments and levels[index + 1] != levels[index]:
-                positions.extend((boundary - 0.7, boundary + 0.7))
-                heights.extend((levels[index], levels[index + 1]))
-            else:
-                positions.append(boundary)
-                heights.append(levels[index])
+    minimum = total_height
+    for name, length in walls:
+        heights = raw[name]
+        if max_height is not None:
+            heights = [min(height, max_height) for height in heights]
+        if min_intact_height:
+            heights = [max(height, min_intact_height) for height in heights]
+        positions = [index * length / (len(heights) - 1)
+                     for index in range(len(heights))]
         profiles[name] = list(zip(positions, heights))
-
-    profiles['min_height'] = low
+        minimum = min(minimum, min(heights))
+    profiles['min_height'] = max(min_intact_height, min(minimum, max_height or total_height))
     profiles['intact_height'] = min_intact_height
     return profiles
 

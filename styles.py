@@ -70,9 +70,10 @@ def building_recipe(style, width, depth, floors, seed, damage=0, interiors=False
         profile.update(interior_fill='FILLED', building_profile='NONE')
     elif condition == 'SHELL':
         profile.update(flat_roof=False, floor_slabs=True, exterior_rubble=True,
-                       building_profile='NONE', roof_parapet=False, roof_box=None)
+                       building_profile='NONE', roof_parapet=False, roof_box=None,
+                       chunk_cut=True)
     elif condition == 'SEMI_COLLAPSED':
-        profile.update(corner_cut=True, exterior_rubble=True, rubble_spread=2.5,
+        profile.update(chunk_cut=True, exterior_rubble=True, rubble_spread=2.5,
                        exterior_rubble_piles=6)
     elif condition == 'LOWER_FLOORS':
         profile.update(damage_amount=1.0, enable_damage=True,

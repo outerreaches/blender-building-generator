@@ -57,6 +57,29 @@ def _delete_box(bm, x0, x1, y0, y1, z0, z1):
         bmesh.ops.delete(bm, geom=doomed, context='FACES')
 
 
+def _cap_wall_box(bm, params, x0, x1, y0, y1, z):
+    """Close the wall thickness at a horizontal cut (chunk base or bay top)."""
+    width, depth = params['width'], params['depth']
+    thickness = params.get('wall_thickness', .25)
+    caps = []
+    if x0 <= .01:
+        caps.append((0, max(y0, 0), thickness, min(y1, depth)))
+    if x1 >= width - .01:
+        caps.append((width - thickness, max(y0, 0), width, min(y1, depth)))
+    if y0 <= .01:
+        caps.append((max(x0 + (thickness if x0 <= .01 else 0), 0), 0, x1, thickness))
+    if y1 >= depth - .01:
+        caps.append((max(x0 + (thickness if x0 <= .01 else 0), 0), depth - thickness,
+                      x1, depth))
+    for cap in caps:
+        cx0, cy0, cx1, cy1 = cap
+        if cx1 <= cx0 or cy1 <= cy0:
+            continue
+        vertices = [bm.verts.new((x, y, z))
+                    for x, y in ((cx0, cy0), (cx1, cy0), (cx1, cy1), (cx0, cy1))]
+        _face(bm, vertices, 0)
+
+
 def expose_fill_bay(bm, params):
     """Open a ground-floor bay so a solid or half-filled interior is visible."""
     rng = random.Random(params.get('seed', 0) ^ 0x3F11)
@@ -105,7 +128,7 @@ def subtract_chunks(bm, params):
                           rng.uniform(.45, .68))
     x0, x1 = ((0, chunk_width) if sign_x < 0 else (width - chunk_width, width))
     y0, y1 = ((0, chunk_depth) if sign_y < 0 else (depth - chunk_depth, depth))
-    _delete_box(bm, x0, x1, y0, y1, chunk_base, total + 1)
+    cuts = [(x0, x1, y0, y1, chunk_base)]
 
     if params['floors'] >= 4 and (aggressive or rng.random() < .6):
         # A second failure is a vertical bay removal that runs out through the
@@ -115,20 +138,21 @@ def subtract_chunks(bm, params):
         base = total * (rng.uniform(.18, .42) if aggressive else rng.uniform(.25, .5))
         if side == 0:
             bx0 = width * rng.uniform(.05, .3)
-            _delete_box(bm, bx0, bx0 + width * bite, 0,
-                        depth * rng.uniform(.2, .45), base, total + 1)
+            box = (bx0, bx0 + width * bite, 0, depth * rng.uniform(.2, .45))
         elif side == 1:
             bx0 = width * rng.uniform(.05, .3)
-            _delete_box(bm, bx0, bx0 + width * bite,
-                        depth * rng.uniform(.55, .8), depth, base, total + 1)
+            box = (bx0, bx0 + width * bite, depth * rng.uniform(.55, .8), depth)
         elif side == 2:
             by0 = depth * rng.uniform(.05, .3)
-            _delete_box(bm, 0, width * rng.uniform(.2, .45),
-                        by0, by0 + depth * bite, base, total + 1)
+            box = (0, width * rng.uniform(.2, .45), by0, by0 + depth * bite)
         else:
             by0 = depth * rng.uniform(.05, .3)
-            _delete_box(bm, width * rng.uniform(.55, .8), width,
-                        by0, by0 + depth * bite, base, total + 1)
+            box = (width * rng.uniform(.55, .8), width, by0, by0 + depth * bite)
+        cuts.append((box[0], box[1], box[2], box[3], base))
+    for xa, xb, ya, yb, z in cuts:
+        _delete_box(bm, xa, xb, ya, yb, z, total + 1)
+    for xa, xb, ya, yb, z in cuts:
+        _cap_wall_box(bm, params, xa, xb, ya, yb, z)
     return sign_x, sign_y
 
 

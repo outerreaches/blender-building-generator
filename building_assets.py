@@ -307,62 +307,265 @@ def _repair_wall_shell(bm, params):
                 break
 
 
-def _cap_floor_edges(bm):
-    """Add the missing side of floor-slab cut edges and stair openings.
+def _cap_vertical_wall_ends(bm, params):
+    """Cap vertical wall ends where a spike or cut left the thickness open."""
+    thickness = params.get('wall_thickness', .25)
+    edges = []
+    for edge in bm.edges:
+        if not edge.is_boundary:
+            continue
+        faces = edge.link_faces
+        if not faces or any(face.material_index in (3, 4) for face in faces):
+            continue
+        if any(face.material_index != 0 for face in faces):
+            continue
+        a, b = edge.verts
+        if abs(a.co.x - b.co.x) > 1e-4 or abs(a.co.y - b.co.y) > 1e-4:
+            continue
+        if abs(a.co.z - b.co.z) < .05:
+            continue
+        edges.append(edge)
+    used = set()
+    for index, edge in enumerate(edges):
+        if edge in used:
+            continue
+        a, b = edge.verts
+        za, zb = sorted((a.co.z, b.co.z))
+        for other in edges[index + 1:]:
+            if other in used:
+                continue
+            c, d = other.verts
+            zc, zd = sorted((c.co.z, d.co.z))
+            if abs(za - zc) > .02 or abs(zb - zd) > .02:
+                continue
+            dx = c.co.x - a.co.x
+            dy = c.co.y - a.co.y
+            if abs((dx * dx + dy * dy) ** .5 - thickness) > .03:
+                continue
+            if abs((d.co.x - b.co.x) - dx) > .03 or abs((d.co.y - b.co.y) - dy) > .03:
+                continue
+            low_a, high_a = (a, b) if a.co.z < b.co.z else (b, a)
+            low_c, high_c = (c, d) if c.co.z < d.co.z else (d, c)
+            try:
+                face = bm.faces.new((low_a, low_c, high_c, high_a))
+            except ValueError:
+                continue
+            face.material_index = 0
+            face.normal_update()
+            adjacent = [f.calc_center_median() for e in (edge, other)
+                        for f in e.link_faces if f.is_valid]
+            if adjacent:
+                centre = sum(adjacent, Vector()) / len(adjacent)
+                away = centre - face.calc_center_median()
+                if away.length > 1e-5 and face.normal.dot(away) > 0:
+                    face.normal_flip()
+            used.add(edge)
+            used.add(other)
+            break
 
-    Floor-slab boundaries show up as matching horizontal edges at the slab top
-    and bottom. Pairing them and adding the vertical quad closes the slab
-    thickness without sealing the opening.
-    """
-    boundary = [e for e in bm.edges if e.is_boundary]
-    by_key = {}
-    for edge in boundary:
+
+def _cap_floor_edges(bm):
+    """Add missing vertical sides where floor slabs were cut or opened."""
+    edges = []
+    for edge in bm.edges:
+        if not edge.is_boundary or len(edge.link_faces) != 1:
+            continue
+        if edge.link_faces[0].material_index != 1:
+            continue
         a, b = edge.verts
         if abs(a.co.z - b.co.z) > 1e-4:
             continue
-        face = edge.link_faces[0] if edge.link_faces else None
-        if face is None or face.material_index != 1:
+        edges.append(edge)
+    used = set()
+    for index, edge in enumerate(edges):
+        if edge in used:
             continue
-        key = tuple(sorted((round(a.co.x, 4), round(a.co.y, 4),
-                            round(b.co.x, 4), round(b.co.y, 4))))
-        by_key.setdefault(key, []).append(edge)
-    for edges in by_key.values():
-        if len(edges) < 2:
-            continue
-        # Pick two edges at different z (slab top and bottom).
-        first = edges[0]
-        second = None
-        for candidate in edges[1:]:
-            dz = abs(first.verts[0].co.z - candidate.verts[0].co.z)
-            if .03 <= dz <= .5:
-                second = candidate
+        a, b = edge.verts
+        for other in edges[index + 1:]:
+            if other in used:
+                continue
+            c, d = other.verts
+            dz = abs(a.co.z - c.co.z)
+            if not (.03 <= dz <= .5):
+                continue
+            for p, q in ((c, d), (d, c)):
+                if ((p.co - a.co).xy.length < .02 and
+                        (q.co - b.co).xy.length < .02):
+                    first, second = (edge, other) if a.co.z > c.co.z else (other, edge)
+                    top = first
+                    bottom = second
+                    t0, t1 = top.verts
+                    b0, b1 = bottom.verts
+                    if (t0.co - b0.co).xy.length < .02:
+                        quad = [t0, t1, b1, b0]
+                    else:
+                        quad = [t0, t1, b0, b1]
+                    try:
+                        face = bm.faces.new(quad)
+                    except ValueError:
+                        continue
+                    face.material_index = 1
+                    face.normal_update()
+                    source = top.link_faces[0] if top.link_faces else None
+                    if source is not None:
+                        edge_mid = (t0.co + t1.co) / 2
+                        centre = source.calc_center_median()
+                        radial = Vector((edge_mid.x - centre.x,
+                                         edge_mid.y - centre.y, 0.0))
+                        if radial.length > 1e-5 and face.normal.dot(radial) < 0:
+                            face.normal_flip()
+                    used.add(edge)
+                    used.add(other)
+                    break
+            if edge in used:
                 break
-        if second is None:
+
+
+def _cap_small_wall_loops(bm, params):
+    """Close small open wall loops left on spikes and wall-top gaps."""
+    seeds = []
+    for edge in bm.edges:
+        if not edge.is_boundary:
             continue
-        top, bottom = (first, second) if first.verts[0].co.z > second.verts[0].co.z else (second, first)
-        t0, t1 = top.verts
-        b0, b1 = bottom.verts
-        # Match the endpoints by their XY positions.
-        if (t0.co.x, t0.co.y) == (b0.co.x, b0.co.y):
-            quad = [t0, t1, b1, b0]
-        elif (t0.co.x, t0.co.y) == (b1.co.x, b1.co.y):
-            quad = [t0, t1, b0, b1]
-        else:
+        faces = edge.link_faces
+        if not faces or any(face.material_index in (3, 4) for face in faces):
             continue
-        try:
-            face = bm.faces.new(quad)
-        except ValueError:
+        if any(face.material_index != 0 for face in faces):
             continue
-        face.material_index = 1
-        face.normal_update()
-        # The slab side points away from the top face centre.
-        source = top.link_faces[0] if top.link_faces else None
-        if source is not None:
-            edge_mid = (top.verts[0].co + top.verts[1].co) / 2
-            source_center = source.calc_center_median()
-            radial = Vector((edge_mid.x - source_center.x,
-                             edge_mid.y - source_center.y, 0.0))
-            if radial.length > 1e-5 and face.normal.dot(radial) < 0:
+        seeds.append(edge)
+    remaining = set(seeds)
+    components = []
+    while remaining:
+        edge = remaining.pop()
+        stack = [edge]
+        component = [edge]
+        verts = set(edge.verts)
+        while stack:
+            current = stack.pop()
+            for vert in current.verts:
+                for candidate in vert.link_edges:
+                    if candidate in remaining:
+                        remaining.remove(candidate)
+                        stack.append(candidate)
+                        component.append(candidate)
+                        verts.add(candidate.verts[0])
+                        verts.add(candidate.verts[1])
+        components.append(component)
+    for component in components:
+        old_faces = set(bm.faces)
+        result = bmesh.ops.holes_fill(bm, edges=component, sides=0)
+        new_faces = [face for face in result.get('faces', []) if face.is_valid]
+        for face in new_faces:
+            xs = [v.co.x for v in face.verts]
+            ys = [v.co.y for v in face.verts]
+            zs = [v.co.z for v in face.verts]
+            if max(max(xs) - min(xs), max(ys) - min(ys),
+                   max(zs) - min(zs)) > 4.0:
+                bmesh.ops.delete(bm, geom=[face], context='FACES')
+                continue
+            face.material_index = 0
+            face.normal_update()
+            adjacent = [f.calc_center_median() for e in component
+                        for f in e.link_faces if f.is_valid]
+            if adjacent:
+                centre = sum(adjacent, Vector()) / len(adjacent)
+                away = centre - face.calc_center_median()
+                if away.length > 1e-5 and face.normal.dot(away) > 0:
+                    face.normal_flip()
+
+
+def _cap_horizontal_wall_loops(bm):
+    """Fill small horizontal wall loops such as spike tops and floor-line caps."""
+    groups = {}
+    for edge in bm.edges:
+        if not edge.is_boundary:
+            continue
+        faces = edge.link_faces
+        if not faces or any(face.material_index in (3, 4) for face in faces):
+            continue
+        if any(face.material_index != 0 for face in faces):
+            continue
+        a, b = edge.verts
+        if abs(a.co.z - b.co.z) > 1e-4:
+            continue
+        groups.setdefault(round(a.co.z, 2), []).append(edge)
+    for edges in groups.values():
+        result = bmesh.ops.holes_fill(bm, edges=edges, sides=0)
+        for face in result.get('faces', []):
+            if not face.is_valid:
+                continue
+            xs = [v.co.x for v in face.verts]
+            ys = [v.co.y for v in face.verts]
+            zs = [v.co.z for v in face.verts]
+            if max(max(xs) - min(xs), max(ys) - min(ys),
+                   max(zs) - min(zs)) > 3.0:
+                bmesh.ops.delete(bm, geom=[face], context='FACES')
+                continue
+            face.material_index = 0
+            face.normal_update()
+            if face.normal.z < 0:
+                face.normal_flip()
+
+
+def _cap_small_top_hulls(bm):
+    """Cap small open top boundaries, including damage spikes.
+
+    These loops can be open chains rather than closed holes, so a convex
+    fan over the boundary vertices is used instead of holes_fill.
+    """
+    groups = {}
+    for edge in bm.edges:
+        if not edge.is_boundary:
+            continue
+        faces = edge.link_faces
+        if not faces or any(face.material_index in (3, 4) for face in faces):
+            continue
+        if any(face.material_index != 0 for face in faces):
+            continue
+        a, b = edge.verts
+        if abs(a.co.z - b.co.z) > 1e-4:
+            continue
+        groups.setdefault(round(a.co.z, 2), []).append(edge)
+    for z, edges in groups.items():
+        remaining = set(edges)
+        while remaining:
+            edge = remaining.pop()
+            component = [edge]
+            verts = set(edge.verts)
+            stack = [edge]
+            while stack:
+                current = stack.pop()
+                for vert in current.verts:
+                    for candidate in vert.link_edges:
+                        if candidate in remaining:
+                            remaining.remove(candidate)
+                            stack.append(candidate)
+                            component.append(candidate)
+                            verts.add(candidate.verts[0])
+                            verts.add(candidate.verts[1])
+            unique = []
+            seen = set()
+            for vert in verts:
+                key = (round(vert.co.x, 3), round(vert.co.y, 3), round(vert.co.z, 3))
+                if key not in seen:
+                    seen.add(key)
+                    unique.append(vert)
+            if len(unique) < 3:
+                continue
+            xs = [v.co.x for v in unique]
+            ys = [v.co.y for v in unique]
+            if max(max(xs) - min(xs), max(ys) - min(ys)) > 3.0:
+                continue
+            cx = sum(xs) / len(xs)
+            cy = sum(ys) / len(ys)
+            unique.sort(key=lambda v: math.atan2(v.co.y - cy, v.co.x - cx))
+            try:
+                face = bm.faces.new(unique)
+            except ValueError:
+                continue
+            face.material_index = 0
+            face.normal_update()
+            if face.normal.z < 0:
                 face.normal_flip()
 
 
@@ -607,6 +810,10 @@ def create_shell(name, params, collection):
             vert.co.x -= params['width'] / 2
             vert.co.y -= params['depth'] / 2
         _repair_wall_shell(bm, params)
+        _cap_vertical_wall_ends(bm, params)
+        _cap_small_wall_loops(bm, params)
+        _cap_horizontal_wall_loops(bm)
+        _cap_small_top_hulls(bm)
         mesh = bpy.data.meshes.new(name)
         bm.to_mesh(mesh)
         obj = bpy.data.objects.new(name, mesh)

@@ -1,5 +1,12 @@
 # Procedural Building Shell Generator
 
+## v0.9.8: Floor plates and wall tops
+
+Non-interior lots now get solid floor plates instead of stair cutouts, while
+interior lots get capped floor-cutout sides. Wall cells are capped at every
+floor, vertical wall ends and spike tips are paired into caps, and small open
+top loops are closed.
+
 ## v0.9.7: Wall shell repair
 
 Damage and chunk cuts could remove a wall's inner facade while leaving the

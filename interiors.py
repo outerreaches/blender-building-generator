@@ -1646,6 +1646,10 @@ def get_floor_slab_opening(params: dict) -> dict:
     if not floor_slabs_enabled:
         return None
     
+    # Non-interior lots have no stairs to reach upper floors.
+    if profile_name in ('NONE', None):
+        return None
+    
     if floors <= 1:
         return None
     

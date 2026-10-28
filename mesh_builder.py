@@ -810,13 +810,10 @@ class BuildingShellBuilder:
                 current_window_width = window_width
                 current_window_count = windows_per_floor
             
-            # Add wall caps on top floor:
-            # - When damage cuts into floors: always cap (damage builds on top, no roof)
-            # - Otherwise: cap only if no roof
-            if damage_profile is not None and intact_floors < floors:
-                add_wall_caps = is_top_floor  # Always cap when damage present
-            else:
-                add_wall_caps = is_top_floor and not has_roof
+            # Cap the wall cell tops on every floor. Floor slabs are inset, so
+            # the wall thickness at each floor line is otherwise an open slot
+            # visible from inside.
+            add_wall_caps = True
             
             # Check if this is the top floor with patio (need reduced walls)
             is_patio_floor = (is_top_intact_floor and 
@@ -838,7 +835,7 @@ class BuildingShellBuilder:
                     window_spacing=window_spacing,
                     sill_height=current_sill_height,
                     windows_per_floor=current_window_count,
-                    add_top_caps=not has_roof,
+                    add_top_caps=True,
                 )
             else:
                 # Build normal walls for this floor

@@ -54,7 +54,7 @@ follows district logic, not a one-per-parcel random draw.
 - **Plazas** in the uptown/old-town area.
 - **Cul-de-sacs** in the suburban street layout.
 
-### R5 — Scale (done in v0.7)
+### R5 — Scale (done in v0.7; redone against the player capsule in v0.10)
 3–4× city extent, 6 km wasteland ground, denser suburbs.
 
 ## Design

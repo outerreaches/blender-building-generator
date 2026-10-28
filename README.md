@@ -1,5 +1,37 @@
 # Procedural Building Shell Generator
 
+## v0.10.0: Closed-solid geometry, polygonal collapses, real floor plans
+
+The geometry pipeline is rebuilt (see [ARCHITECTURE.md](ARCHITECTURE.md) for
+the audit and design). Every wall, slab, partition and stair is now built as a
+closed solid from its final outline, so damage of any shape cannot leave holes,
+and no two faces z-fight. Tested on every style and condition: no open edges,
+no flipped faces, no coplanar overlaps.
+
+- **Damage.** Collapses are polygonal craters with sloped, jagged sides: facades
+  break in diagonals and steps, floor slabs step back storey by storey along
+  broken edges, and walls, slabs, partitions and stairs agree on what is
+  missing. Exposed fills get jagged breaches; weathered facades get blast holes.
+  Windows the break passes through are filled so ruins read as masonry.
+- **Interiors.** Real floor plans: corridor apartment blocks with flats (hall,
+  bath, kitchen, living room, bedroom), town-house walk-ups, shops either side
+  of a stair hall, houses, office floors around a stair-and-lift core, warehouses
+  and bars. Every room is reachable through a door the player fits through;
+  partitions never land on a window.
+- **Scale.** Sized for the Ares player: 1.2 x 2.3 m interior doors (were
+  0.9 m and, upstairs, 1.95 m clear), 1.8 m corridors, 1.3 m stair flights,
+  0.25 m slabs, taller ground floors for shops and lobbies, believable window
+  heads, thick masonry for old town.
+- **Towers.** Lobby types (grand double-height lobby with desk and canopy,
+  retail podium, colonnade arcade, pilotis), curtain/ribbon/punched facades,
+  podium and setback tiers, plant floors, stepped crowns, masts and plant rooms.
+- **Operators.** The single-building operator adds Lobby, Facade, Taller Ground
+  Floor, Cornices, Tower Core and the Office/House profiles; Generate Building
+  by Style adds a Lobby override and up to 40 floors.
+- Gable houses get a ceiling under the roof (the sky no longer shows through).
+- Generation is pure Python up to the Blender adapter; `python3 -m unittest
+  discover -s tests` checks real buildings without Blender.
+
 ## v0.9.9: Skyscraper cores
 
 DOWNTOWN office towers now use a centered service core: two elevator shafts
@@ -81,9 +113,10 @@ A Blender 4.5+ addon for generating game-ready building shells with customizable
 - **Procedural Building Generation** - Create 1-10 floor urban building shells with a single click
 - **Customizable Windows & Doors** - Control window types, sizes, spacing, and door placement
 - **Storefront Mode** - Large display windows for ground floor retail spaces
-- **Interior Layouts** - Optional room divisions, stairs, and multiple building profiles (Storefront, Warehouse, Residential, Office, House, Bar)
-- **Damage System** - Post-apocalyptic weathering with irregular edges and wall collapses
-- **Facade Decoration** - Pilasters, roof parapets, and patios
+- **Interior Layouts** - Real floor plans with doors, stair cores and lifts (Storefront, Warehouse, Residential, Office, House, Bar)
+- **Damage System** - Ragged tops, polygonal collapses, breaches and blast holes, all watertight
+- **Lobbies and Massing** - Grand lobbies, retail podiums, arcades, pilotis, setbacks and crowns
+- **Facade Decoration** - Pilasters, cornices, canopies, roof parapets, and patios
 - **Bulk Generation** - Generate multiple buildings with randomized parameters
 - **Game-Ready Output** - Clean geometry with proper normals and UV seams
 - **Material Slots** - Pre-configured slots for easy texturing
@@ -136,6 +169,16 @@ Or manually copy the `procedural_building_shell` folder to your Blender addons d
 | **Floors** | 2 | Number of floors (1–4) |
 | **Floor Height** | 3.5m | Height of each floor |
 | **Wall Thickness** | 0.25m | Thickness of walls |
+| **Taller Ground Floor** | 0.0m | Extra height of the ground storey (shops, lobbies) |
+
+#### Ground Floor and Facade
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| **Lobby** | None | Grand Lobby, Retail Podium, Arcade (colonnade) or Pilotis |
+| **Facade** | Punched | Punched windows, Ribbon bands, Curtain Wall or Deep Grid |
+| **Cornices** | Off | Bands at the first-floor line and below the roof |
+| **Tower Core** | Off | Stair and lift core on every floor, even without an interior profile |
 
 #### Window Settings
 
@@ -180,17 +223,20 @@ Or manually copy the `procedural_building_shell` folder to your Blender addons d
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | **Enable Damage** | Off | Master toggle for damage effects |
-| **Face Deletion** | 0.0 | Probability of randomly deleting faces (0–0.5) |
-| **Wall Section Removal** | 0.0 | Intensity of removing vertical wall sections |
-| **Edge Noise** | 0.0m | Random vertex displacement for worn edges |
-| **Broken Floors** | 0.0 | Probability of floor/roof damage |
+| **Damage Amount** | 0.3 | How far the top breaks down; above ~0.5 whole storeys go |
+| **Pointiness** | 0.5 | Variation of the ragged wall tops |
+| **Resolution** | 1.0 | Samples per 1.2 m along the broken tops |
+
+Collapses (polygonal craters), breaches and blast holes come from the city and
+style conditions (Semi-collapsed, Rubble-filled, ...). The ground storey never
+breaks, so entrances stay usable.
 
 #### Generation Settings
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | **Random Seed** | 0 | Seed for deterministic generation |
-| **Auto Clean** | ✓ On | Remove doubles, dissolve unnecessary edges, recalculate normals |
+| **Auto Clean** | ✓ On | Merge coplanar faces into n-gons (the mesh stays watertight) |
 | **Create Material Slots** | ✓ On | Create material slots for easy texturing |
 
 ---
@@ -256,11 +302,9 @@ Replace these placeholder materials with your own textures for production use.
 - Uniform window sizes across all floors
 
 #### Abandoned/Damaged Building
-- Enable damage
-- Face Deletion: 0.05–0.15
-- Wall Section Removal: 0.3–0.5
-- Edge Noise: 0.05–0.1m
-- Broken Floors: 0.2–0.4
+- Enable damage, Damage Amount 0.3–0.6
+- For collapses use **Generate Building by Style** with the Semi-collapsed,
+  Shell or Rubble-filled condition
 
 #### City Block (Bulk Generation)
 - Use Bulk Generate with Grid layout
@@ -279,18 +323,17 @@ Replace these placeholder materials with your own textures for production use.
 - For bulk generation, Base Seed determines all building variations
 
 #### Geometry Quality
-- **Auto Clean** merges duplicate vertices and dissolves unnecessary edges
-- Walls have proper thickness (inner + outer faces)
-- Opening frames show wall depth at windows/doors
-- Walls get top caps when no roof is generated
+- Every wall, slab, partition and stair is a closed solid: no holes, no
+  flipped faces, no coplanar faces fighting (see ARCHITECTURE.md)
+- **Auto Clean** merges coplanar faces into n-gons
+- Opening reveals show the wall depth at windows/doors
 
 #### Performance
-- Single buildings generate in under 5ms
-- Bulk generation is efficient (no modifiers or booleans)
-- Geometry is optimized with edge dissolution
+- About 0.1 s for a mid-size building with interiors in Blender
+- No modifiers or booleans
 
 #### Game Engine Export
-- Geometry is clean and manifold (when Auto Clean is on)
+- Geometry is watertight (every edge shared by exactly two faces)
 - Normals face outward
 - Separate material slots for easy texturing
 - Export via **File → Export → FBX** (or your preferred format)
@@ -315,8 +358,7 @@ Replace these placeholder materials with your own textures for production use.
 - Check **Front Door Position** isn't pushing door off the wall
 
 #### Damage Looks Too Extreme
-- Lower all damage probabilities
-- Use subtle Edge Noise (0.02–0.05m) for weathering
+- Lower **Damage Amount**; below about 0.3 only the parapet breaks
 
 #### Materials Not Appearing
 - Ensure **Create Material Slots** is enabled

@@ -380,10 +380,52 @@ class MESH_OT_procedural_building_shell(bpy.types.Operator):
             ('NONE', "None", "No interior layout"),
             ('STOREFRONT', "Storefront", "Retail front with back room, residential above"),
             ('WAREHOUSE', "Warehouse", "Large open space with optional office"),
-            ('RESIDENTIAL', "Residential", "Apartments with hallway"),
-            ('BAR', "Bar/Entertainment", "Multiple connected rooms for entertainment"),
+            ('RESIDENTIAL', "Residential", "Apartments off a corridor (walk-up on small plates)"),
+            ('OFFICE', "Office", "Open plan around a stair and lift core"),
+            ('HOUSE', "House", "Hall, living room, kitchen; bedrooms upstairs"),
+            ('BAR', "Bar/Entertainment", "Bar room, kitchen, private rooms upstairs"),
         ],
         default='NONE'
+    )
+
+    # === Ground floor and facade ===
+    ground_floor_extra: FloatProperty(
+        name="Taller Ground Floor",
+        description="Extra height of the ground storey over the others (shops, lobbies)",
+        default=0.0, min=0.0, max=6.0, unit='LENGTH'
+    )
+    lobby: EnumProperty(
+        name="Lobby",
+        description="Ground-floor treatment for larger buildings",
+        items=[
+            ('NONE', "None", "Ground floor like the others"),
+            ('GRAND', "Grand Lobby", "Tall glazed lobby with a reception desk and canopy"),
+            ('RETAIL', "Retail Podium", "Shops either side of the entrance lobby"),
+            ('ARCADE', "Arcade", "Glazed ground floor set back behind a colonnade"),
+            ('PILOTIS', "Pilotis", "Glass box lobby under the floors above, on columns"),
+        ],
+        default='NONE'
+    )
+    facade_system: EnumProperty(
+        name="Facade",
+        description="How the upper floors are glazed",
+        items=[
+            ('PUNCHED', "Punched", "Individual windows in a solid wall"),
+            ('RIBBON', "Ribbon", "Continuous window bands with thin piers"),
+            ('CURTAIN', "Curtain Wall", "Near floor-to-ceiling glazing on a grid"),
+            ('GRID', "Deep Grid", "Square windows in a deep concrete grid"),
+        ],
+        default='PUNCHED'
+    )
+    cornice: BoolProperty(
+        name="Cornices",
+        description="Projecting bands at the first-floor line and below the roof",
+        default=False
+    )
+    tower_core: BoolProperty(
+        name="Tower Core",
+        description="Central stair and lift core on every floor, even without interiors",
+        default=False
     )
     
     exterior_stairs: BoolProperty(
@@ -603,6 +645,11 @@ class MESH_OT_procedural_building_shell(bpy.types.Operator):
             
             'building_profile': self.building_profile,
             'exterior_stairs': self.exterior_stairs,
+            'ground_floor_height': self.floor_height + self.ground_floor_extra,
+            'lobby': self.lobby,
+            'facade_system': self.facade_system,
+            'cornice': self.cornice,
+            'skyscraper': self.tower_core,
             
             'interior_fill': self.interior_fill,
             'fill_floors': self.fill_floors,
@@ -635,7 +682,16 @@ class MESH_OT_procedural_building_shell(bpy.types.Operator):
         col.prop(self, "depth")
         col.prop(self, "floors")
         col.prop(self, "floor_height")
+        col.prop(self, "ground_floor_extra")
         col.prop(self, "wall_thickness")
+
+        box = layout.box()
+        box.label(text="Ground Floor and Facade", icon='HOME')
+        col = box.column(align=True)
+        col.prop(self, "lobby")
+        col.prop(self, "facade_system")
+        col.prop(self, "cornice")
+        col.prop(self, "tower_core")
         
         # Window Settings
         box = layout.box()

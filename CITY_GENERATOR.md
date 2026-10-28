@@ -1,21 +1,21 @@
-# City generator — v0.9.3 failure-model ruins
+# City generator — v0.10 failure-model ruins
 
 This generator supplies the main static environment for a low-poly first-person Unity game. Existing signs, ruined cars and other props remain separate assets.
 
 ## Try it
 
-Install `output/procedural_building_shell_v0.9.3.zip` as a Blender add-on. Use **Shift+A → Mesh → Generate City** or **Generate Building by Style**. Start with **Layout Preview**; select **Detailed Shells** for windows, doors, floors, damage and optional interiors. Both modes use the same plan. Each run creates a new collection at the 3D cursor. Undo removes that run; failure rolls back its own objects.
+Install `output/procedural_building_shell_v0.10.0.zip` as a Blender add-on. Use **Shift+A → Mesh → Generate City** or **Generate Building by Style**. Start with **Layout Preview**; select **Detailed Shells** for windows, doors, floors, damage and optional interiors. Both modes use the same plan. Each run creates a new collection at the 3D cursor. Undo removes that run; failure rolls back its own objects.
 
 The original single-building and bulk operators remain available. Architecture uses six district archetypes built from rectangular shells:
 
 | District | City heights | Differences |
 | --- | --- | --- |
-| Downtown | 8–24 floors | Glazed offices, dense windows, storefront ground, rooftop plant box |
-| Old town | 2–4 floors | Narrow tall windows, storefronts, corner pilasters, parapets |
-| Residential | 2–5 floors | Regular apartment openings and modest parapets |
-| Brutalist | 4–8 floors | Thick walls, square openings, higher parapets |
-| Industrial | 1–2 floors, 5.5 m storeys | Wide low sheds, high windows, 3.2 m doors, no parapet |
-| Suburban | 1–2 floors, 3.0 m storeys | Small footprints, pitched gable roof, front yard |
+| Downtown | 8–24 floors, 3.9 m storeys | Lobby (grand 6.4–7.8 m, retail podium, arcade or pilotis), curtain/ribbon/punched facades, podium and setbacks from 10 floors, plant floors every 12, plant room, stepped crown or mast |
+| Old town | 2–4 floors, 3.6 m (shops 4.2 m) | 0.45 m masonry, tall windows, shopfronts, cornices and pilasters |
+| Residential | 2–5 floors, 3.2 m (ground 3.4 m) | Regular apartment windows, parapets, cornices on some |
+| Brutalist | 4–8 floors, 3.3 m | 0.45 m walls, deep grid of square windows, often lifted on pilotis |
+| Industrial | 1–2 floors, 5.5 m storeys | Wide low sheds, high window band, 3.6 × 4.0 m loading door, no parapet |
+| Suburban | 1–2 floors, 3.1 m storeys | Small footprints, gable roof over a ceiling, front yard |
 
 ## Controls
 
@@ -114,9 +114,9 @@ minimum damage and the geometry treatment:
 | --- | --- |
 | Intact | Clean shell; interior only when the lot is in the interior budget |
 | Weathered | Fine irregular collapsed top (median-smoothed, slope-limited, no needles); interiors only below the damage line |
-| Semi-collapsed | Whole upper chunks removed (corner block plus a vertical bay slice through the roof), exposed slabs and a rubble mound at the cut base |
-| Rubble-filled | Interior packed solid; a ground-floor bay and an upper cut expose the fill; no interior layout |
-| Partial-filled | Lower floors packed with rubble, upper floors open; exposed bay and upper cut; no interior layout |
+| Semi-collapsed | Polygonal craters: a corner collapse with a stepped lobe and, on taller buildings, a bay failure through the roof. Facades break in diagonals, slabs step back along broken edges, a rubble mound at the cut base |
+| Rubble-filled | Interior packed solid; a jagged ground-floor breach and a crater expose the fill; no interior layout |
+| Partial-filled | Lower floors packed with rubble, upper floors open; jagged breach and crater; no interior layout |
 | Lower floors only | Full damage so the cut lands in the first few storeys; enterable |
 | Shell | No roof; floor slabs exposed; one vertical slice removed with a corner mound; no interior |
 | Wall ring | Low perimeter walls (2–4 storeys), no roof or upper slabs, rubble mound inside |

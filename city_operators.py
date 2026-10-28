@@ -379,10 +379,14 @@ class MESH_OT_building_style(bpy.types.Operator):
     style: EnumProperty(name='Architecture', items=STYLE_ITEMS)
     width: FloatProperty(name='Width', default=14, min=6, max=100)
     depth: FloatProperty(name='Depth', default=12, min=6, max=100)
-    floors: IntProperty(name='Floors', default=3, min=1, max=10)
+    floors: IntProperty(name='Floors', default=3, min=1, max=40)
     seed: IntProperty(name='Seed', default=42)
     damage: FloatProperty(name='Damage', default=.35, min=0, max=1)
     interiors: BoolProperty(name='Interiors', default=False)
+    lobby: EnumProperty(name='Lobby', items=[('AUTO', 'Auto', 'Chosen by the style and seed'),
+                                             ('NONE', 'None', ''), ('GRAND', 'Grand Lobby', ''),
+                                             ('RETAIL', 'Retail Podium', ''), ('ARCADE', 'Arcade', ''),
+                                             ('PILOTIS', 'Pilotis', '')], default='AUTO')
     condition: EnumProperty(name='Condition',
                             items=[(condition, condition.replace('_', ' ').title(), '')
                                    for condition in CONDITIONS])
@@ -401,6 +405,11 @@ class MESH_OT_building_style(bpy.types.Operator):
             params = building_recipe(self.style, self.width, self.depth, self.floors,
                                      self.seed, self.damage, self.interiors,
                                      self.condition)
+            if self.lobby != 'AUTO' and self.condition != 'WALL_RING':
+                params['lobby'] = self.lobby
+                if self.lobby != 'NONE':
+                    params['ground_floor_height'] = max(params['ground_floor_height'],
+                                                        {'GRAND': 6.8}.get(self.lobby, 5.2))
             if self.condition == 'COLLAPSED':
                 obj = create_rubble(self.style, params, collection)
             else:

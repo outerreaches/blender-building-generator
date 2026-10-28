@@ -1,220 +1,374 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# Damage system for Procedural Building Shell Generator
-# Creates realistic top-down weathering with irregular top edges
+"""Damage model: one break field over the footprint.
 
-import bmesh
-from mathutils import Vector
+``BreakField`` answers "how high does the building still stand here?". The
+facade walls read it along their outer line (a profile), floor slabs contour
+it, and interior walls and stairs are clipped by it, so every element of a
+damaged building agrees on what is missing.
+
+Two kinds of damage combine by taking the minimum:
+
+* a ragged top (weathering): fine, slope-limited wall-top profiles over the
+  intact floors, with the storeys above the break line removed inside;
+* craters (collapse): polygonal plan regions with a jagged floor height and
+  sloped sides, so cuts through facades are trapezoids and V-notches with
+  broken edges rather than boxes.
+"""
 import math
-from . import util
+import random
+
+from . import geom2d
+
+PROFILE_STEP = .6        # Sampling step for damage profiles along a line.
+PROFILE_TOLERANCE = .12  # Douglas-Peucker tolerance; keeps edges crisp.
 
 
-def generate_damage_profile(width: float, depth: float, total_height: float,
-                            damage_amount: float, min_intact_height: float = 0,
-                            pointiness: float = 0.5, resolution: float = 1.0,
-                            seed: int = None, max_height: float = None,
-                            floor_height: float = None) -> dict:
-    """Fine irregular wall tops, median-smoothed and slope-clamped.
+def _hash_noise(seed, ix, iy):
+    value = (ix * 73856093) ^ (iy * 19349663) ^ (seed * 83492791)
+    value = ((value ^ (value >> 13)) * 1274126177) & 0xFFFFFFFF
+    return ((value ^ (value >> 16)) & 0xFFFF) / 0xFFFF * 2 - 1
 
-    The original high-frequency profile gives the facade detail that reads on
-    tall buildings. Isolated needles are removed with a 3-tap median filter and
-    a per-sample step limit; adjoining walls share their corner heights so the
-    strips meet without slivers. ``max_height`` caps the remaining wall top.
+
+def value_noise(seed, x, y, cell):
+    """Smooth lattice noise in [-1, 1]."""
+    gx, gy = x / cell, y / cell
+    ix, iy = math.floor(gx), math.floor(gy)
+    fx, fy = gx - ix, gy - iy
+    fx, fy = fx * fx * (3 - 2 * fx), fy * fy * (3 - 2 * fy)
+    a = _hash_noise(seed, ix, iy)
+    b = _hash_noise(seed, ix + 1, iy)
+    c = _hash_noise(seed, ix, iy + 1)
+    d = _hash_noise(seed, ix + 1, iy + 1)
+    return (a * (1 - fx) + b * fx) * (1 - fy) + (c * (1 - fx) + d * fx) * fy
+
+
+class Crater:
+    """A collapse: plan polygon, broken floor height and side slope."""
+
+    def __init__(self, polygon, floor, slope, roughness, seed, corner=None):
+        self.polygon = polygon
+        self.floor = floor
+        self.slope = slope
+        self.roughness = roughness
+        self.seed = seed
+        self.corner = corner
+        xs = [x for x, _ in polygon]
+        ys = [y for _, y in polygon]
+        self.bounds = (min(xs), min(ys), max(xs), max(ys))
+
+    def height(self, x, y):
+        distance = geom2d.distance_outside(x, y, self.polygon)
+        jag = value_noise(self.seed, x, y, 1.7) * self.roughness
+        return self.floor + self.slope * distance + jag
+
+    def reach(self, z):
+        """How far beyond the polygon the crater still cuts below ``z``."""
+        return max(0.0, (z - self.floor + self.roughness) / max(self.slope, .1))
+
+
+class BreakField:
+    """Standing height over a W x D footprint (x right, y back, z up).
+
+    ``level_zs`` are the floor surfaces of every storey, ground first.
+    ``min_height`` protects the ground floor (entrances stay usable).
     """
-    if seed is not None:
-        util.seed_random(seed)
 
-    walls = (('front', width), ('back', width), ('left', depth), ('right', depth))
-    if damage_amount <= 0 or total_height <= 0:
-        profiles = {name: [(0, total_height), (length, total_height)]
-                    for name, length in walls}
-        profiles['min_height'] = total_height
-        profiles['intact_height'] = min_intact_height
-        return profiles
+    def __init__(self, width, depth, top, level_zs, seed=0, damage=0.0,
+                 pointiness=.5, resolution=1.0, min_height=0.0, cap_height=None,
+                 chunk_cut=False):
+        self.width, self.depth, self.top = width, depth, top
+        self.level_zs = list(level_zs)
+        self.seed = seed
+        self.damage = damage
+        self.min_height = max(0.0, min_height)
+        self.ragged = None
+        self.break_base = None
+        self.craters = []
+        if damage > 0 and top > 0:
+            self._make_ragged_top(pointiness, resolution, cap_height)
+        if chunk_cut:
+            self._make_craters()
 
-    # Keep most of the tower standing; whole-chunk cuts do the heavy damage.
-    base_loss = total_height * 0.55 * damage_amount
-    variance = base_loss * pointiness * 1.5
-    absolute_min = max(min_intact_height, total_height * 0.1)
-    low = max(min_intact_height, total_height - base_loss)
-    if max_height is not None:
-        low = min(low, max_height)
-    collapsed = {name: util.random_bool(damage_amount * 0.4) for name, _ in walls}
-    intensity = {name: (util.random_float(1.0, 1.25) if collapsed[name] else 1.0)
-                 for name, _ in walls}
+    # -- queries ---------------------------------------------------------
+    @property
+    def damaged(self):
+        return self.ragged is not None or bool(self.craters)
 
-    raw = {}
-    for name, length in walls:
-        samples = max(3, int(round(length / 1.2 * max(resolution, 0.25))))
-        offsets = [util.random_float(0, 1) for _ in range(samples + 1)]
-        heights = []
-        for offset in offsets:
-            loss = base_loss * intensity[name] + (offset - 0.5) * variance * intensity[name]
-            height = max(absolute_min, min(total_height, total_height - max(0.0, loss)))
-            heights.append(height)
-        if len(heights) >= 3:
+    def interior_top(self, x, y):
+        if self.break_base is None:
+            return self.top
+        # Partitions of the broken storey stand as knee-to-chest-high stubs.
+        noise = value_noise(self.seed ^ 0x51AB, x, y, 3.5)
+        return self.break_base + 1.2 + .35 * noise
+
+    def height(self, x, y):
+        """Standing height for slabs, partitions and stairs."""
+        h = self.interior_top(x, y)
+        for crater in self.craters:
+            h = min(h, crater.height(x, y))
+        return max(self.min_height, h)
+
+    def wall_profile(self, origin, direction, ua, ub, side=None):
+        """Top of an exterior wall along its outer line, as [(u, z)].
+
+        ``side`` names the facade (front/right/back/left) whose ragged
+        profile applies; u is measured from that facade's start corner.
+        """
+        if side is not None and self.ragged is not None:
+            profile = self._clip(self.ragged[side], ua, ub)
+        else:
+            profile = [(ua, self.top), (ub, self.top)]
+        for crater in self.craters:
+            profile = geom2d.profile_min(
+                profile, self._crater_profile(crater, origin, direction, ua, ub))
+        return [(u, max(self.min_height, z)) for u, z in profile]
+
+    def line_profile(self, x0, y0, x1, y1, ceiling):
+        """Top of an interior element along a line, capped at ``ceiling``."""
+        length = math.hypot(x1 - x0, y1 - y0)
+        profile = [(0.0, ceiling), (length, ceiling)]
+        if not self.damaged or length < 1e-6:
+            return profile
+        if self.break_base is None and not any(
+                self._crater_near(crater, x0, y0, x1, y1, ceiling) for crater in self.craters):
+            return profile
+        dx, dy = (x1 - x0) / length, (y1 - y0) / length
+        count = max(2, int(math.ceil(length / PROFILE_STEP)) + 1)
+        samples = [(length * index / (count - 1),
+                    self.height(x0 + dx * length * index / (count - 1),
+                                y0 + dy * length * index / (count - 1)))
+                   for index in range(count)]
+        return geom2d.profile_min(profile, geom2d.simplify(samples, PROFILE_TOLERANCE))
+
+    def lowest(self, samples=12):
+        """Lowest standing height over the footprint (sampled)."""
+        if not self.damaged:
+            return self.top
+        best = self.top
+        for i in range(samples + 1):
+            for j in range(samples + 1):
+                best = min(best, self.height(self.width * i / samples, self.depth * j / samples))
+        if self.ragged is not None:
+            best = min(best, min(min(z for _, z in p) for p in self.ragged.values()))
+        return max(self.min_height, best)
+
+    def damaged_bounds(self, z, margin=1.0):
+        """Plan box where the field may drop below ``z``; None if intact there."""
+        if self.break_base is not None and z > self.break_base + .2:
+            return (0.0, 0.0, self.width, self.depth)
+        box = None
+        for crater in self.craters:
+            if crater.floor - crater.roughness > z:
+                continue
+            reach = crater.reach(z) + margin
+            x0, y0, x1, y1 = crater.bounds
+            candidate = (max(0.0, x0 - reach), max(0.0, y0 - reach),
+                         min(self.width, x1 + reach), min(self.depth, y1 + reach))
+            if candidate[0] >= candidate[2] or candidate[1] >= candidate[3]:
+                continue
+            box = candidate if box is None else (
+                min(box[0], candidate[0]), min(box[1], candidate[1]),
+                max(box[2], candidate[2]), max(box[3], candidate[3]))
+        return box
+
+    def _crater_near(self, crater, x0, y0, x1, y1, z):
+        if crater.floor - crater.roughness > z:
+            return False
+        reach = crater.reach(z) + .5
+        bx0, by0, bx1, by1 = crater.bounds
+        return not (max(x0, x1) < bx0 - reach or min(x0, x1) > bx1 + reach or
+                    max(y0, y1) < by0 - reach or min(y0, y1) > by1 + reach)
+
+    # -- ragged top ------------------------------------------------------
+    def _make_ragged_top(self, pointiness, resolution, cap_height):
+        """Fine irregular wall tops, median-smoothed and slope-clamped.
+
+        Same character as the v0.9 profiles: a one-storey ragged parapet above
+        the break line, adjoining walls sharing their corner heights.
+        """
+        rng = random.Random((self.seed * 2654435761) ^ 0xDA7A6E)
+        total = self.top
+        damage = self.damage
+        base_loss = total * .55 * damage
+        variance = base_loss * pointiness * 1.5
+        absolute_min = max(self.min_height, total * .1)
+        low = max(self.min_height, total - base_loss)
+        if cap_height is not None:
+            low = min(low, cap_height)
+        walls = (('front', self.width), ('right', self.depth),
+                 ('back', self.width), ('left', self.depth))
+        intensity = {name: (rng.uniform(1.0, 1.25) if rng.random() < damage * .4 else 1.0)
+                     for name, _ in walls}
+        max_step = max(1.5, total * .06)
+        raw = {}
+        for name, length in walls:
+            samples = max(3, int(round(length / 1.2 * max(resolution, .25))))
+            heights = []
+            for _ in range(samples + 1):
+                loss = base_loss * intensity[name] + (rng.random() - .5) * variance * intensity[name]
+                heights.append(max(absolute_min, min(total, total - max(0.0, loss))))
             median = heights[:]
             for index in range(1, len(heights) - 1):
                 median[index] = sorted(heights[index - 1:index + 2])[1]
-            heights = median
-        if len(heights) >= 3:
-            averaged = heights[:]
-            for index in range(1, len(heights) - 1):
-                averaged[index] = (0.25 * heights[index - 1] +
-                                   0.5 * heights[index] +
-                                   0.25 * heights[index + 1])
+            averaged = median[:]
+            for index in range(1, len(median) - 1):
+                averaged[index] = .25 * median[index - 1] + .5 * median[index] + .25 * median[index + 1]
             heights = averaged
-        # No isolated peak: a point may not rise more than one step above both
-        # neighbours. Broad variation survives; needles do not.
-        max_step = max(1.5, total_height * 0.06)
-        for index in range(1, len(heights) - 1):
-            heights[index] = min(heights[index],
-                                 max(heights[index - 1], heights[index + 1]) + max_step)
-        heights = [min(total_height, max(absolute_min, height)) for height in heights]
-        raw[name] = heights
+            for index in range(1, len(heights) - 1):
+                heights[index] = min(heights[index],
+                                     max(heights[index - 1], heights[index + 1]) + max_step)
+            raw[name] = heights
+        # Facades run CCW (front, right, back, left); each end meets the next start.
+        order = [name for name, _ in walls]
+        for index, name in enumerate(order):
+            following = order[(index + 1) % 4]
+            shared = (raw[name][-1] + raw[following][0]) / 2
+            shared = min(shared, raw[name][-2] + max_step, raw[following][1] + max_step)
+            raw[name][-1] = raw[following][0] = shared
+        # One ragged storey above the break line; intact floors keep windows.
+        candidates = [z for z in self.level_zs if 0 < z <= low + 1e-6]
+        upper = [z for z in self.level_zs if z > 0]
+        break_base = max(candidates) if candidates else (min(upper) if upper else low)
+        ceiling = min([z for z in self.level_zs if z > break_base + 1e-6] + [total])
+        if cap_height is not None:
+            ceiling = min(ceiling, max(cap_height, break_base + .4))
+        ceiling = max(ceiling, break_base + .4)
+        self.break_base = break_base
+        self.ragged = {}
+        for name, length in walls:
+            heights = [min(max(h, break_base + .35), ceiling) for h in raw[name]]
+            count = len(heights)
+            self.ragged[name] = [(length * index / (count - 1), max(self.min_height, h))
+                                 for index, h in enumerate(heights)]
 
-    # Shared corners: average the adjoining ends so neither wall keeps a fin.
-    corner_pairs = {
-        'FL': (('front', 0), ('left', 0)),
-        'FR': (('front', -1), ('right', 0)),
-        'BR': (('right', -1), ('back', 0)),
-        'BL': (('back', -1), ('left', -1)),
-    }
-    for corner, ((wall_a, index_a), (wall_b, index_b)) in corner_pairs.items():
-        shared = (raw[wall_a][index_a] + raw[wall_b][index_b]) / 2
-        neighbour_a = raw[wall_a][index_a + 1 if index_a == 0 else index_a - 1]
-        neighbour_b = raw[wall_b][index_b + 1 if index_b == 0 else index_b - 1]
-        shared = min(shared, neighbour_a + max_step, neighbour_b + max_step)
-        raw[wall_a][index_a] = shared
-        raw[wall_b][index_b] = shared
+    @staticmethod
+    def _clip(profile, ua, ub):
+        inner = [(u, z) for u, z in profile if ua < u < ub]
+        return geom2d.clean_profile([(ua, geom2d.interp(profile, ua))] + inner +
+                                    [(ub, geom2d.interp(profile, ub))])
 
-    # Keep the broken top to a one-floor ragged parapet above the break line.
-    # The intact floors below keep their windows; deeper missing walls come from
-    # the whole-chunk cuts, not from tall blank fins.
-    break_base = None
-    if floor_height:
-        break_floor = max(1, int(low / floor_height))
-        break_base = break_floor * floor_height
-        ceiling = break_base + floor_height
-        if max_height is not None:
-            ceiling = min(ceiling, max_height)
-        if ceiling <= break_base:
-            ceiling = break_base + .05
+    # -- craters ---------------------------------------------------------
+    def _make_craters(self):
+        """Corner collapse plus, on taller buildings, a facade bay failure.
 
-    profiles = {}
-    minimum = total_height
-    for name, length in walls:
-        heights = raw[name]
-        if break_base is not None:
-            heights = [min(max(height, break_base + .05), ceiling)
-                       for height in heights]
-        elif max_height is not None:
-            heights = [min(height, max_height) for height in heights]
-        if min_intact_height:
-            heights = [max(height, min_intact_height) for height in heights]
-        positions = [index * length / (len(heights) - 1)
-                     for index in range(len(heights))]
-        profiles[name] = list(zip(positions, heights))
-        minimum = min(minimum, min(heights))
-    if break_base is not None:
-        profiles['min_height'] = max(min_intact_height, break_base)
-    else:
-        profiles['min_height'] = max(min_intact_height,
-                                     min(minimum, max_height or total_height))
-    profiles['intact_height'] = min_intact_height
-    return profiles
+        Keeps the v0.9 chunk sizes and heights, but each cut is a jagged
+        polygon in plan with sloped sides, so facades break in diagonals and
+        steps instead of rectangles.
+        """
+        rng = random.Random((self.seed * 40503) ^ 0xB10C)
+        width, depth, total = self.width, self.depth, self.top
+        floors = len(self.level_zs)
+        aggressive = floors >= 8
+        very_tall = floors >= 12
+        sign_x, sign_y = rng.choice((-1, 1)), rng.choice((-1, 1))
+        span = (.45, .7) if very_tall else (.38, .6) if aggressive else (.32, .52)
+        chunk_w = width * rng.uniform(*span)
+        chunk_d = depth * rng.uniform(*span)
+        fraction = (.28, .5) if very_tall else (.3, .52) if aggressive else (.45, .68)
+        floor = max(self.min_height, total * rng.uniform(*fraction))
+        cx = 0.0 if sign_x < 0 else width
+        cy = 0.0 if sign_y < 0 else depth
+        polygon = self._corner_polygon(rng, cx, cy, sign_x, sign_y, chunk_w, chunk_d)
+        rise = max(1.0, total - floor)
+        slope = max(1.3, min(6.0, rise / (max(chunk_w, chunk_d) * rng.uniform(.45, .8))))
+        self.craters.append(Crater(polygon, floor, slope, rng.uniform(.25, .55),
+                                   self.seed ^ 0x3A11, corner=(sign_x, sign_y)))
+        # A step in the break: a smaller, higher lobe beside the corner.
+        lobe_floor = floor + rng.uniform(.25, .6) * min(rise, 12.0)
+        if lobe_floor < total - 1.0:
+            if rng.random() < .5:
+                lobe = self._blob(rng, cx - sign_x * chunk_w * rng.uniform(.7, 1.0), cy,
+                                  chunk_w * rng.uniform(.22, .36),
+                                  min(depth * .35, chunk_d * rng.uniform(.4, .7)))
+            else:
+                lobe = self._blob(rng, cx, cy - sign_y * chunk_d * rng.uniform(.7, 1.0),
+                                  min(width * .35, chunk_w * rng.uniform(.4, .7)),
+                                  chunk_d * rng.uniform(.22, .36))
+            self.craters.append(Crater(lobe, lobe_floor, slope * rng.uniform(.8, 1.3),
+                                       rng.uniform(.2, .45), self.seed ^ 0x77E5))
+        if floors >= 4 and (aggressive or rng.random() < .6):
+            # A vertical bay failure that runs out through the top: lost
+            # slices take their support above with them.
+            side = rng.randrange(4)
+            bite = rng.uniform(.3, .5) if aggressive else rng.uniform(.25, .4)
+            base = max(self.min_height, total * (rng.uniform(.18, .42) if aggressive
+                                                 else rng.uniform(.25, .5)))
+            if side < 2:
+                polygon = self._blob(rng, width * rng.uniform(.25, .75), 0.0 if side == 0 else depth,
+                                     width * bite / 2, depth * rng.uniform(.18, .35))
+            else:
+                polygon = self._blob(rng, 0.0 if side == 2 else width, depth * rng.uniform(.25, .75),
+                                     width * rng.uniform(.18, .35), depth * bite / 2)
+            rise = max(1.0, total - base)
+            slope = max(2.0, min(8.0, rise / (max(width, depth) * bite * .6)))
+            self.craters.append(Crater(polygon, base, slope, rng.uniform(.25, .5),
+                                       self.seed ^ 0x9E37))
+
+    @staticmethod
+    def _corner_polygon(rng, cx, cy, sign_x, sign_y, chunk_w, chunk_d):
+        """Irregular polygon around a building corner, reaching past the facades."""
+        out = 1.5
+        ix, iy = -sign_x, -sign_y  # Inward directions.
+        a = chunk_w * rng.uniform(.35, .6)
+        b = chunk_d * rng.uniform(.35, .6)
+        points = [
+            (cx - ix * out, cy - iy * out),
+            (cx + ix * a, cy - iy * out),
+            (cx + ix * a * rng.uniform(.75, 1.05), cy + iy * b * rng.uniform(.25, .5)),
+            (cx + ix * a * rng.uniform(.4, .7), cy + iy * b * rng.uniform(.6, .95)),
+            (cx + ix * a * rng.uniform(.15, .35), cy + iy * b),
+            (cx - ix * out, cy + iy * b),
+        ]
+        return _ccw(points)
+
+    @staticmethod
+    def _blob(rng, cx, cy, rx, ry, count=7):
+        """Jagged convex-ish polygon centred on (cx, cy)."""
+        phase = rng.uniform(0, math.tau)
+        points = []
+        for index in range(count):
+            angle = phase + math.tau * index / count
+            scale = rng.uniform(.75, 1.15)
+            points.append((cx + math.cos(angle) * rx * scale, cy + math.sin(angle) * ry * scale))
+        return _ccw(points)
+
+    def _crater_profile(self, crater, origin, direction, ua, ub):
+        ox, oy = origin
+        dx, dy = direction
+        x0, y0 = ox + dx * ua, oy + dy * ua
+        x1, y1 = ox + dx * ub, oy + dy * ub
+        if not self._crater_near(crater, x0, y0, x1, y1, self.top):
+            return [(ua, self.top), (ub, self.top)]
+        length = ub - ua
+        count = max(2, int(math.ceil(length / PROFILE_STEP)) + 1)
+        us = {ua, ub}
+        us.update(ua + length * index / (count - 1) for index in range(count))
+        us.update(ua + length * t for t in geom2d.segment_crossings(x0, y0, x1, y1,
+                                                                    crater.polygon))
+        samples = [(u, min(self.top, crater.height(ox + dx * u, oy + dy * u)))
+                   for u in sorted(us)]
+        return geom2d.simplify(samples, PROFILE_TOLERANCE)
 
 
-def _face_oriented(bm, vertices, direction, material):
-    """Create a face whose normal points along ``direction`` (if possible)."""
-    if len(vertices) < 3:
-        return
-    edge_a = vertices[1].co - vertices[0].co
-    edge_b = vertices[2].co - vertices[0].co
-    normal = edge_a.cross(edge_b)
-    if normal.dot(direction) < 0:
-        vertices = list(reversed(vertices))
-    try:
-        face = bm.faces.new(vertices)
-        face.material_index = material
-    except ValueError:
-        pass
+def breach_outline(rng, u0, u1, z0, z1, grounded=True):
+    """Jagged x-monotone (bottom, top) outline of a blown-out wall opening."""
+    count = max(3, int((u1 - u0) / .7))
+    bottom, top = [], []
+    for index in range(count + 1):
+        t = index / count
+        u = u0 + (u1 - u0) * t
+        arch = math.sin(math.pi * t)
+        inner = 0 < index < count
+        height = (z1 - z0) * (.2 + .8 * arch) * (rng.uniform(.75, 1.0) if inner else 1.0)
+        base = z0 if grounded else z0 + (z1 - z0) * .3 * (1 - arch) * (rng.uniform(.3, 1.0) if inner else 1.0)
+        bottom.append((u, base))
+        top.append((u, max(base + .25, z0 + height)))
+    return bottom, top
 
 
-def get_height_at_position(profile: list, position: float) -> float:
-    """Interpolate the height at a given position along the wall."""
-    if not profile:
-        return 0
-    
-    if position <= profile[0][0]:
-        return profile[0][1]
-    if position >= profile[-1][0]:
-        return profile[-1][1]
-    
-    for i in range(len(profile) - 1):
-        pos1, h1 = profile[i]
-        pos2, h2 = profile[i + 1]
-        
-        if pos1 <= position <= pos2:
-            if abs(pos2 - pos1) < 0.001:
-                return h1
-            t = (position - pos1) / (pos2 - pos1)
-            return h1 + t * (h2 - h1)
-    
-    return profile[-1][1]
-
-
-def get_intact_floor_count(min_height: float, floor_height: float) -> int:
-    """Calculate how many complete floors are below the damage line."""
-    if floor_height <= 0:
-        return 0
-    return int(min_height / floor_height)
-
-
-def build_damaged_top_section(bm: bmesh.types.BMesh, profile: list,
-                               start_pos: Vector, direction: Vector, normal: Vector,
-                               base_z: float, thickness: float, mat_index: int = 0):
-    """Wall strip between the intact floors and a coarse collapsed top edge.
-
-    Every face is oriented explicitly: outer faces along ``normal``, inner faces
-    against it, top strips up and end caps along ``direction``. Quads that can be
-    non-planar (tops and caps) are split into triangles, so Blender cannot pick
-    an arbitrary winding for them.
-    """
-    valid_profile = [(pos, height) for pos, height in profile
-                     if height > base_z + 0.05]
-    if len(valid_profile) < 2:
-        return
-    inner_offset = -normal * thickness
-    outer_bottom, outer_top, inner_bottom, inner_top = [], [], [], []
-    for pos, height in valid_profile:
-        top_z = max(height, base_z + 0.05)
-        outer_pos = start_pos + direction * pos
-        inner_pos = outer_pos + inner_offset
-        outer_bottom.append(bm.verts.new(outer_pos + Vector((0, 0, base_z))))
-        outer_top.append(bm.verts.new(outer_pos + Vector((0, 0, top_z))))
-        inner_bottom.append(bm.verts.new(inner_pos + Vector((0, 0, base_z))))
-        inner_top.append(bm.verts.new(inner_pos + Vector((0, 0, top_z))))
-
-    up = Vector((0, 0, 1))
-    for i in range(len(valid_profile) - 1):
-        _face_oriented(bm, [outer_bottom[i], outer_bottom[i + 1], outer_top[i + 1]],
-                       normal, mat_index)
-        _face_oriented(bm, [outer_bottom[i], outer_top[i + 1], outer_top[i]],
-                       normal, mat_index)
-        _face_oriented(bm, [inner_bottom[i], inner_bottom[i + 1], inner_top[i + 1]],
-                       -normal, mat_index)
-        _face_oriented(bm, [inner_bottom[i], inner_top[i + 1], inner_top[i]],
-                       -normal, mat_index)
-        _face_oriented(bm, [outer_top[i], outer_top[i + 1], inner_top[i + 1]],
-                       up, mat_index)
-        _face_oriented(bm, [outer_top[i], inner_top[i + 1], inner_top[i]],
-                       up, mat_index)
-
-    _face_oriented(bm, [inner_bottom[0], outer_bottom[0], outer_top[0]],
-                   -direction, mat_index)
-    _face_oriented(bm, [inner_bottom[0], outer_top[0], inner_top[0]],
-                   -direction, mat_index)
-    _face_oriented(bm, [outer_bottom[-1], inner_bottom[-1], inner_top[-1]],
-                   direction, mat_index)
-    _face_oriented(bm, [outer_bottom[-1], inner_top[-1], outer_top[-1]],
-                   direction, mat_index)
+def _ccw(points):
+    area = 0.0
+    for index, (x0, y0) in enumerate(points):
+        x1, y1 = points[(index + 1) % len(points)]
+        area += x0 * y1 - x1 * y0
+    return points if area > 0 else list(reversed(points))

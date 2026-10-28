@@ -6,6 +6,7 @@ from collections import Counter
 import bmesh
 import bpy
 from mathutils import Vector
+from mathutils.kdtree import KDTree
 from .mesh_builder import BuildingShellBuilder
 
 MATERIALS = (
@@ -151,8 +152,15 @@ def _plane_cap_loops(bm, axis, value, low, high, max_thickness):
                     materials[face.material_index] += 1
             if not materials:
                 continue
+            if any(index in (3, 4) for index in materials):
+                continue
             material = materials.most_common(1)[0][0]
-            if material not in (1, 5, 6):
+            if material == 0 and axis != 2:
+                # Large wall cut/inside faces are legitimate caps; only frame
+                # openings are excluded above. Horizontal caps stay thin.
+                loops.append((ordered, material))
+                continue
+            if min(extents) > max_thickness:
                 continue
             loops.append((ordered, material))
     return loops
@@ -216,6 +224,146 @@ def _cut_box_with_caps(bm, params, x0, x1, y0, y1, z0):
         face.normal_update()
         if face.normal.dot(outward) < 0:
             face.normal_flip()
+
+
+def _repair_wall_shell(bm, params):
+    """Restore missing inner facade faces and wall-top caps after damage.
+
+    Damage/chunk removal can leave the outer wall face in place while deleting
+    its inner counterpart. Duplicate each outer wall face inward when no inner
+    face exists, then pair the remaining top edges into caps.
+    """
+    thickness = params.get('wall_thickness', .25)
+    bm.normal_update()
+    outer_faces = [f for f in bm.faces if f.material_index == 0]
+    if not outer_faces:
+        return
+    tree = KDTree(len(outer_faces))
+    for index, face in enumerate(outer_faces):
+        tree.insert(face.calc_center_median(), index)
+    tree.balance()
+    added = 0
+    for face in list(outer_faces):
+        normal = face.normal.copy()
+        centre = face.calc_center_median()
+        if abs(normal.z) > .3 or abs(normal.x) + abs(normal.y) < .7:
+            continue
+        if normal.x * centre.x + normal.y * centre.y <= 0:
+            continue
+        target = centre - normal * thickness
+        hit = tree.find(target)
+        if hit is not None and hit[2] < .08 and outer_faces[hit[1]].normal.dot(-normal) > .8:
+            continue
+        vertices = [bm.verts.new(v.co - normal * thickness) for v in face.verts]
+        try:
+            inner = bm.faces.new(list(reversed(vertices)))
+        except ValueError:
+            continue
+        inner.material_index = 0
+        inner.normal_update()
+        added += 1
+    bm.normal_update()
+
+    boundary = []
+    for edge in bm.edges:
+        if not edge.is_boundary or not edge.link_faces:
+            continue
+        if any(face.material_index != 0 for face in edge.link_faces):
+            continue
+        a, b = edge.verts
+        if abs(a.co.z - b.co.z) > 1e-4 or a.co.z < .5:
+            continue
+        boundary.append(edge)
+    used = set()
+    caps = 0
+    for index, edge in enumerate(boundary):
+        if edge in used:
+            continue
+        a, b = edge.verts
+        for other in boundary[index + 1:]:
+            if other in used:
+                continue
+            c, d = other.verts
+            for p, q in ((c, d), (d, c)):
+                offset_a = p.co - a.co
+                offset_b = q.co - b.co
+                if (abs(offset_a.z) < 1e-4 and abs(offset_b.z) < 1e-4 and
+                        abs(offset_a.length - thickness) < .03 and
+                        abs(offset_b.length - thickness) < .03 and
+                        (offset_a - offset_b).length < .03):
+                    try:
+                        cap = bm.faces.new((a, b, q, p))
+                    except ValueError:
+                        continue
+                    cap.material_index = 0
+                    cap.normal_update()
+                    if cap.normal.z < 0:
+                        cap.normal_flip()
+                    used.add(edge)
+                    used.add(other)
+                    caps += 1
+                    break
+            if edge in used:
+                break
+
+
+def _cap_floor_edges(bm):
+    """Add the missing side of floor-slab cut edges and stair openings.
+
+    Floor-slab boundaries show up as matching horizontal edges at the slab top
+    and bottom. Pairing them and adding the vertical quad closes the slab
+    thickness without sealing the opening.
+    """
+    boundary = [e for e in bm.edges if e.is_boundary]
+    by_key = {}
+    for edge in boundary:
+        a, b = edge.verts
+        if abs(a.co.z - b.co.z) > 1e-4:
+            continue
+        face = edge.link_faces[0] if edge.link_faces else None
+        if face is None or face.material_index != 1:
+            continue
+        key = tuple(sorted((round(a.co.x, 4), round(a.co.y, 4),
+                            round(b.co.x, 4), round(b.co.y, 4))))
+        by_key.setdefault(key, []).append(edge)
+    for edges in by_key.values():
+        if len(edges) < 2:
+            continue
+        # Pick two edges at different z (slab top and bottom).
+        first = edges[0]
+        second = None
+        for candidate in edges[1:]:
+            dz = abs(first.verts[0].co.z - candidate.verts[0].co.z)
+            if .03 <= dz <= .5:
+                second = candidate
+                break
+        if second is None:
+            continue
+        top, bottom = (first, second) if first.verts[0].co.z > second.verts[0].co.z else (second, first)
+        t0, t1 = top.verts
+        b0, b1 = bottom.verts
+        # Match the endpoints by their XY positions.
+        if (t0.co.x, t0.co.y) == (b0.co.x, b0.co.y):
+            quad = [t0, t1, b1, b0]
+        elif (t0.co.x, t0.co.y) == (b1.co.x, b1.co.y):
+            quad = [t0, t1, b0, b1]
+        else:
+            continue
+        try:
+            face = bm.faces.new(quad)
+        except ValueError:
+            continue
+        face.material_index = 1
+        face.normal_update()
+        # The slab side points away from the top face centre.
+        source = top.link_faces[0] if top.link_faces else None
+        if source is not None:
+            edge_mid = (top.verts[0].co + top.verts[1].co) / 2
+            source_center = source.calc_center_median()
+            radial = Vector((edge_mid.x - source_center.x,
+                             edge_mid.y - source_center.y, 0.0))
+            if radial.length > 1e-5 and face.normal.dot(radial) < 0:
+                face.normal_flip()
 
 
 def expose_fill_bay(bm, params):
@@ -445,6 +593,7 @@ def create_shell(name, params, collection):
             expose_fill_bay(bm, params)
         if params.get('interior_mound'):
             add_interior_mound(bm, params)
+        _cap_floor_edges(bm)
         # Roof extras only belong on an intact top; a damaged shell already has
         # an irregular silhouette where the upper floors were cut away.
         total_height = params['floors'] * params['floor_height']
@@ -457,6 +606,7 @@ def create_shell(name, params, collection):
         for vert in bm.verts:
             vert.co.x -= params['width'] / 2
             vert.co.y -= params['depth'] / 2
+        _repair_wall_shell(bm, params)
         mesh = bpy.data.meshes.new(name)
         bm.to_mesh(mesh)
         obj = bpy.data.objects.new(name, mesh)

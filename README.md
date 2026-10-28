@@ -1,5 +1,12 @@
 # Procedural Building Shell Generator
 
+## v0.9.7: Wall shell repair
+
+Damage and chunk cuts could remove a wall's inner facade while leaving the
+outer face, opening the wall cavity to the interior. Surviving outer wall faces
+are now mirrored inward wherever the inner face is missing, and the remaining
+top edges are paired into wall caps.
+
 ## v0.9.6: Capped chunk cuts
 
 Chunk removals are bisected exactly at their cut planes. Exposed floor-slab

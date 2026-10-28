@@ -796,7 +796,6 @@ def create_shell(name, params, collection):
             expose_fill_bay(bm, params)
         if params.get('interior_mound'):
             add_interior_mound(bm, params)
-        _cap_floor_edges(bm)
         # Roof extras only belong on an intact top; a damaged shell already has
         # an irregular silhouette where the upper floors were cut away.
         total_height = params['floors'] * params['floor_height']
@@ -812,8 +811,6 @@ def create_shell(name, params, collection):
         _repair_wall_shell(bm, params)
         _cap_vertical_wall_ends(bm, params)
         _cap_small_wall_loops(bm, params)
-        _cap_horizontal_wall_loops(bm)
-        _cap_small_top_hulls(bm)
         mesh = bpy.data.meshes.new(name)
         bm.to_mesh(mesh)
         obj = bpy.data.objects.new(name, mesh)

@@ -559,84 +559,60 @@ def _create_opening_frame(bm: bmesh.types.BMesh, segment: WallSegment,
     return faces
 
 
-def build_floor_slab(bm: bmesh.types.BMesh, width: float, depth: float, 
+def build_floor_slab(bm: bmesh.types.BMesh, width: float, depth: float,
                      z_height: float, thickness: float = 0.15,
                      wall_thickness: float = 0.25,
-                     opening: dict = None) -> list:
+                     opening: dict = None, openings: list = None) -> list:
+    """Build a floor slab with optional stair/elevator openings.
+
+    Accepts one opening or a list. The slab is subdivided on the opening edges
+    so every hole gets closed sides from the surrounding slab cells.
     """
-    Build a floor slab with optional opening for stairs.
-    
-    Args:
-        bm: BMesh to add geometry to
-        width: Building width (X)
-        depth: Building depth (Y)
-        z_height: Height of the floor slab bottom
-        thickness: Slab thickness
-        wall_thickness: Wall thickness (to inset slab properly)
-        opening: Optional dict with 'x_min', 'y_min', 'x_max', 'y_max' for stair opening
-    
-    Returns:
-        List of created faces
-    """
-    faces = []
-    
-    # Slab is inset to sit within the interior walls (not through them)
     slab_x_min = wall_thickness
     slab_y_min = wall_thickness
     slab_x_max = width - wall_thickness
     slab_y_max = depth - wall_thickness
     slab_z_bottom = z_height
     slab_z_top = z_height + thickness
-    
-    if opening is None:
-        # Simple solid slab
-        min_co = Vector((slab_x_min, slab_y_min, slab_z_bottom))
-        max_co = Vector((slab_x_max, slab_y_max, slab_z_top))
-        return util.create_box(bm, min_co, max_co, MAT_FLOOR)
-    
-    # Slab with opening - create as multiple sections around the hole
-    # Clamp opening to slab bounds with minimum margin from edges
-    min_margin = 0.05  # Minimum edge from opening to slab edge
-    
-    ox_min = max(opening['x_min'], slab_x_min + min_margin)
-    oy_min = max(opening['y_min'], slab_y_min + min_margin)
-    ox_max = min(opening['x_max'], slab_x_max - min_margin)
-    oy_max = min(opening['y_max'], slab_y_max - min_margin)
-    
-    # Minimum dimension threshold for creating a section
-    min_dim = 0.05
-    
-    # Create sections around the opening using an "frame" approach:
-    # We create up to 4 sections that together form a frame around the opening
-    
-    # Section 1: Front strip (full width, from slab front to opening front)
-    front_depth = oy_min - slab_y_min
-    if front_depth > min_dim:
-        min_co = Vector((slab_x_min, slab_y_min, slab_z_bottom))
-        max_co = Vector((slab_x_max, oy_min, slab_z_top))
-        faces.extend(util.create_box(bm, min_co, max_co, MAT_FLOOR))
-    
-    # Section 2: Back strip (full width, from opening back to slab back)
-    back_depth = slab_y_max - oy_max
-    if back_depth > min_dim:
-        min_co = Vector((slab_x_min, oy_max, slab_z_bottom))
-        max_co = Vector((slab_x_max, slab_y_max, slab_z_top))
-        faces.extend(util.create_box(bm, min_co, max_co, MAT_FLOOR))
-    
-    # Section 3: Left strip (between opening Y bounds, from slab left to opening left)
-    left_width = ox_min - slab_x_min
-    if left_width > min_dim:
-        min_co = Vector((slab_x_min, oy_min, slab_z_bottom))
-        max_co = Vector((ox_min, oy_max, slab_z_top))
-        faces.extend(util.create_box(bm, min_co, max_co, MAT_FLOOR))
-    
-    # Section 4: Right strip (between opening Y bounds, from opening right to slab right)
-    right_width = slab_x_max - ox_max
-    if right_width > min_dim:
-        min_co = Vector((ox_max, oy_min, slab_z_bottom))
-        max_co = Vector((slab_x_max, oy_max, slab_z_top))
-        faces.extend(util.create_box(bm, min_co, max_co, MAT_FLOOR))
-    
+    margin = 0.05
+    holes = []
+    if opening:
+        holes.append(opening)
+    if openings:
+        holes.extend(openings)
+    clipped = []
+    for hole in holes:
+        ox0 = max(hole['x_min'], slab_x_min + margin)
+        oy0 = max(hole['y_min'], slab_y_min + margin)
+        ox1 = min(hole['x_max'], slab_x_max - margin)
+        oy1 = min(hole['y_max'], slab_y_max - margin)
+        if ox0 < ox1 - 1e-4 and oy0 < oy1 - 1e-4:
+            clipped.append((ox0, ox1, oy0, oy1))
+    if not clipped:
+        return util.create_box(
+            bm, Vector((slab_x_min, slab_y_min, slab_z_bottom)),
+            Vector((slab_x_max, slab_y_max, slab_z_top)), MAT_FLOOR)
+    xs = {slab_x_min, slab_x_max}
+    ys = {slab_y_min, slab_y_max}
+    for ox0, ox1, oy0, oy1 in clipped:
+        xs.update((ox0, ox1))
+        ys.update((oy0, oy1))
+    xs = sorted(xs)
+    ys = sorted(ys)
+    faces = []
+    for xi in range(len(xs) - 1):
+        for yi in range(len(ys) - 1):
+            x0, x1 = xs[xi], xs[xi + 1]
+            y0, y1 = ys[yi], ys[yi + 1]
+            if x1 - x0 < 1e-4 or y1 - y0 < 1e-4:
+                continue
+            cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
+            if any(ox0 < cx < ox1 and oy0 < cy < oy1
+                   for ox0, ox1, oy0, oy1 in clipped):
+                continue
+            faces.extend(util.create_box(
+                bm, Vector((x0, y0, slab_z_bottom)),
+                Vector((x1, y1, slab_z_top)), MAT_FLOOR))
     return faces
 
 
@@ -862,14 +838,14 @@ class BuildingShellBuilder:
             
             # Build floor slab (except for ground floor)
             if floor_idx > 0 and self.params.get('floor_slabs', True):
-                stair_opening = self._get_stair_opening()
-                
+                openings = self._get_floor_openings()
                 if is_patio_floor:
-                    # For patio floor, build a reduced slab covering only the interior portion
                     self._build_patio_interior_floor_slab(
-                        floor_base_z, 0.15, width, depth, wall_thickness, stair_opening)
+                        floor_base_z, 0.15, width, depth, wall_thickness,
+                        openings[0] if openings else None)
                 else:
-                    build_floor_slab(self.bm, width, depth, floor_base_z, 0.15, wall_thickness, stair_opening)
+                    build_floor_slab(self.bm, width, depth, floor_base_z, 0.15,
+                                     wall_thickness, openings=openings)
         
         # === BUILD ADDITIONAL FLOOR SLABS BELOW DAMAGE LINE ===
         # If damage cuts into upper floors, we still need to build their floor slabs
@@ -880,13 +856,23 @@ class BuildingShellBuilder:
                 floor_base_z = floor_idx * floor_height
                 # Only build slab if it's below the damage line
                 if floor_base_z < min_damage_height - 0.1:
-                    stair_opening = self._get_stair_opening()
-                    build_floor_slab(self.bm, width, depth, floor_base_z, 0.15, wall_thickness, stair_opening)
+                    build_floor_slab(self.bm, width, depth, floor_base_z, 0.15,
+                                     wall_thickness, openings=self._get_floor_openings())
         
         # === BUILD DAMAGED TOP PORTION ===
         if damage_profile is not None and intact_floors < floors:
             damaged_base_z = intact_floors * floor_height
             self._build_damaged_top(damage_profile, damaged_base_z, wall_thickness)
+        
+        # === SKYSCRAPER CORE (elevators + rear stair) ===
+        if self._has_skyscraper_core():
+            core_floors = max(0, min(floors, floors_to_build))
+            for index in range(core_floors):
+                interiors.generate_skyscraper_core_floor(
+                    self.bm, self.params, index, index * floor_height)
+            for index in range(max(0, core_floors - 1)):
+                interiors.build_skyscraper_stairs(
+                    self.bm, self.params, index, index * floor_height)
         
         # === BUILD FEATURES (only if no damage or damage doesn't affect top) ===
         build_roof_and_features = (damage_profile is None) or (intact_floors >= floors)
@@ -985,6 +971,7 @@ class BuildingShellBuilder:
         """
         # Step 1: Merge very close vertices - use small threshold to avoid merging window corners
         bmesh.ops.remove_doubles(self.bm, verts=self.bm.verts[:], dist=0.0005)
+        self._remove_coincident_internal_faces()
         
         # Step 2: Remove loose vertices (not part of any face)
         loose_verts = [v for v in self.bm.verts if not v.link_faces]
@@ -1004,6 +991,33 @@ class BuildingShellBuilder:
         # that were correctly oriented during creation. All faces are created
         # with correct winding using cross-product checks.
     
+    def _remove_coincident_internal_faces(self):
+        """Drop opposite coincident faces left by adjacent boxes and steps."""
+        self.bm.normal_update()
+        groups = {}
+        for face in self.bm.faces:
+            key = frozenset(face.verts)
+            groups.setdefault(key, []).append(face)
+        doomed = []
+        for faces in groups.values():
+            if len(faces) < 2:
+                continue
+            remaining = list(faces)
+            while remaining:
+                first = remaining.pop()
+                match = None
+                for index, other in enumerate(remaining):
+                    if first.normal.dot(other.normal) < -.9:
+                        match = index
+                        break
+                if match is not None:
+                    counterpart = remaining.pop(match)
+                    doomed.extend((first, counterpart))
+            for extra in remaining[1:]:
+                doomed.append(extra)
+        if doomed:
+            bmesh.ops.delete(self.bm, geom=doomed, context='FACES')
+
     def _dissolve_wall_seams(self):
         """
         Dissolve unnecessary edges on walls to reduce polygon count.
@@ -1786,6 +1800,18 @@ class BuildingShellBuilder:
         # Build wall with the door
         build_wall_with_openings(self.bm, segment, thickness, add_top_cap=True)
     
+    def _has_skyscraper_core(self) -> bool:
+        params = self.params
+        return (bool(params.get('skyscraper')) and
+                params.get('floor_slabs', True) and
+                params.get('interior_fill', 'NONE') == 'NONE')
+
+    def _get_floor_openings(self) -> list:
+        if self._has_skyscraper_core():
+            return interiors.get_skyscraper_openings(self.params)
+        opening = self._get_stair_opening()
+        return [opening] if opening else []
+
     def _get_stair_opening(self) -> dict:
         """Get stair opening bounds for floor slabs."""
         # Use the centralized function from interiors module

@@ -49,6 +49,7 @@ def building_recipe(style, width, depth, floors, seed, damage=0, interiors=False
         roof_parapet=True, parapet_height=.35,
         has_patio=False,
         building_profile=INTERIOR_PROFILE.get(style, 'RESIDENTIAL') if interiors else 'NONE',
+        skyscraper=style == 'DOWNTOWN',
         exterior_stairs=False, interior_fill='NONE', exterior_rubble=False,
         enable_damage=damage > 0, damage_amount=damage,
         damage_pointiness=.4, damage_resolution=1.0,

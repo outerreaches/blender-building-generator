@@ -1,5 +1,14 @@
 # Procedural Building Shell Generator
 
+## v0.9.9: Skyscraper cores
+
+DOWNTOWN office towers now use a centered service core: two elevator shafts
+at the front, a rear switchback stair, core doors, and stair/elevator slab
+cutouts. Floor slabs support multiple openings. The core and stairs are built
+even for shell-only skyscrapers; furnished office floors add the meeting room
+and open plate around it. Wall tops and wall ends are capped at floor lines
+and on weathered roof spikes.
+
 ## v0.9.8: Floor plates and wall tops
 
 Non-interior lots now get solid floor plates instead of stair cutouts, while

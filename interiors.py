@@ -1239,6 +1239,131 @@ class BarProfile(BuildingProfile):
         }
 
 
+# =============================================================================
+# Skyscraper core (elevator bank + rear stair)
+# =============================================================================
+
+def get_skyscraper_core(width: float, depth: float, params: dict) -> dict:
+    """Central office core: two elevator shafts at the front, stair behind.
+
+    The core stays clear of the facade and leaves an office plate around it.
+    Door openings are on the elevator side (front) and the stair side.
+    """
+    t = params.get('wall_thickness', .25)
+    ix0, iy0, ix1, iy1 = get_interior_bounds(width, depth, t)
+    iw, idp = ix1 - ix0, iy1 - iy0
+    # get_interior_bounds is in pre-shift building coordinates.
+    core_w = min(max(5.4, iw * .32), 7.8, iw - 2.8)
+    core_d = min(max(8.0, idp * .34), 9.0, idp - 2.8)
+    core_w = max(3.8, core_w)
+    core_d = max(5.2, core_d)
+    cx, cy = width / 2, depth / 2
+    x0, x1 = cx - core_w / 2, cx + core_w / 2
+    y0, y1 = cy - core_d / 2, cy + core_d / 2
+    core_w, core_d = x1 - x0, y1 - y0
+    elev_depth = min(2.7, max(2.1, core_d * .34))
+    divider_y = y0 + t + elev_depth + t / 2
+    stair_y0 = divider_y + t / 2
+    stair_y1 = y1 - t
+    stair_x0, stair_x1 = x0 + t, x1 - t
+    stair_w = stair_x1 - stair_x0
+    stair_d = max(.8, stair_y1 - stair_y0)
+    landing = min(.9, max(.55, (stair_d - 1.2) / 2))
+    run = max(1.0, stair_d - 2 * landing)
+    flight_width = max(.7, (stair_w - STAIR_WELL) / 2)
+    stair_zone = {
+        'x_min': stair_x0, 'x_max': stair_x1,
+        'y_min': stair_y0, 'y_max': stair_y1,
+        'landing': landing, 'run': run, 'flight_width': flight_width,
+    }
+    shaft_w = max(.8, (core_w - 3 * t) / 2)
+    shaft_y0 = y0 + t
+    shaft_y1 = divider_y - t / 2
+    elevator_openings = [
+        {'x_min': x0 + t, 'x_max': cx - t / 2,
+         'y_min': shaft_y0, 'y_max': shaft_y1},
+        {'x_min': cx + t / 2, 'x_max': x1 - t,
+         'y_min': shaft_y0, 'y_max': shaft_y1},
+    ]
+    inset = t / 2 + .03
+    stair_opening = {
+        'x_min': stair_x0 + inset, 'x_max': stair_x1 - inset,
+        'y_min': stair_y0 + landing, 'y_max': stair_y1,
+    }
+    return {
+        'x0': x0, 'x1': x1, 'y0': y0, 'y1': y1, 'cx': cx, 'cy': cy,
+        'wall_thickness': t, 'floor_height': params.get('floor_height', 3.5),
+        'elev_depth': elev_depth, 'divider_y': divider_y,
+        'stair_zone': stair_zone, 'stair_opening': stair_opening,
+        'elevator_openings': elevator_openings, 'shaft_w': shaft_w,
+    }
+
+
+def get_skyscraper_openings(params: dict) -> list:
+    core = get_skyscraper_core(params['width'], params['depth'], params)
+    return list(core['elevator_openings']) + [core['stair_opening']]
+
+
+def _skyscraper_walls(core: dict, floor_height: float) -> list:
+    t = core['wall_thickness']
+    x0, x1, y0, y1 = core['x0'], core['x1'], core['y0'], core['y1']
+    divider = core['divider_y']
+    walls = []
+    front_start = x0 + t / 2
+    front_end = x1 - t / 2
+    front_len = front_end - front_start
+    shaft_w = core['shaft_w']
+    door_w = min(1.2, max(.8, shaft_w - .35))
+    cx = core.get('cx', (x0 + x1) / 2)
+    centers = [(x0 + t + cx - t / 2) / 2, (cx + t / 2 + x1 - t) / 2]
+    openings = [{'offset': c - front_start - door_w / 2, 'width': door_w,
+                 'height': 2.2} for c in centers]
+    walls.append({'start': Vector((front_start, y0 + t / 2, 0)),
+                  'end': Vector((front_end, y0 + t / 2, 0)),
+                  'height': floor_height, 'thickness': t, 'openings': openings})
+    # Back wall is solid; stair egress is the side door below.
+    walls.append({'start': Vector((front_start, y1 - t / 2, 0)),
+                  'end': Vector((front_end, y1 - t / 2, 0)),
+                  'height': floor_height, 'thickness': t, 'openings': []})
+    # Side walls; the left has the stair door access.
+    side_start = y0 + t / 2
+    side_end = y1 - t / 2
+    side_len = side_end - side_start
+    stair_door_y = core['stair_zone']['y_min'] + .45
+    walls.append({'start': Vector((x0 + t / 2, side_start, 0)),
+                  'end': Vector((x0 + t / 2, side_end, 0)),
+                  'height': floor_height, 'thickness': t,
+                  'openings': [{'offset': stair_door_y - side_start,
+                                'width': .9, 'height': 2.1}]})
+    walls.append({'start': Vector((x1 - t / 2, side_start, 0)),
+                  'end': Vector((x1 - t / 2, side_end, 0)),
+                  'height': floor_height, 'thickness': t, 'openings': []})
+    # Divider between elevators and stair.
+    walls.append({'start': Vector((x0 + t, divider, 0)),
+                  'end': Vector((x1 - t, divider, 0)),
+                  'height': floor_height, 'thickness': t, 'openings': []})
+    # Wall between the two elevator shafts.
+    walls.append({'start': Vector((cx, y0 + t, 0)),
+                  'end': Vector((cx, divider - t / 2, 0)),
+                  'height': floor_height, 'thickness': t, 'openings': []})
+    return walls
+
+
+def generate_skyscraper_core_floor(bm, params: dict, floor_idx: int, base_z: float) -> list:
+    core = get_skyscraper_core(params['width'], params['depth'], params)
+    faces = []
+    for wall in _skyscraper_walls(core, params.get('floor_height', 3.5)):
+        faces.extend(build_interior_wall(bm, wall, base_z))
+    return faces
+
+
+def build_skyscraper_stairs(bm, params: dict, floor_idx: int, base_z: float) -> list:
+    core = get_skyscraper_core(params['width'], params['depth'], params)
+    return build_interior_stairs(
+        bm, core['stair_zone'], params.get('floor_height', 3.5),
+        base_z + FLOOR_SLAB_THICKNESS)
+
+
 class OfficeProfile(BuildingProfile):
     """Open office plates around an enclosed stair core."""
 
@@ -1589,7 +1714,8 @@ def generate_interior_layout(bm: bmesh.types.BMesh, params: dict) -> list:
 
     window_positions = get_window_positions(width, depth, params)
     stair_zone = None
-    if floors > 1 and floor_slabs_enabled:
+    if (floors > 1 and floor_slabs_enabled and
+            not params.get('skyscraper')):
         stair_zone = profile_class.get_stair_zone(width, depth, params)
 
     ground_layout = profile_class.get_ground_floor_layout(width, depth, params)

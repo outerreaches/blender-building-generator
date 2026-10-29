@@ -94,10 +94,29 @@ The tests enforce 1, 2, 4 and 5 for every style and condition.
   slope-limited), a ragged storey above the break line, the floors above it
   removed inside. Partitions of the broken storey stand as low stubs.
 - **Craters** (collapse): a jagged plan polygon with a broken floor height and
-  sloped sides (height grows with distance from the polygon). A corner
-  collapse, a higher lobe beside it and, on taller buildings, a facade bay
-  failure through the top. Facades break in diagonals and steps; slabs step
+  sloped sides (height grows with distance from the polygon), optionally
+  terraced at the slab lines. Facades break in diagonals and steps; slabs step
   back storey by storey along contoured, polygonal edges.
+- **Blasts**: bounded volumes one to three storeys high, mid-height, with the
+  floors above intact. Walls get ragged holes (open at a corner the blast
+  took), intermediate slabs and partitions go, stair flights in them go, and
+  debris lands on the blown floor and the street below.
+- **Collapse archetypes**, one per building by seed (weights favour corner
+  collapses; cleave/gutted need 4+ storeys, blowouts 5+), placed on the tier
+  standing at their height so setback towers break where their walls are:
+
+  | Type | Look |
+  | --- | --- |
+  | Corner | Corner collapse with a higher lobe; a bay failure on taller buildings |
+  | Stepped | Corner collapse breaking storey by storey (ledges at slab lines) |
+  | Shear | One side sliced off along a diagonal plane rising across the plan |
+  | Cleave | Split along a plan diagonal; one half gone above a low break |
+  | Sawtooth | Two to four bites of different depths along the roofline |
+  | Gutted | Facades stand, the middle of the floor plates has fallen in |
+  | Blowout | One or two multi-storey holes blown through mid-height |
+
+  `params['collapse']` forces a type; tall weathered towers draw from the
+  milder sawtooth, blowout and corner.
 - Under craters the top only weathers lightly (craters do the heavy damage).
 - Windows the break passes through above the sill are filled, so broken walls
   read as masonry rather than holes in thin spikes.

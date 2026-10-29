@@ -52,7 +52,9 @@ def make_field(spec, params):
         pointiness=float(params.get('damage_pointiness', .5)),
         resolution=float(params.get('damage_resolution', 1.0)),
         min_height=min(min_height, spec.top), cap_height=params.get('damage_cap_height'),
-        chunk_cut=bool(params.get('chunk_cut')))
+        chunk_cut=bool(params.get('chunk_cut')), collapse=params.get('collapse'),
+        tiers=[(spec.levels[tier.first].z, spec.levels[tier.last].ceiling, tier.rect)
+               for tier in spec.tiers])
 
 
 def build_building(params):
@@ -74,9 +76,11 @@ def build_building(params):
     _interiors(mesh, spec, field, plan)
     rubble.interior_fill(mesh, rng, spec, field, params)
     rubble.exterior_piles(mesh, rng, spec, params)
-    corner = next((crater.corner for crater in field.craters if crater.corner), None)
-    if corner is not None:
-        rubble.corner_mound(mesh, rng, spec, corner)
+    for x, y, rx, ry, peak, base in field.debris:
+        # Upper-floor debris sinks into its slab so its underside shares no
+        # plane with partitions standing on the same floor.
+        rubble.mound(mesh, rng, x, y, rx, ry, peak, segments=9,
+                     base=base - .03 if base > 0 else base)
     if params.get('interior_mound'):
         rubble.interior_mound(mesh, rng, spec)
     return Building(mesh, spec, plan, field)
@@ -127,6 +131,15 @@ def _damage_openings(spec, field, params, rng):
                          (spec.top + spec.parapet) * .8)
             _replace_with_hole(facade, bays[first] + .15, bays[first + span] - .15, 0.0, height,
                                rng, grounded=True)
+    for tier in spec.tiers:
+        for facade in tier.facades:
+            for u0, u1, z0, z1 in field.blast_spans(facade.origin, facade.direction, facade.ua,
+                                                    facade.ub, facade.base + .3, facade.top):
+                corner = (u0 <= facade.ua + .05, u1 >= facade.ub - .05)
+
+                def outline(rng, a, b, low, high, corner=corner):
+                    return damage.blast_outline(rng, a, b, low, high, *corner)
+                _replace_with_hole(facade, u0, u1, z0, z1, rng, grounded=False, outline=outline)
     holes = int(round(field.damage * 3 * rng.uniform(.3, 1.0))) if field.damage else 0
     for _ in range(holes):
         tier = rng.choice(spec.tiers)
@@ -151,15 +164,36 @@ def _damage_openings(spec, field, params, rng):
         high = min(above - .25, z1 + rng.uniform(.3, .9))
         if high - low < 1.0:
             continue
+        if any(o.kind != 'window' and o.u0 < bay[1] + .1 and o.u1 > bay[0] - .1 and
+               min(z for _, z in o.bottom) < high + .5 and max(z for _, z in o.top) > low - .5
+               for o in facade.openings):
+            continue  # Never swallow a door or another breach.
         _replace_with_hole(facade, bay[0] + .12, bay[1] - .12, low, high, rng, grounded=False,
                            keep=(window.u0, window.u1, z0, z1))
 
 
-def _replace_with_hole(facade, u0, u1, z0, z1, rng, grounded, keep=None):
+def _replace_with_hole(facade, u0, u1, z0, z1, rng, grounded, keep=None, outline=None):
     if u1 - u0 < .8:
         return
-    victims = [o for o in facade.openings if o.u0 < u1 and o.u1 > u0 and
-               min(z for _, z in o.bottom) < z1 and max(z for _, z in o.top) > z0]
+    near = [o for o in facade.openings if o.u0 < u1 + .1 and o.u1 > u0 - .1 and
+            min(z for _, z in o.bottom) < z1 + .5 and max(z for _, z in o.top) > z0 - .5]
+    # Doors survive: the hole starts above them.
+    for door in [o for o in near if o.kind == 'door']:
+        z0 = max(z0, max(z for _, z in door.top) + .6)
+    if z1 - z0 < 1.0:
+        return
+    if outline is not None:
+        # Blast holes keep their ragged outline: windows it touches are filled
+        # in (broken masonry) instead of stretching the hole around them.
+        bottom, top = outline(rng, u0, u1, z0, z1)
+        bottom = [(u, max(facade.base + .05, z)) for u, z in bottom]
+        for opening in [o for o in near if o.kind != 'door']:
+            if _touches_outline(opening, bottom, top):
+                facade.openings.remove(opening)
+        facade.openings.append(solids.Opening(u0, u1, bottom, top, MAT_WALLS, 'breach'))
+        return
+    victims = [o for o in near if o.kind != 'door' and
+               min(z for _, z in o.bottom) < z1 + .5 and max(z for _, z in o.top) > z0 - .5]
     for opening in victims:
         facade.openings.remove(opening)
     bottom, top = damage.breach_outline(rng, u0, u1, z0, z1, grounded)
@@ -172,6 +206,21 @@ def _replace_with_hole(facade, u0, u1, z0, z1, rng, grounded, keep=None):
                for u, z in top]
     bottom = [(u, max(facade.base, z)) for u, z in bottom]
     facade.openings.append(solids.Opening(u0, u1, bottom, top, MAT_WALLS, 'breach'))
+
+
+def _touches_outline(opening, bottom, top, margin=.15):
+    """Whether a rectangular opening comes within ``margin`` of a hole outline."""
+    a = max(opening.u0, bottom[0][0]) - margin
+    b = min(opening.u1, bottom[-1][0]) + margin
+    if b <= a:
+        return False
+    ob, ot = min(z for _, z in opening.bottom), max(z for _, z in opening.top)
+    for k in range(9):
+        u = a + (b - a) * k / 8
+        low, high = geom2d.interp(bottom, u), geom2d.interp(top, u)
+        if max(ob, low) < min(ot, high) + margin:
+            return True
+    return False
 
 
 # -- walls -------------------------------------------------------------------
@@ -257,7 +306,7 @@ def slab(mesh, field, rect, z_bottom, z_top, holes=(), material=MAT_FLOOR, clear
             return 1.0
     else:
         def inside(x, y):
-            return field.height(x, y) - level
+            return field.slab_value(x, y, z_top, clearance)
     solids.slab_solid(mesh, xs, ys, z_bottom, z_top, inside, material, holes)
 
 
@@ -496,11 +545,15 @@ def _interiors(mesh, spec, field, plan):
         if level_plan.stair is not None and not last:
             boxes, *_ = layouts.stair_steps(level_plan.stair, level.height)
             for x0, y0, z0, x1, y1, z1 in boxes:
-                if field.damaged and field.height((x0 + x1) / 2, (y0 + y1) / 2) < level.z + z1 + .2:
+                cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
+                if field.damaged and (field.height(cx, cy) < level.z + z1 + .2 or
+                                      field.in_blast(cx, cy, level.z + z1 / 2)):
                     continue
                 solids.box(mesh, x0, y0, level.z + z0, x1, y1, level.z + z1, MAT_STAIRS)
         for x0, y0, x1, y1, height in level_plan.fixtures:
-            if field.damaged and field.height((x0 + x1) / 2, (y0 + y1) / 2) < level.z + height + .2:
+            cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
+            if field.damaged and (field.height(cx, cy) < level.z + height + .2 or
+                                  field.in_blast(cx, cy, level.z + height / 2)):
                 continue
             solids.box(mesh, x0, y0, level.z, x1, y1, level.z + height, MAT_INTERIOR_WALL)
 
@@ -515,6 +568,26 @@ def _partition(mesh, field, wall, z, ceiling):
     if length < .05:
         return
     top = field.line_profile(ax, ay, bx, by, ceiling)
-    openings = [solids.Opening.rect(offset, offset + width, z, z + height, MAT_DOOR_FRAME, 'door')
-                for offset, width, height in wall.openings]
+    blown = []
+    for u0, u1, z0, z1 in field.blast_spans((ax, ay), direction, 0.0, length, z, ceiling):
+        if z1 - z0 >= .6 * (ceiling - z):
+            blown.append((max(0.0, u0), min(length, u1)))
+    blown = _merge_spans(blown)
+    openings = [solids.Opening(a, b, [(a, z), (b, z)], [(a, ceiling + 1), (b, ceiling + 1)],
+                               MAT_INTERIOR_WALL, 'breach') for a, b in blown if b - a > .05]
+    for offset, width, height in wall.openings:
+        if any(offset < b + .05 and offset + width > a - .05 for a, b in blown):
+            continue
+        openings.append(solids.Opening.rect(offset, offset + width, z, z + height,
+                                            MAT_DOOR_FRAME, 'door'))
     solids.wall_solid(mesh, origin, direction, t, 0.0, length, z, top, openings, MAT_INTERIOR_WALL)
+
+
+def _merge_spans(spans):
+    merged = []
+    for a, b in sorted(spans):
+        if merged and a <= merged[-1][1] + .05:
+            merged[-1] = (merged[-1][0], max(merged[-1][1], b))
+        else:
+            merged.append((a, b))
+    return merged

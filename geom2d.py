@@ -111,6 +111,20 @@ def distance_outside(x, y, polygon):
                for index in range(count))
 
 
+def signed_distance(x, y, polygon):
+    """Distance to a polygon's outline; negative inside."""
+    count = len(polygon)
+    distance = min(distance_to_segment(x, y, *polygon[index], *polygon[(index + 1) % count])
+                   for index in range(count))
+    return -distance if point_in_polygon(x, y, polygon) else distance
+
+
+def polygon_bounds(polygon):
+    xs = [x for x, _ in polygon]
+    ys = [y for _, y in polygon]
+    return min(xs), min(ys), max(xs), max(ys)
+
+
 def segment_crossings(ax, ay, bx, by, polygon):
     """Parameters t in (0, 1) where segment a-b crosses the polygon outline."""
     result = []

@@ -1,5 +1,16 @@
 # Procedural Building Shell Generator
 
+## v0.10.1: Collapse variety
+
+Collapsed buildings now pick one of seven archetypes by seed: corner, stepped
+(breaking storey by storey), shear (a side sliced off on a diagonal), cleave
+(split along a plan diagonal), sawtooth (several roofline bites), gutted
+(facades standing, floors fallen in) and blowout (multi-storey holes blown
+through mid-height with the floors above intact). Collapses land on the tier
+standing at their height, so setback towers break where their walls are.
+Blast holes have ragged edges and spill debris to the street. Everything stays
+watertight; every archetype is tested on four styles.
+
 ## v0.10.0: Closed-solid geometry, polygonal collapses, real floor plans
 
 The geometry pipeline is rebuilt (see [ARCHITECTURE.md](ARCHITECTURE.md) for

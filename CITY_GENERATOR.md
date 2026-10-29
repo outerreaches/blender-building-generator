@@ -4,7 +4,7 @@ This generator supplies the main static environment for a low-poly first-person 
 
 ## Try it
 
-Install `output/procedural_building_shell_v0.10.0.zip` as a Blender add-on. Use **Shift+A → Mesh → Generate City** or **Generate Building by Style**. Start with **Layout Preview**; select **Detailed Shells** for windows, doors, floors, damage and optional interiors. Both modes use the same plan. Each run creates a new collection at the 3D cursor. Undo removes that run; failure rolls back its own objects.
+Install `output/procedural_building_shell_v0.10.1.zip` as a Blender add-on. Use **Shift+A → Mesh → Generate City** or **Generate Building by Style**. Start with **Layout Preview**; select **Detailed Shells** for windows, doors, floors, damage and optional interiors. Both modes use the same plan. Each run creates a new collection at the 3D cursor. Undo removes that run; failure rolls back its own objects.
 
 The original single-building and bulk operators remain available. Architecture uses six district archetypes built from rectangular shells:
 
@@ -114,7 +114,7 @@ minimum damage and the geometry treatment:
 | --- | --- |
 | Intact | Clean shell; interior only when the lot is in the interior budget |
 | Weathered | Fine irregular collapsed top (median-smoothed, slope-limited, no needles); interiors only below the damage line |
-| Semi-collapsed | Polygonal craters: a corner collapse with a stepped lobe and, on taller buildings, a bay failure through the roof. Facades break in diagonals, slabs step back along broken edges, a rubble mound at the cut base |
+| Semi-collapsed | One of seven collapse archetypes by seed (corner, stepped, shear, cleave, sawtooth, gutted, blowout; see ARCHITECTURE.md). Facades break in diagonals, steps or blast holes, slabs step back along broken edges, debris where the building came down |
 | Rubble-filled | Interior packed solid; a jagged ground-floor breach and a crater expose the fill; no interior layout |
 | Partial-filled | Lower floors packed with rubble, upper floors open; jagged breach and crater; no interior layout |
 | Lower floors only | Full damage so the cut lands in the first few storeys; enterable |

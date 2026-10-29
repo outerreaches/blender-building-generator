@@ -153,7 +153,10 @@ def building_recipe(style, width, depth, floors, seed, damage=0, interiors=False
         profile['building_profile'] = 'NONE'
     if (condition == 'WEATHERED' and floors >= 10 and
             random.Random(seed ^ 0x5EED).random() < .55):
+        # Tall weathered towers lose a piece, but stay recognisably standing.
         profile['chunk_cut'] = True
+        profile['collapse'] = random.Random(seed ^ 0x5EEE).choice(
+            ('SAWTOOTH', 'BLOWOUT', 'BLOWOUT', 'CORNER'))
     margin = 2 * (profile['wall_thickness'] + .35)
     module = profile['window_width'] + profile['window_spacing']
     profile['windows_per_floor'] = max(1, int(round((width - margin) / module)))

@@ -7,6 +7,15 @@ shippable step with its own tests, renders and release.
 conditions (including partial fills and wall rings), chunk removal, rubble
 mounds and the condition sheet render.
 
+**Phases 2 and 3 shipped in v0.11** as points of interest (`sites.py`):
+- gas station, fast food, school, hospital, police and fire stations;
+- transit stations and footway stops, four kinds of park, parking lots and
+  garages, strip malls and shopping plazas.
+
+They are placed by a block-level pass with quotas and district weights. Auto
+repair and an enclosed mall are still open; big boxes ship as part of the
+shopping plaza.
+
 ## Requirements
 
 ### R1 — Interior budget
@@ -130,12 +139,12 @@ seeds; tall lots can be collapsed; interiors only where flagged; corner-sheared
 meshes validate; no interiors in filled/shell/collapsed; Blender smoke and
 round-trip still pass.
 
-### Phase 2 — POI framework + roadside set
+### Phase 2 — POI framework + roadside set — shipped in v0.11
 Block-level placement pass, quotas and reporting, gas station, park, plaza,
 transit shelter, fast food. Acceptance: a default city contains each type (or
 reports a shortfall); pads and props export; no overlap with buildings; renders.
 
-### Phase 3 — Retail and parking set
+### Phase 3 — Retail and parking set — shipped in v0.11 (auto repair, mall open)
 Parking lot, parking structure, auto repair, big box, strip mall, mall,
 megacluster placement, collapsed POI variants. Acceptance: quotas hold on
 default and metro maps; cluster spacing is bounded; enterable volumes have
@@ -147,9 +156,25 @@ documentation and release. Acceptance: street invariants still hold (route
 coverage, field classification, mesh topology), cul-de-sacs appear only in the
 suburbs, metro renders updated.
 
+## Later: terrain and infrastructure
+
+Requested after v0.11, not started:
+
+- **Elevation changes**: terrain height across the map, streets on grades,
+  stepped pads and retaining walls; streets currently sit on one plane.
+- **Railway and subway**: surface rail corridors with crossings, elevated
+  sections and subway entrances or stations tied to the transit sites.
+- **Bridges**: road and rail bridges over rail cuts, water or dips in the
+  terrain, with headroom and slope limits for vehicles.
+- **Tunnel entrances**: portals where roads or rail go below grade.
+- **Water edge, optional**: a river crossing the city, or a dried-up
+  coastline with port infrastructure (quays, cranes, warehouses, a dry
+  harbour basin).
+
 ## Open decisions
 - Confirm the condition weights above (they are data, cheap to tune).
-- POIs replace whole blocks (proposed) rather than sharing a block.
+- POIs replace whole blocks (shipped in v0.11; small kinds could later share
+  a block with lots).
 - Default interior ratio 0.25 (shipped).
 - Which POIs need enterable interiors: proposed big box, mall, repair, fast
   food, gas kiosk; parks/plazas/parking are outdoors only.

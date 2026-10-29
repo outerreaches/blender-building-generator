@@ -29,6 +29,7 @@ WINDOW_SIDES = {
     'FRONT_RIGHT': ('front', 'right'),
     'BACK_SIDES': ('back', 'left', 'right'),
     'SIDES_ONLY': ('left', 'right'),
+    'NONE': (),
 }
 
 
@@ -109,6 +110,9 @@ class BuildingSpec:
         self.tiers = self._tiers()
         self.columns = []                       # (x, y, size, z0, z1) free-standing columns.
         self.door_overrides = None
+        # Explicit street doors [(side, centre, width[, height])] for designed
+        # buildings (bay doors, shop units); the interior planner may replace them.
+        self.base_doors = p.get('doors')
         for index, tier in enumerate(self.tiers):
             tier.facades = self._facades(index, tier)
         self._segment_shared_lines()
@@ -121,7 +125,7 @@ class BuildingSpec:
         ``doors`` optionally replaces the ground-floor street doors with the
         planner's choice: a list of (side, centre, width) in building space.
         """
-        self.door_overrides = doors
+        self.door_overrides = doors if doors is not None else self.base_doors
         for tier in self.tiers:
             for facade in tier.facades:
                 facade.openings = []
@@ -131,8 +135,8 @@ class BuildingSpec:
     # -- storeys ---------------------------------------------------------
     def _roof_kind(self):
         kind = self.params.get('roof_kind', 'FLAT')
-        if kind == 'GABLE':
-            return 'GABLE'
+        if kind in ('GABLE', 'HIP', 'MANSARD'):
+            return kind
         return 'FLAT' if self.params.get('flat_roof', True) else 'NONE'
 
     def _levels(self):
@@ -322,7 +326,9 @@ class BuildingSpec:
         p = self.params
         bays = facade.bays
         count = len(bays) - 1
-        sides = WINDOW_SIDES.get(p.get('window_sides', 'ALL'), SIDES)
+        chosen = p.get('window_sides', 'ALL')
+        # A tuple of side names (designed buildings) or a WINDOW_SIDES key.
+        sides = tuple(chosen) if isinstance(chosen, (tuple, list)) else WINDOW_SIDES.get(chosen, SIDES)
         windowed = facade.side in sides
         result = []
         doors = self._doors(facade, level, tier) if level.index == tier.first else []
@@ -336,13 +342,13 @@ class BuildingSpec:
                                        frame, kind))
             taken.update(range(first_bay, last_bay + 1))
         if level.kind == 'MECHANICAL':
-            return result
+            return self._extra_openings(facade, level, result)
         if level.index == 0 and tier.first == 0:
             sill, head, width, glazed = self._ground_glazing(facade, level, windowed)
         elif windowed:
             sill, head, width, glazed = self._upper_glazing(facade, level)
         else:
-            return result
+            return self._extra_openings(facade, level, result)
         for bay in glazed:
             if bay in taken or bay >= count:
                 continue
@@ -353,6 +359,26 @@ class BuildingSpec:
             centre = (u0 + u1) / 2
             result.append(Opening.rect(centre - span / 2, centre + span / 2,
                                        level.z + sill, level.z + head, MAT_WINDOW_FRAME))
+        return self._extra_openings(facade, level, result)
+
+    def _extra_openings(self, facade, level, result):
+        """Designed openings (drive-thru windows, hatches) replace what they overlap."""
+        extras = [e for e in self.params.get('extra_openings', ()) or ()
+                  if e['side'] == facade.side and
+                  level.z - 1e-6 <= level.z + e.get('z0', 1.0) < level.ceiling]
+        axis = 0 if facade.side in ('front', 'back') else 1
+        for extra in extras:
+            u = abs(extra['centre'] - facade.point(0)[axis])
+            u0, u1 = u - extra['width'] / 2, u + extra['width'] / 2
+            if u0 < facade.ua + .3 or u1 > facade.ub - .3:
+                continue
+            z0 = level.z + extra.get('z0', 1.0)
+            z1 = min(z0 + extra['height'], level.ceiling - self.slab - dims.LINTEL)
+            if z1 - z0 < .4:
+                continue
+            result = [o for o in result if not (o.u0 < u1 + .2 and o.u1 > u0 - .2)]
+            frame = MAT_DOOR_FRAME if extra.get('kind') == 'door' else MAT_WINDOW_FRAME
+            result.append(Opening.rect(u0, u1, z0, z1, frame, extra.get('kind', 'window')))
         return result
 
     def _upper_glazing(self, facade, level):
@@ -363,7 +389,12 @@ class BuildingSpec:
         system = self.facade_system
         bays = facade.bays
         widest = max(b - a for a, b in zip(bays, bays[1:]))
-        if system == 'RIBBON':
+        if system == 'OPEN':
+            # Parking decks: open from a 1.05 m upstand to the beam.
+            width = widest
+            sill = 1.05
+            head = clear
+        elif system == 'RIBBON':
             width = widest
             sill = max(.75, sill)
             head = min(clear, sill + max(height, 1.5))
@@ -397,6 +428,8 @@ class BuildingSpec:
                 glazed = range(count)
             widest = max(b - a for a, b in zip(bays, bays[1:]))
             return .15, clear, widest, glazed
+        if mode == 'OPEN' and windowed:
+            return self._upper_glazing(facade, level)
         if mode in ('STOREFRONT', 'STOREFRONT_WIDE') and facade.side == 'front':
             sill = float(p.get('storefront_sill_height', .3))
             head = min(clear, sill + float(p.get('storefront_window_height', 2.2)))
@@ -422,12 +455,14 @@ class BuildingSpec:
         if level.index == 0 and self.door_overrides is not None:
             height = float(p.get('door_height', 2.4))
             axis = 0 if facade.side in ('front', 'back') else 1
-            for side, centre, width in self.door_overrides:
+            for item in self.door_overrides:
+                side, centre, width = item[:3]
                 if side != facade.side:
                     continue
                 offset = facade.point(0)[axis]
                 u = abs(centre - offset)
-                result.append(self._door_bays(facade, u / facade.length, width, height, 'door'))
+                result.append(self._door_bays(facade, u / facade.length, width,
+                                              item[3] if len(item) > 3 else height, 'door'))
         elif level.index == 0:
             width = float(p.get('door_width', 1.2))
             height = float(p.get('door_height', 2.4))
@@ -573,7 +608,7 @@ class BuildingSpec:
     def door_bays(self, side):
         """Default ground doors on a side: [(first_bay, last_bay, width, height, kind)]."""
         facade = self.ground_facade(side)
-        saved, self.door_overrides = self.door_overrides, None
+        saved, self.door_overrides = self.door_overrides, self.base_doors
         try:
             return self._doors(facade, self.levels[0], self.tiers[0])
         finally:

@@ -82,3 +82,15 @@ class MeshData:
 
     def translate(self, dx, dy, dz=0.0):
         self.verts = [(x + dx, y + dy, z + dz) for x, y, z in self.verts]
+
+    def place(self, other, dx=0.0, dy=0.0, quarter=0, dz=0.0, material_map=None):
+        """Append ``other`` turned by quarter turns about its origin, then moved."""
+        quarter %= 4
+        offset = len(self.verts)
+        for x, y, z in other.verts:
+            for _ in range(quarter):
+                x, y = -y, x
+            self.verts.append((x + dx, y + dy, z + dz))
+        for face, material in other.faces:
+            mapped = material if material_map is None else material_map.get(material, material)
+            self.faces.append((tuple(index + offset for index in face), mapped))

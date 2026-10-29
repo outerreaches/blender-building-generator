@@ -61,6 +61,7 @@ Everything left of `mesh_builder` is pure Python and runs under plain
 | `solids.py` | Closed solids: walls from 2D outlines, contoured slabs, boxes, prisms |
 | `shell.py` | Assembles the building; trims broken windows; facade details |
 | `rubble.py` | Mounds, piles and fills as closed solids |
+| `sites.py` | Points of interest: site layouts (buildings + props) on a pad |
 | `meshdata.py` | Plain mesh container and edge checks |
 | `mesh_builder.py` | Blender adapter (BMesh, coplanar merge, UVs, seams) |
 
@@ -171,6 +172,47 @@ Sized for the Ares player (`Player.prefab`: capsule 2.0 m x 0.8 m, 0.08 m skin,
 - `tests/blender_interiors.py`: stairs reach the top floor, doors, tower cores,
   all lobby types.
 - `tests/draw_plans.py OUT`: PNG floor plans (rooms, doors, stairs) for review.
+
+## Sites (v0.11)
+
+`sites.compose(kind, width, depth, seed, variant, condition)` lays out a pad
+in site coordinates: centred on the origin, with the street along the front
+(-y) and z = 0 at pad level.
+
+- **Buildings.** Each building is a `SiteBuilding`: generator parameters
+  (`designed()`, with a site program such as `STRIP`, `BIGBOX`, `BAY`,
+  `RESTAURANT` or `SCHOOL`) plus a position and a quarter-turn. The Blender
+  adapter builds them with `create_shell`, so they keep every rule above.
+- **Props.** Props are closed solids in one grounds mesh. Pads, paint, lawns,
+  walks, islands and platforms are stacked layers whose top faces sit at
+  distinct heights (`LAYER`). The pad drops to the ground-slab underside under
+  each building's ground storey, so it never shares the floor plane.
+- **Openings.** Props that touch a building read its planned openings
+  (`_openings`, `_band`, `_main_door`, `_solid_spot`). Canopies, porticos and
+  portals sit in the wall band clear of doors and windows.
+- **Damage.** Props fixed to a building are recorded with
+  `Composer.attached()`. They are dropped if the building collapses, and
+  wherever its break field stands lower than the prop.
+- **Tests.** `tests/test_sites.py` checks every kind, layout and pad size:
+  - closed grounds with no same-facing overlaps, also against the buildings;
+  - buildings inside the pad;
+  - reachable plans;
+  - no prop over an opening;
+  - no window facing a neighbour flush against it.
+
+  `tests/blender_sites.py` runs the operator for each one in Blender.
+
+City placement (`city_plan._place_pois`):
+
+- **Quotas.** Each kind has a quota per 100 built-up blocks (at least one per
+  city) and district weights. Blocks the lot pass would leave sparse are
+  favoured.
+- **Superblocks.** A superblock needs no road on its inner edges.
+- **Fronts.** The front faces the best allowed road tier.
+- **Pads.** The pad keeps a 1 m verge to the footway. Where route fillets cut
+  a corner, the pad is pushed back.
+- **Stops.** Transit stops go mid-block on arterial and collector footways,
+  clear of lot and site fronts.
 
 ## Open
 

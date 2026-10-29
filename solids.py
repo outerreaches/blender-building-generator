@@ -6,6 +6,7 @@ shared by exactly two faces. Walls are built from their 2D outline (a top
 profile minus openings) rather than cut and patched afterwards, so damage and
 openings of any polygonal shape cannot leave holes.
 """
+import math
 from dataclasses import dataclass
 
 from . import geom2d
@@ -314,3 +315,27 @@ def prism(mesh, outline, z0, z1, material, top_material=None):
     for index in range(count):
         following = (index + 1) % count
         mesh.face((bottom[index], bottom[following], upper[following], upper[index]), material)
+
+
+def frustum(mesh, bottom, top, z0, z1, material, top_material=None):
+    """Closed solid between two CCW outlines with the same vertex count."""
+    if z1 - z0 < 1e-5 or len(bottom) < 3 or len(bottom) != len(top):
+        return
+    lower = [mesh.vert((x, y, z0)) for x, y in bottom]
+    upper = [mesh.vert((x, y, z1)) for x, y in top]
+    mesh.face(list(reversed(lower)), material)
+    mesh.face(upper, material if top_material is None else top_material)
+    count = len(bottom)
+    for index in range(count):
+        following = (index + 1) % count
+        mesh.face((lower[index], lower[following], upper[following], upper[index]), material)
+
+
+def circle(cx, cy, radius, segments=8, phase=0.0):
+    """CCW polygon approximating a circle."""
+    return [(cx + math.cos(phase + math.tau * k / segments) * radius,
+             cy + math.sin(phase + math.tau * k / segments) * radius) for k in range(segments)]
+
+
+def cylinder(mesh, cx, cy, radius, z0, z1, material, segments=8):
+    prism(mesh, circle(cx, cy, radius, segments), z0, z1, material)

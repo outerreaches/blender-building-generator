@@ -1,5 +1,52 @@
 # Procedural Building Shell Generator
 
+## v0.11.0: Points of interest
+
+Cities now set whole blocks aside for points of interest, or 2 x 1 and 2 x 2
+superblocks where no street crosses between the blocks. Each kind has two to
+four layouts, and the new pure-Python `sites.py` lays them out:
+
+| Site | Layouts | Contents |
+| --- | --- | --- |
+| Gas station | Back, Side | Kiosk shop, canopy over pump islands with bollards, price pylon, parking stalls; Side adds a car wash |
+| Fast food | Mansard, Box, Diner | Restaurant (dining room, kitchen) with a mansard roof, a raised entrance box or a hipped diner roof; curbed drive-through lane with a window and menu board, patio, pole sign, bin enclosure |
+| School | Bar, Wing | 2-3 storey classroom block and gym, entrance canopy, flagpole, fenced yard with a court, playing field and play area; Wing adds a second block joined by a covered walk, or a courtyard plan on shallow pads |
+| Hospital | Tower, Slab | Podium and setback tower, or a long slab with an outpatient block; grand lobby, drive-under emergency canopy at the ambulance doors, drop-off island, parking, rooftop helipad |
+| Police station | Civic, Modern | Masonry station with a portico or canopy, flagpoles, bollards, fenced back lot with a sally-port garage, roof mast |
+| Fire station | Classic, Modern | Drive-through apparatus hall (2-4 bays) with living quarters, apron, sign band; Classic adds a drill tower |
+| Transit station | Terminal, Hub | Station hall with a canopy; raised platforms under shelters (Terminal), or a bus island and a clock tower (Hub) |
+| Park | Green, Playground, Plaza, Sports | Paths to a fountain; play equipment and picnic tables; planters and a monument; a pitch with goals, stands and floodlights |
+| Parking lot | Rows, Angled | Painted stalls, planted end islands with trees or lamps, booth and barrier |
+| Parking garage | Decks, Tall | Open decks (4-6 or 7-9 levels) linked by ramps, vehicle entrances, booth |
+| Strip mall | Row, L | Shop units with front and back doors, arcade on columns, unit signs, parking, pylon |
+| Shopping plaza | Pair, Anchor | Two big boxes with shops between them, or an anchor and junior box with a shop wing; entrance portals, loading doors, an outparcel restaurant, cart corrals, a tall pylon |
+
+Transit stops (a shelter, or a pole and bench) stand mid-block on arterial and
+collector footways.
+
+- Site buildings are ordinary generator shells with their own floor plans
+  (shop units, dining room and kitchen, classrooms, apparatus bays), so they
+  are enterable and take damage like any other building.
+- Sites take a condition from their district. Props fixed to a building, such
+  as canopies, signs and porticos, go with it: they are dropped when the
+  building collapses, and where its wall broke below them. A collapsed site
+  keeps its pad and free-standing props, with a rubble heap scaled to the
+  building's height. Damaged sites have some dead trees.
+- New operator **Shift+A > Mesh > Generate Site (Point of Interest)**: kind,
+  layout, pad size, seed and condition.
+- The city has a **Points of Interest** switch. Plan schema 5 adds `pois` and
+  `shelters`.
+- Fixed: every city building's ground floor shared its plane with the lot
+  foundation, so the floors z-fought. Under the ground storey, the foundation
+  now drops to the underside of the ground slab.
+- Tests check every kind, layout, pad size and condition:
+  - the grounds are closed with no coplanar overlaps, including against the
+    buildings;
+  - buildings fit the pad and plans are reachable;
+  - no prop covers a door or window, and no window faces a neighbour flush
+    against it;
+  - every kind is placed in the default city, clear of footways.
+
 ## v0.10.1: Collapse variety
 
 Collapsed buildings now pick one of seven archetypes by seed: corner, stepped

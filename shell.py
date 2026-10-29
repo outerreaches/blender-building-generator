@@ -74,6 +74,7 @@ def build_building(params):
     _roof(mesh, spec, field, roof_intact, params)
     _facade_details(mesh, spec, field, params)
     _interiors(mesh, spec, field, plan)
+    _ramps(mesh, spec, field)
     rubble.interior_fill(mesh, rng, spec, field, params)
     rubble.exterior_piles(mesh, rng, spec, params)
     for x, y, rx, ry, peak, base in field.debris:
@@ -324,7 +325,12 @@ def _slabs(mesh, spec, field, plan):
         here = level.rect
         outer = below if _contains(below, here) else here
         rect = (outer[0] + t, outer[1] + t, outer[2] - t, outer[3] - t)
-        holes = planned[level.index].holes if level.index in planned else []
+        holes = list(planned[level.index].holes) if level.index in planned else []
+        # Designed openings (parking ramps) from the parameters.
+        holes += [tuple(rect) for index, rect in spec.params.get('slab_holes', ()) or ()
+                  if index == level.index]
+        holes += [tuple(ramp['rect']) for ramp in spec.params.get('ramps', ()) or ()
+                  if ramp['level'] + 1 == level.index]
         slab(mesh, field, rect, level.z - spec.slab, level.z, holes)
 
 
@@ -339,8 +345,8 @@ def _roof(mesh, spec, field, intact, params):
     tier = spec.tiers[-1]
     rect = spec.interior_rect(spec.levels[-1].index)
     top = spec.top
-    if spec.roof_kind in ('FLAT', 'GABLE'):
-        # Flat roof slab, or the ceiling under a gable roof.
+    if spec.roof_kind in ('FLAT', 'GABLE', 'HIP', 'MANSARD'):
+        # Flat roof slab, or the ceiling under a pitched roof.
         slab(mesh, field, rect, top - spec.roof_slab, top, material=MAT_ROOF if spec.roof_kind == 'FLAT'
              else MAT_FLOOR, clearance=0.0)
     if not intact:
@@ -348,6 +354,9 @@ def _roof(mesh, spec, field, intact, params):
     if spec.roof_kind == 'GABLE':
         _gable(mesh, spec, tier, float(params.get('roof_height', 2.0)),
                float(params.get('roof_overhang', .4)))
+    elif spec.roof_kind in ('HIP', 'MANSARD'):
+        _hipped(mesh, spec, tier, float(params.get('roof_height', 2.0)),
+                float(params.get('roof_overhang', .4)))
     box = params.get('roof_box')
     if box and spec.roof_kind == 'FLAT':
         fw, fd, height = box
@@ -362,6 +371,26 @@ def _roof(mesh, spec, field, intact, params):
         elif crown == 'MAST':
             solids.box(mesh, cx - .3, cy - .3, top + height, cx + .3, cy + .3,
                        top + height + max(8.0, spec.top * .12), MAT_ROOF)
+
+
+def _hipped(mesh, spec, tier, rise, overhang):
+    """Hip roof (planes up to a short ridge) or mansard (steep, flat-topped)."""
+    x0, y0, x1, y1 = tier.rect
+    ox0, oy0, ox1, oy1 = x0 - overhang, y0 - overhang, x1 + overhang, y1 + overhang
+    width, depth = ox1 - ox0, oy1 - oy0
+    if spec.roof_kind == 'HIP':
+        half = min(width, depth) / 2 - .15
+        inner = (ox0 + half, oy0 + half, ox1 - half, oy1 - half)
+    else:
+        step = min(rise * .45, min(width, depth) / 4)
+        inner = (ox0 + step, oy0 + step, ox1 - step, oy1 - step)
+    solids.frustum(mesh, _rect_outline((ox0, oy0, ox1, oy1)), _rect_outline(inner),
+                   spec.top, spec.top + rise, MAT_ROOF)
+
+
+def _rect_outline(rect):
+    x0, y0, x1, y1 = rect
+    return [(x0, y0), (x1, y0), (x1, y1), (x0, y1)]
 
 
 def _gable(mesh, spec, tier, rise, overhang):
@@ -529,6 +558,38 @@ def _ccw(points):
         x1, y1 = points[(index + 1) % len(points)]
         area += x0 * y1 - x1 * y0
     return points if area > 0 else list(reversed(points))
+
+
+# -- ramps -------------------------------------------------------------------
+
+def _ramps(mesh, spec, field):
+    """Vehicle ramps between decks: sloped slabs rising across a slab opening.
+
+    ``params['ramps']`` items: {'level': i, 'rect': (x0, y0, x1, y1), 'rise': '+x'|'-x'|'+y'|'-y'}.
+    The opening is cut in the slab of storey i + 1; the ramp starts on storey
+    i's floor and lands flush with the next deck.
+    """
+    for ramp in spec.params.get('ramps', ()) or ():
+        index = ramp['level']
+        if index + 1 >= len(spec.levels):
+            continue
+        z0, z1 = spec.levels[index].z, spec.levels[index + 1].z
+        x0, y0, x1, y1 = ramp['rect']
+        cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
+        if field.damaged and (field.height(cx, cy) < z1 + .3 or field.in_blast(cx, cy, (z0 + z1) / 2)):
+            continue
+        rise = ramp.get('rise', '+y')
+        low, high = z0, z1
+        t = spec.slab
+        # Underside follows the slope at slab thickness; the low end sits on the floor.
+        heights = {'+y': (low, low, high, high), '-y': (high, high, low, low),
+                   '+x': (low, high, high, low), '-x': (high, low, low, high)}[rise]
+        corners = [(x0, y0), (x1, y0), (x1, y1), (x0, y1)]
+        bottom = [(x, y, max(z0, h - t)) for (x, y), h in zip(corners, heights)]
+        top = [(x, y, h) for (x, y), h in zip(corners, heights)]
+        # Lift the low edge's top a little so the wedge never has zero thickness.
+        top = [(x, y, max(z, b + .05)) for (x, y, z), (_, _, b) in zip(top, bottom)]
+        solids.hexahedron(mesh, bottom + top, MAT_FLOOR)
 
 
 # -- interiors ---------------------------------------------------------------

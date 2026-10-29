@@ -1,11 +1,13 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Shared Blender material and shell creation services."""
+import math
 import random
 
 import bpy
 
-from . import rubble
-from .mesh_builder import BuildingShellBuilder
+from . import rubble, sites
+from .mesh_builder import (BuildingShellBuilder, generate_uvs, mark_seams_for_uvs,
+                           merge_coplanar, to_bmesh)
 from .meshdata import MAT_RUBBLE, MeshData
 
 MATERIALS = (
@@ -17,6 +19,24 @@ MATERIALS = (
     ('Building_InteriorWall', (.85, .82, .78, 1)),
     ('Building_Stairs', (.45, .4, .35, 1)),
     ('Building_Rubble', (.35, .32, .28, 1)),
+)
+
+
+# Site ground slots, in sites.S_* order.
+SITE_MATERIALS = (
+    ('Site_Asphalt', (.09, .09, .10, 1)),
+    ('Site_Concrete', (.52, .51, .48, 1)),
+    ('Site_Paint', (.80, .80, .76, 1)),
+    ('Site_PaintYellow', (.78, .62, .16, 1)),
+    ('Site_Grass', (.27, .29, .15, 1)),
+    ('Site_Foliage', (.20, .26, .12, 1)),
+    ('Site_Metal', (.36, .37, .38, 1)),
+    ('Site_Sign', (.66, .20, .14, 1)),
+    ('Site_Wood', (.36, .25, .16, 1)),
+    ('Site_Rubble', (.35, .32, .28, 1)),
+    ('Site_Glass', (.28, .36, .40, 1)),
+    ('Site_Rubber', (.30, .16, .12, 1)),
+    ('Site_Water', (.10, .16, .18, 1)),
 )
 
 
@@ -90,3 +110,90 @@ def create_rubble(name, params, collection):
         if mesh.users == 0:
             bpy.data.meshes.remove(mesh)
         raise
+
+
+def mesh_object_from_data(name, data, collection, merge=True):
+    """Object from a MeshData (material indices kept), merged and UV-mapped."""
+    bm = to_bmesh(data)
+    mesh = None
+    try:
+        bm.normal_update()
+        if merge:
+            merge_coplanar(bm)
+            bm.normal_update()
+        generate_uvs(bm)
+        mark_seams_for_uvs(bm)
+        mesh = bpy.data.meshes.new(name)
+        bm.to_mesh(mesh)
+    except Exception:
+        if mesh is not None and mesh.users == 0:
+            bpy.data.meshes.remove(mesh)
+        raise
+    finally:
+        bm.free()
+    obj = bpy.data.objects.new(name, mesh)
+    collection.objects.link(obj)
+    return obj
+
+
+def add_site_material_slots(obj):
+    for name, color in SITE_MATERIALS:
+        obj.data.materials.append(material(name, color))
+
+
+def create_site(name, site, collection):
+    """Site grounds object with its buildings parented to it.
+
+    The grounds origin is the pad centre at pad level; the front (street)
+    faces -Y, like a building's.
+    """
+    grounds = mesh_object_from_data(f'{name}_Grounds', site.ground, collection)
+    add_site_material_slots(grounds)
+    grounds['site_kind'], grounds['site_variant'] = site.kind, site.variant
+    grounds['site_size'] = (round(site.width, 3), round(site.depth, 3))
+    grounds['surface_role'] = 'site'
+    if site.notes:
+        grounds['site_notes'] = '; '.join(site.notes)
+    walls = material(f'Site_{site.kind.title()}_Walls', sites.WALL_COLORS[site.kind])
+    for building in site.buildings:
+        obj = create_shell(f'{name}_{building.name}', building.params, collection)
+        obj.parent = grounds
+        obj.location = (building.x, building.y, 0.0)
+        obj.rotation_euler.z = building.quarter * math.pi / 2
+        obj.data.materials[0] = walls
+        obj['site_role'] = building.role
+    return grounds
+
+
+def create_site_preview(name, site, collection):
+    """Fast stand-in: the pad and one box per building."""
+    data = MeshData()
+    x0, y0, x1, y1 = -site.width / 2, -site.depth / 2, site.width / 2, site.depth / 2
+    from .solids import box
+    box(data, x0, y0 - site.approach, -sites.PAD_THICKNESS, x1, y1, 0.0, sites.S_CONCRETE)
+    for building in site.buildings:
+        p = building.params
+        height = p['ground_floor_height'] + (p['floors'] - 1) * p['floor_height']
+        bx0, by0, bx1, by1 = building.footprint
+        box(data, bx0, by0, 0.0, bx1, by1, height, sites.S_SIGN)
+    obj = mesh_object_from_data(f'{name}_Preview', data, collection, merge=False)
+    add_site_material_slots(obj)
+    obj['site_kind'], obj['site_variant'] = site.kind, site.variant
+    return obj
+
+
+def create_shelter(name, variant, collection, meshes=None):
+    """Transit stop; the road side is -Y. Pass one ``meshes`` dict per batch so
+    stops of a variant share their mesh."""
+    meshes = {} if meshes is None else meshes
+    mesh = meshes.get(variant)
+    if mesh is None:
+        source = mesh_object_from_data(f'Shelter_{variant}', sites.shelter(variant), collection)
+        add_site_material_slots(source)
+        mesh = meshes[variant] = source.data
+        bpy.data.objects.remove(source)
+    obj = bpy.data.objects.new(name, mesh)
+    collection.objects.link(obj)
+    obj['surface_role'] = 'prop'
+    obj['shelter_variant'] = variant
+    return obj

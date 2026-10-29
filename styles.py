@@ -125,6 +125,16 @@ def building_recipe(style, width, depth, floors, seed, damage=0, interiors=False
                        door_width=1.2, door_height=2.4, roof_parapet=False,
                        flat_roof=False, roof_kind='GABLE', roof_height=2.4,
                        roof_overhang=.5)
+    apply_condition(profile, condition, floors, seed)
+    margin = 2 * (profile['wall_thickness'] + .35)
+    module = profile['window_width'] + profile['window_spacing']
+    profile['windows_per_floor'] = max(1, int(round((width - margin) / module)))
+    profile['ground_floor_window_count'] = max(1, int((width - 3) / 3))
+    return profile
+
+
+def apply_condition(profile, condition, floors, seed):
+    """Turn a building condition into generator parameters (in place)."""
     if condition == 'RUBBLE_FILLED':
         profile.update(interior_fill='FILLED', building_profile='NONE',
                        chunk_cut=True, expose_fill=True)
@@ -157,8 +167,4 @@ def building_recipe(style, width, depth, floors, seed, damage=0, interiors=False
         profile['chunk_cut'] = True
         profile['collapse'] = random.Random(seed ^ 0x5EEE).choice(
             ('SAWTOOTH', 'BLOWOUT', 'BLOWOUT', 'CORNER'))
-    margin = 2 * (profile['wall_thickness'] + .35)
-    module = profile['window_width'] + profile['window_spacing']
-    profile['windows_per_floor'] = max(1, int(round((width - margin) / module)))
-    profile['ground_floor_window_count'] = max(1, int((width - 3) / 3))
     return profile

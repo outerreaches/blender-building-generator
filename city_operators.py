@@ -4,9 +4,13 @@ import math
 import bpy
 from bpy.props import BoolProperty, EnumProperty, FloatProperty, IntProperty
 from .city_plan import CONDITIONS, VERSION, CitySettings, generate_city, stream
+from .dims import GROUND_SLAB
+from .spec import BuildingSpec
+from .sites import KINDS as SITE_KINDS, VARIANTS as SITE_VARIANTS, compose as compose_site
 from .streets import build_street_mesh, build_ground_mesh, junctions
 from .styles import STYLE_ITEMS, STYLE_COLORS, building_recipe
-from .building_assets import create_rubble, create_shell, material
+from .building_assets import (create_rubble, create_shell, create_shelter, create_site,
+                              create_site_preview, material)
 
 
 def mesh_object(name, vertices, faces, collection, mat):
@@ -51,13 +55,18 @@ def build_roads(plan, collection):
     return obj
 
 
-def build_frontage(lot, plan, collection):
-    """Level foundation and a clear concrete approach from sidewalk to entrance."""
+def build_frontage(lot, plan, collection, sunken=None):
+    """Level foundation and a clear concrete approach from sidewalk to entrance.
+
+    ``sunken`` (x0, y0, x1, y1, centred on the lot) is the building's ground
+    storey: the foundation drops there to the underside of its ground slab,
+    so the two never share the floor plane.
+    """
     h = plan.settings.curb_height
     vertices, faces = [], []
-    def slab(x0, y0, x1, y1):
+    def slab(x0, y0, x1, y1, top=h):
         offset = len(vertices)
-        vertices.extend([(x, y, z) for z in (-.2, h)
+        vertices.extend([(x, y, z) for z in (-.2, top)
                          for x, y in ((x0, y0), (x1, y0), (x1, y1), (x0, y1))])
         faces.extend(tuple(offset + i for i in f) for f in
                      ((0, 3, 2, 1), (4, 5, 6, 7), (0, 1, 5, 4),
@@ -70,7 +79,18 @@ def build_frontage(lot, plan, collection):
     facing = (math.sin(lot.rotation), -math.cos(lot.rotation))
     distance = sum((mid[i] - lot.center[i]) * facing[i] for i in range(2))
     approach_end = distance - road.width / 2 - plan.settings.sidewalk_width
-    slab(-half_w, -approach_end, half_w, half_d)
+    if sunken:
+        xs = sorted({-half_w, half_w, sunken[0], sunken[2]})
+        ys = sorted({-approach_end, half_d, sunken[1], sunken[3]})
+        for x0, x1 in zip(xs, xs[1:]):
+            for y0, y1 in zip(ys, ys[1:]):
+                if x1 - x0 < 1e-4 or y1 - y0 < 1e-4:
+                    continue
+                inside = (sunken[0] <= (x0 + x1) / 2 <= sunken[2] and
+                          sunken[1] <= (y0 + y1) / 2 <= sunken[3])
+                slab(x0, y0, x1, y1, h - GROUND_SLAB if inside else h)
+    else:
+        slab(-half_w, -approach_end, half_w, half_d)
     obj = mesh_object(lot.id + '_Foundation', vertices, faces, collection,
                       material('City_Pavement', (.42, .41, .38, 1)))
     obj.rotation_euler.z = lot.rotation
@@ -210,6 +230,30 @@ def build_route_guides(plan, collection, origin):
         curve.materials.append(material('City_Route_' + str(index), colors[index % len(colors)]))
 
 
+def build_sites(plan, root, origin, detail):
+    """Points of interest (one object tree per site) and transit stops."""
+    collection = bpy.data.collections.new('Sites')
+    root.children.link(collection)
+    h = plan.settings.curb_height
+    for poi in plan.pois:
+        site = compose_site(poi.kind, poi.width, poi.depth, poi.seed, None, poi.condition,
+                            poi.damage, poi.approach)
+        if detail == 'SHELLS':
+            obj = create_site(poi.id, site, collection)
+        else:
+            obj = create_site_preview(poi.id, site, collection)
+        obj.location = (origin.x + poi.center[0], origin.y + poi.center[1], origin.z + h)
+        obj.rotation_euler.z = poi.rotation
+        obj['condition'], obj['district'], obj['city_style'] = poi.condition, poi.district, poi.style
+        obj['asset_seed'] = poi.seed
+    meshes = {}
+    for shelter in plan.shelters:
+        obj = create_shelter(shelter.id, shelter.variant, collection, meshes)
+        obj.location = (origin.x + shelter.position[0], origin.y + shelter.position[1], origin.z + h)
+        obj.rotation_euler.z = shelter.rotation
+    return collection
+
+
 def remove_generated_collection(collection):
     for child in list(collection.children):
         remove_generated_collection(child)
@@ -255,6 +299,9 @@ class MESH_OT_generate_city(bpy.types.Operator):
     interior_ratio: FloatProperty(name='Interior Ratio', default=.25, min=0, max=1,
                                  description='Fraction of enterable buildings that get full interior layouts')
     route_guides: BoolProperty(name='Show Driving Route Guides', default=False)
+    points_of_interest: BoolProperty(name='Points of Interest', default=True,
+                                     description='Gas stations, schools, hospitals, parks, parking, malls '
+                                                 'and transit stops on reserved blocks')
     lane_markings: BoolProperty(name='Worn Lane Markings', default=True)
 
     @classmethod
@@ -269,7 +316,7 @@ class MESH_OT_generate_city(bpy.types.Operator):
         for title, names in (
             ('City Growth', ('seed', 'radius', 'block_size', 'primary_count', 'secondary_count', 'driving_loop_count')),
             ('Density and Access', ('curve_radius', 'core_radius', 'core_density', 'outskirts_density', 'road_density', 'setback', 'sidewalk_width', 'curb_height', 'wasteland')),
-            ('Buildings', ('style', 'damage', 'max_buildings', 'detail')),
+            ('Buildings', ('style', 'damage', 'max_buildings', 'points_of_interest', 'detail')),
         ):
             group = layout.box()
             group.label(text=title)
@@ -345,15 +392,23 @@ class MESH_OT_generate_city(bpy.types.Operator):
                 obj.location = (origin.x + lot.center[0], origin.y + lot.center[1], origin.z + self.curb_height)
                 obj.rotation_euler.z = lot.rotation
                 obj['city_style'], obj['asset_seed'], obj['district'] = lot.style, lot.seed, lot.district
-                foundation = build_frontage(lot, plan, col)
+                sunken = None
+                if self.detail == 'SHELLS' and lot.condition != 'COLLAPSED':
+                    x0, y0, x1, y1 = BuildingSpec(params).levels[0].rect
+                    sunken = (x0 - lot.width / 2, y0 - lot.depth / 2,
+                              x1 - lot.width / 2, y1 - lot.depth / 2)
+                foundation = build_frontage(lot, plan, col, sunken)
                 foundation.location = (origin.x + lot.center[0], origin.y + lot.center[1], origin.z)
                 context.window_manager.progress_update(index + 1)
+            if plan.pois or plan.shelters:
+                build_sites(plan, root, origin, self.detail)
             plan_text = bpy.data.texts.new(f'{root.name}_plan.json')
             plan_text.write(plan.to_json())
             root['plan_text'] = plan_text.name
             root['origin'] = list(origin)
             root['driving_circuits'] = len(plan.driving_loops)
-            message = f'{len(plan.lots)} buildings, {len(plan.roads)} road segments, {len(plan.driving_loops)} circuits'
+            message = (f'{len(plan.lots)} buildings, {len(plan.pois)} sites, '
+                       f'{len(plan.roads)} road segments, {len(plan.driving_loops)} circuits')
             if plan.eligible_lots > len(plan.lots):
                 message += f' (budget limited from {plan.eligible_lots})'
             self.report({'INFO'}, message)
@@ -425,4 +480,65 @@ class MESH_OT_building_style(bpy.types.Operator):
             return {'CANCELLED'}
 
 
-CLASSES = (MESH_OT_building_style, MESH_OT_generate_city)
+_VARIANT_ITEMS = {kind: [('AUTO', 'Auto', 'Chosen by the seed')] +
+                  [(v, v.replace('_', ' ').title(), '') for v in variants]
+                  for kind, variants in SITE_VARIANTS.items()}
+
+
+def _variant_items(self, context):
+    return _VARIANT_ITEMS.get(self.kind, _VARIANT_ITEMS['PARK'])
+
+
+class MESH_OT_generate_site(bpy.types.Operator):
+    bl_idname = 'mesh.generate_city_site'
+    bl_label = 'Generate Site (Point of Interest)'
+    bl_description = 'Gas station, fast food, school, hospital, police or fire station, transit, park, parking or mall on its own pad'
+    bl_options = {'REGISTER', 'UNDO'}
+
+    kind: EnumProperty(name='Site', items=[(k, k.replace('_', ' ').title(), '') for k in SITE_KINDS],
+                       default='GAS_STATION')
+    variant: EnumProperty(name='Layout', items=_variant_items)
+    width: FloatProperty(name='Width (along street)', default=40, min=16, max=160)
+    depth: FloatProperty(name='Depth', default=40, min=16, max=160)
+    seed: IntProperty(name='Seed', default=42)
+    condition: EnumProperty(name='Condition',
+                            items=[(condition, condition.replace('_', ' ').title(), '')
+                                   for condition in CONDITIONS])
+    damage: FloatProperty(name='Damage', default=.35, min=0, max=1)
+    approach: FloatProperty(name='Front Approach (m)', default=2, min=0, max=12)
+    detail: EnumProperty(name='Output', items=[('SHELLS', 'Detailed Shells', ''),
+                                               ('PREVIEW', 'Layout Preview', '')])
+
+    @classmethod
+    def poll(cls, context):
+        return context.mode == 'OBJECT'
+
+    def invoke(self, context, event):
+        return context.window_manager.invoke_props_dialog(self, width=360)
+
+    def execute(self, context):
+        collection = bpy.data.collections.new(f'Site_{self.kind.title()}')
+        context.collection.children.link(collection)
+        try:
+            variant = None if self.variant == 'AUTO' else self.variant
+            if variant not in (None, *SITE_VARIANTS[self.kind]):
+                variant = None
+            site = compose_site(self.kind, self.width, self.depth, self.seed, variant,
+                                self.condition, self.damage if self.condition != 'INTACT' else 0.0,
+                                self.approach)
+            builder = create_site if self.detail == 'SHELLS' else create_site_preview
+            obj = builder(f'{self.kind.title()}_{self.seed}', site, collection)
+            obj.location = context.scene.cursor.location
+            obj['condition'], obj['asset_seed'] = self.condition, self.seed
+            for note in site.notes:
+                self.report({'WARNING'}, note)
+            self.report({'INFO'}, f'{site.kind.title()} ({site.variant.title()}), '
+                                  f'{len(site.buildings)} buildings')
+            return {'FINISHED'}
+        except Exception as exc:
+            remove_generated_collection(collection)
+            self.report({'ERROR'}, f'Site generation failed: {exc}')
+            return {'CANCELLED'}
+
+
+CLASSES = (MESH_OT_building_style, MESH_OT_generate_city, MESH_OT_generate_site)

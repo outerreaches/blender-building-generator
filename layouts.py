@@ -432,37 +432,72 @@ def plan_bar(spec, rng):
 
 
 def plan_apartments(spec, rng):
-    """Double-loaded corridor block; walk-up plan on small or shallow plates."""
-    x0, y0, x1, y1 = _common_rect(spec)
-    if y1 - y0 < 11.5 or x1 - x0 < 14 or len(spec.levels) < 2:
+    """Double-loaded corridor block of flats; walk-up plan on small or shallow plates."""
+    if len(spec.levels) < 2:
         return plan_walkup(spec, rng)
+    return plan_corridor(spec, rng, _flat, (4.6, 9.5), fallback=plan_walkup)
+
+
+def plan_school(spec, rng):
+    """Classrooms either side of a corridor, WCs by the stair, exits at the corridor ends."""
+    return plan_corridor(spec, rng, _single('classroom'), (6.5, 9.5), wc=True, exits=True,
+                         fallback=plan_open)
+
+
+def plan_civic(spec, rng):
+    """Offices off a corridor (police, clinics, administration)."""
+    return plan_corridor(spec, rng, _single('office'), (3.2, 6.5), wc=True, exits=True,
+                         fallback=plan_open)
+
+
+def _single(kind):
+    def unit(tiling, spec, level, rect, tag, corridor_low, rng):
+        tiling.add(f'{kind}{tag}', kind, rect, 'corridor')
+    return unit
+
+
+def plan_corridor(spec, rng, unit, widths, wc=False, exits=False, fallback=None):
+    """Rooms either side of a corridor along the building, a stair core at the back.
+
+    ``unit`` fills each slice of the two strips (flats, classrooms, offices);
+    slices are cut at facade piers so their walls never land on windows.
+    """
+    fallback = fallback or plan_walkup
+    x0, y0, x1, y1 = _common_rect(spec)
+    multi = len(spec.levels) > 1
+    if y1 - y0 < 11.5 or x1 - x0 < 14:
+        return fallback(spec, rng)
     side_piers = sorted(spec.piers(0)['left'])
     middle = (y0 + y1) / 2
     pairs = [(a, b) for a, b in zip(side_piers, side_piers[1:])
              if dims.CORRIDOR - EPS <= b - a <= 3.6 and a - y0 >= 4.4 and y1 - b >= 4.4]
-    ca, cb = (min(pairs, key=lambda pair: abs(sum(pair) / 2 - middle)) if pairs else
-              (middle - dims.CORRIDOR / 2, middle + dims.CORRIDOR / 2))
-    long_side = stair_length([level.height for level in spec.levels]) + dims.CORE_WALL / 2
-    short_side = stair_width() + dims.CORE_WALL
-    back_depth = y1 - cb
-    if back_depth + EPS >= long_side:
-        need, axis = short_side, 'y'
-    elif back_depth + EPS >= short_side:
-        need, axis = long_side + dims.CORE_WALL / 2, 'x'
-    else:
-        return plan_walkup(spec, rng)
+    if not pairs:
+        return fallback(spec, rng)
+    ca, cb = min(pairs, key=lambda pair: abs(sum(pair) / 2 - middle))
     front_piers = spec.piers(0)['front']
-    target = (x0 + x1) / 2 + rng.choice((-1, 0, 1)) * (x1 - x0) * .2
-    span = _snap_span(front_piers, x0 + 4.4, x1 - 4.4, need, target, ends=False)
-    if span is None:
-        return plan_walkup(spec, rng)
-    sx0, sx1 = span
+    sx0 = sx1 = None
+    axis, entry = 'y', -1
+    if multi:
+        long_side = stair_length([level.height for level in spec.levels]) + dims.CORE_WALL / 2
+        short_side = stair_width() + dims.CORE_WALL
+        back_depth = y1 - cb
+        if back_depth + EPS >= long_side:
+            need, axis = short_side, 'y'
+        elif back_depth + EPS >= short_side:
+            need, axis = long_side + dims.CORE_WALL / 2, 'x'
+        else:
+            return fallback(spec, rng)
+        target = (x0 + x1) / 2 + rng.choice((-1, 0, 1)) * (x1 - x0) * .2
+        span = _snap_span(front_piers, x0 + 4.4, x1 - 4.4, need, target, ends=False)
+        if span is None:
+            return fallback(spec, rng)
+        sx0, sx1 = span
+        entry = -1 if axis == 'y' else (-1 if (sx0 + sx1) / 2 > (x0 + x1) / 2 else 1)
     door = _front_door(spec)
     lobby_span = None
     if door:
         lobby_span = _snap_span(front_piers, x0, x1, max(door[1] - door[0] + .8, 3.0),
                                 (door[0] + door[1]) / 2)
-    entry = -1 if axis == 'y' else (-1 if (sx0 + sx1) / 2 > (x0 + x1) / 2 else 1)
     levels = []
     for level in spec.levels:
         rect = spec.interior_rect(level.index)
@@ -471,27 +506,40 @@ def plan_apartments(spec, rng):
         is_ground = level.index == 0
         tiling.add('corridor', 'corridor', (lx0, ca, lx1, cb),
                    'lobby' if is_ground and lobby_span else None if is_ground else 'stair')
-        tiling.add('stair', 'stair', (sx0, cb, sx1, ly1), 'corridor' if is_ground else None,
-                   wall=dims.CORE_WALL, stair=(axis, entry, dims.STAIR_FLIGHT))
+        if multi:
+            tiling.add('stair', 'stair', (sx0, cb, sx1, ly1), 'corridor' if is_ground else None,
+                       wall=dims.CORE_WALL, stair=(axis, entry, dims.STAIR_FLIGHT))
         if is_ground and lobby_span:
             la, lb = lobby_span
             tiling.add('lobby', 'lobby', (la, ly0, lb, ca))
-            pieces = [_split_bays(lx0, la, front_piers), _split_bays(lb, lx1, front_piers)]
+            pieces = [_split_bays(lx0, la, front_piers, *widths),
+                      _split_bays(lb, lx1, front_piers, *widths)]
         else:
-            pieces = [_split_bays(lx0, lx1, front_piers)]
+            pieces = [_split_bays(lx0, lx1, front_piers, *widths)]
         number = 0
         for cuts in pieces:
             for a, b in zip(cuts, cuts[1:]):
-                _flat(tiling, spec, level, (a, ly0, b, ca), f'f{number}', corridor_low=False, rng=rng)
+                unit(tiling, spec, level, (a, ly0, b, ca), f'f{number}', corridor_low=False, rng=rng)
                 number += 1
-        for bx0, bx1 in ((lx0, sx0), (sx1, lx1)):
-            cuts = _split_bays(bx0, bx1, front_piers)
-            for a, b in zip(cuts, cuts[1:]):
-                _flat(tiling, spec, level, (a, cb, b, ly1), f'b{number}', corridor_low=True, rng=rng)
+        back = ((lx0, sx0), (sx1, lx1)) if multi else ((lx0, lx1),)
+        for block, (bx0, bx1) in enumerate(back):
+            cuts = _split_bays(bx0, bx1, front_piers, *widths)
+            for index, (a, b) in enumerate(zip(cuts, cuts[1:])):
+                beside_stair = multi and ((block == 0 and index == len(cuts) - 2) or
+                                          (block == 1 and index == 0))
+                if wc and beside_stair and b - a >= dims.MIN_BATH:
+                    tiling.add(f'wc{number}', 'bath', (a, cb, b, ly1), 'corridor')
+                else:
+                    unit(tiling, spec, level, (a, cb, b, ly1), f'b{number}', corridor_low=True,
+                         rng=rng)
                 number += 1
         levels.append(tiling.level())
-    doors = [('front', (lobby_span[0] + lobby_span[1]) / 2, door[2])] if lobby_span else None
-    return Plan(levels, doors)
+    doors = []
+    if lobby_span:
+        doors.append(('front', (lobby_span[0] + lobby_span[1]) / 2, door[2]))
+    if exits:
+        doors += [('left', (ca + cb) / 2, 1.6), ('right', (ca + cb) / 2, 1.6)]
+    return Plan(levels, doors or None)
 
 
 def _flat(tiling, spec, level, rect, tag, corridor_low, rng):
@@ -796,7 +844,124 @@ def plan_open(spec, rng):
     return Plan(levels, notes=notes)
 
 
+def _back_zone(spec, level, rect, depth, minimum=dims.MIN_ROOM):
+    """y of a wall cutting a back zone off the plate, on a side pier (or None)."""
+    x0, y0, x1, y1 = rect
+    options = [p for p in spec.piers(level.index)['left'] if y0 + minimum <= p <= y1 - 2.0]
+    if not options:
+        return None
+    return min(options, key=lambda p: abs((y1 - p) - depth))
+
+
+def plan_shop(spec, rng):
+    """Sales room on the street, store room and WC behind, a counter."""
+    if len(spec.levels) > 1:
+        return plan_walkup(spec, rng, 'shop', 'flat')
+    rect = spec.interior_rect(0)
+    x0, y0, x1, y1 = rect
+    tiling = Tiling(rect, 0)
+    cut = _back_zone(spec, spec.levels[0], rect, 3.5)
+    if cut is None:
+        tiling.add('shop', 'shop', rect)
+    else:
+        tiling.add('shop', 'shop', (x0, y0, x1, cut))
+        split = [p for p in spec.piers(0)['back'] if x0 + dims.MIN_BATH <= p <= x0 + 3.2 and
+                 x1 - p >= dims.MIN_ROOM]
+        if split:
+            tiling.add('wc', 'bath', (x0, cut, split[0], y1), 'shop')
+            tiling.add('store', 'storage', (split[0], cut, x1, y1), 'shop')
+        else:
+            tiling.add('store', 'storage', (x0, cut, x1, y1), 'shop')
+        tiling.fixtures.append((x0 + (x1 - x0) * .45, cut - 1.5, x1 - .8, cut - .9, 1.05))
+    return Plan([tiling.level()])
+
+
+def plan_restaurant(spec, rng):
+    """Dining room on the street, counter, kitchen and restrooms behind."""
+    if len(spec.levels) > 1:
+        return plan_walkup(spec, rng, 'shop', 'flat')
+    rect = spec.interior_rect(0)
+    x0, y0, x1, y1 = rect
+    tiling = Tiling(rect, 0)
+    cut = _back_zone(spec, spec.levels[0], rect, (y1 - y0) * .42)
+    if cut is None:
+        tiling.add('dining', 'bar', rect)
+        return Plan([tiling.level()])
+    tiling.add('dining', 'bar', (x0, y0, x1, cut))
+    split = [p for p in spec.piers(0)['back'] if x0 + 2.4 <= p <= x0 + 4.5 and x1 - p >= 4.0]
+    if split:
+        tiling.add('restrooms', 'bath', (x0, cut, split[0], y1), 'dining')
+        tiling.add('kitchen', 'kitchen', (split[0], cut, x1, y1), 'dining')
+    else:
+        tiling.add('kitchen', 'kitchen', (x0, cut, x1, y1), 'dining')
+    left = split[0] if split else x0
+    tiling.fixtures.append((left + 1.0, cut - 1.6, x1 - 1.0, cut - 1.0, 1.05))
+    return Plan([tiling.level()])
+
+
+def plan_strip(spec, rng):
+    """A row of shop units, each with its own street door, back room and back door."""
+    rect = spec.interior_rect(0)
+    x0, y0, x1, y1 = rect
+    tiling = Tiling(rect, 0)
+    cut = _back_zone(spec, spec.levels[0], rect, 3.5)
+    cuts = _split_bays(x0, x1, spec.piers(0)['front'], 5.5, 10.5)
+    doors = []
+    for number, (a, b) in enumerate(zip(cuts, cuts[1:])):
+        if cut is None:
+            tiling.add(f'shop{number}', 'shop', (a, y0, b, y1), unit=f'u{number}')
+        else:
+            tiling.add(f'shop{number}', 'shop', (a, y0, b, cut), unit=f'u{number}')
+            tiling.add(f'back{number}', 'storage', (a, cut, b, y1), f'shop{number}', unit=f'u{number}')
+        doors.append(('front', (a + b) / 2, 1.6))
+        doors.append(('back', (a + b) / 2, 1.2))
+        tiling.fixtures.append((a + 1.0, y0 + (cut or y1 - y0) * .55, b - 1.0,
+                                y0 + (cut or y1 - y0) * .55 + .6, 1.0))
+    return Plan([tiling.level()], doors)
+
+
+def plan_bigbox(spec, rng):
+    """Open sales floor, stockroom along the back, an office and WC by the entrance."""
+    rect = spec.interior_rect(0)
+    x0, y0, x1, y1 = rect
+    tiling = Tiling(rect, 0)
+    cut = _back_zone(spec, spec.levels[0], rect, min(12.0, (y1 - y0) * .3), 6.0)
+    sales_y1 = cut if cut is not None else y1
+    office_x = [p for p in spec.piers(0)['front'] if x0 + 5.0 <= p <= x0 + 9.0]
+    office_y = [p for p in spec.piers(0)['left'] if y0 + 4.0 <= p <= y0 + 7.0 and p < sales_y1 - 6]
+    if office_x and office_y:
+        ox, oy = office_x[0], office_y[0]
+        blocks = [(x0, y0, ox, oy)]
+        _tile_around(tiling, (x0, y0, x1, sales_y1), blocks, 'sales', 'shop')
+        half = [p for p in spec.piers(0)['front'] if x0 + 2.4 <= p <= ox - 2.0]
+        if half:
+            tiling.add('office', 'office', (x0, y0, half[0], oy))
+            tiling.add('wc', 'bath', (half[0], y0, ox, oy))
+        else:
+            tiling.add('office', 'office', (x0, y0, ox, oy))
+    else:
+        _tile_around(tiling, (x0, y0, x1, sales_y1), [], 'sales', 'shop')
+    if cut is not None:
+        tiling.add('stock', 'storage', (x0, cut, x1, y1))
+    return Plan([tiling.level()])
+
+
+def plan_bay(spec, rng):
+    """One open hall (vehicle bays, depots)."""
+    rect = spec.interior_rect(0)
+    tiling = Tiling(rect, 0)
+    tiling.add('hall', 'open', rect)
+    return Plan([tiling.level()])
+
+
 PLANNERS = {
+    'SHOP': plan_shop,
+    'RESTAURANT': plan_restaurant,
+    'STRIP': plan_strip,
+    'BIGBOX': plan_bigbox,
+    'BAY': plan_bay,
+    'SCHOOL': plan_school,
+    'CIVIC': plan_civic,
     'STOREFRONT': plan_storefront,
     'RESIDENTIAL': plan_apartments,
     'OFFICE': plan_office,

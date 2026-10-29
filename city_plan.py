@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Deterministic city growth, independent of Blender. Coordinates are metres."""
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from collections import deque
 import hashlib
 import heapq
@@ -8,7 +8,7 @@ import json
 import math
 import random
 
-VERSION = 4
+VERSION = 5
 ROAD_WIDTHS = {"HIGHWAY": 20.0, "ARTERIAL": 12.0, "COLLECTOR": 8.0, "LOCAL": 6.0}
 ROAD_RANK = {name: i for i, name in enumerate(ROAD_WIDTHS)}
 # Corner radius at a route bend, before the curve_radius multiplier and clamping.
@@ -32,6 +32,54 @@ STYLE_PROFILE = {
                      setback=3, road=.5, curve=1.4, damage=.3),
 }
 STYLES = tuple(STYLE_PROFILE)
+# Points of interest (sites.py lays them out). ``blocks`` lists footprints in
+# blocks (along the street, away from it), preferred first; ``count`` is the
+# number per 100 built-up blocks and ``minimum`` how many any city gets when a
+# block qualifies; ``front`` limits the road tiers a site may face (None: any
+# but a highway); ``spacing`` is the least distance in blocks between two of a
+# kind; ``districts`` weights district styles (styles left out only take a
+# site when the minimum cannot be met otherwise).
+POI_RULES = {
+    'SHOPPING_PLAZA': dict(blocks=((2, 2),), count=.5, minimum=1, front=('ARTERIAL', 'COLLECTOR'),
+                           spacing=8, districts={'SUBURBAN': 3, 'INDUSTRIAL': 1.5, 'RESIDENTIAL': 1}),
+    'HOSPITAL': dict(blocks=((2, 1), (2, 2)), count=.5, minimum=1, front=('ARTERIAL', 'COLLECTOR'),
+                     spacing=6, districts={'BRUTALIST': 3, 'DOWNTOWN': 2, 'RESIDENTIAL': 1.5,
+                                           'OLD_TOWN': 1}),
+    'SCHOOL': dict(blocks=((2, 1), (1, 1)), count=1, minimum=1, front=None, spacing=4,
+                   districts={'RESIDENTIAL': 3, 'SUBURBAN': 2, 'BRUTALIST': 2, 'OLD_TOWN': 1}),
+    'STRIP_MALL': dict(blocks=((1, 1), (2, 1)), count=1, minimum=1, front=('ARTERIAL', 'COLLECTOR'),
+                       spacing=3, districts={'SUBURBAN': 3, 'RESIDENTIAL': 1.5, 'INDUSTRIAL': 1,
+                                             'BRUTALIST': 1}),
+    'PARK': dict(blocks=((1, 1), (2, 1)), count=2, minimum=1, front=None, spacing=2,
+                 districts={'RESIDENTIAL': 3, 'OLD_TOWN': 2, 'BRUTALIST': 2, 'DOWNTOWN': 1.5,
+                            'SUBURBAN': 1.5}),
+    'TRANSIT_STATION': dict(blocks=((1, 1),), count=1, minimum=1, front=('ARTERIAL', 'COLLECTOR'),
+                            spacing=4, districts={'DOWNTOWN': 3, 'BRUTALIST': 2, 'OLD_TOWN': 1.5,
+                                                  'RESIDENTIAL': 1, 'INDUSTRIAL': 1}),
+    'POLICE': dict(blocks=((1, 1),), count=.7, minimum=1, front=None, spacing=5,
+                   districts={'DOWNTOWN': 2, 'OLD_TOWN': 2, 'BRUTALIST': 2, 'RESIDENTIAL': 1,
+                              'SUBURBAN': 1}),
+    'FIRE_STATION': dict(blocks=((1, 1),), count=1, minimum=1, front=None, spacing=4,
+                         districts={'RESIDENTIAL': 2, 'OLD_TOWN': 2, 'INDUSTRIAL': 2, 'SUBURBAN': 1.5,
+                                    'BRUTALIST': 1.5, 'DOWNTOWN': 1}),
+    'PARKING_GARAGE': dict(blocks=((1, 1),), count=1.2, minimum=1, front=None, spacing=2,
+                           districts={'DOWNTOWN': 4, 'BRUTALIST': 1, 'OLD_TOWN': .5}),
+    'PARKING_LOT': dict(blocks=((1, 1),), count=1.2, minimum=1, front=None, spacing=2,
+                        districts={'DOWNTOWN': 2, 'OLD_TOWN': 2, 'INDUSTRIAL': 1.5, 'BRUTALIST': 1}),
+    'GAS_STATION': dict(blocks=((1, 1),), count=2, minimum=1, front=('ARTERIAL', 'COLLECTOR'),
+                        spacing=3, districts={'SUBURBAN': 3, 'INDUSTRIAL': 2.5, 'RESIDENTIAL': 1.5,
+                                              'BRUTALIST': 1, 'OLD_TOWN': .5}),
+    'FAST_FOOD': dict(blocks=((1, 1),), count=2, minimum=1, front=('ARTERIAL', 'COLLECTOR'),
+                      spacing=2, districts={'SUBURBAN': 3, 'RESIDENTIAL': 2, 'BRUTALIST': 1.5,
+                                            'INDUSTRIAL': 1, 'OLD_TOWN': 1}),
+}
+# Smallest pad each kind is laid out for (mirrors sites.MIN_PAD).
+POI_MIN_PAD = {'GAS_STATION': (24, 22), 'FAST_FOOD': (26, 24), 'SCHOOL': (40, 32),
+               'HOSPITAL': (44, 32), 'POLICE': (28, 26), 'FIRE_STATION': (28, 26),
+               'TRANSIT_STATION': (28, 24), 'PARK': (16, 16), 'PARKING_LOT': (20, 20),
+               'PARKING_GARAGE': (30, 26), 'STRIP_MALL': (30, 26), 'SHOPPING_PLAZA': (80, 70)}
+POI_VERGE = 1.0          # Unpaved strip between a site pad and the footway.
+POI_MIN_DENSITY = .2     # Sites stay inside the built-up area.
 MIDTOWN_STYLES = ('OLD_TOWN', 'RESIDENTIAL', 'BRUTALIST')
 
 CONDITIONS = ('INTACT', 'WEATHERED', 'SEMI_COLLAPSED', 'RUBBLE_FILLED',
@@ -97,6 +145,7 @@ class CitySettings:
     interior_ratio: float = .25
     max_buildings: int = 600
     style: str = "MIXED"
+    points_of_interest: bool = True   # Sites (sites.py) and transit stops.
 
     def validate(self):
         for name, lo, hi in (("radius", 2, 25), ("primary_count", 1, 16),
@@ -157,6 +206,35 @@ class Lot:
     damage: float = 0.0
 
 
+@dataclass(frozen=True)
+class Poi:
+    """A point-of-interest site over one or more whole blocks."""
+    id: str
+    kind: str
+    center: tuple
+    width: float         # Along the frontage.
+    depth: float
+    rotation: float      # Same convention as Lot: the front faces (sin r, -cos r).
+    frontage: tuple
+    blocks: tuple
+    style: str
+    district: str
+    seed: int
+    approach: float      # Pad front to the back of the footway.
+    condition: str = 'INTACT'
+    damage: float = 0.0
+
+
+@dataclass(frozen=True)
+class Shelter:
+    """A transit stop on a footway; its back faces the block."""
+    id: str
+    position: tuple
+    rotation: float
+    variant: str         # SHELTER or STOP.
+    road: tuple
+
+
 @dataclass
 class CityPlan:
     settings: CitySettings
@@ -166,6 +244,8 @@ class CityPlan:
     lots: list
     eligible_lots: int
     driving_loops: list
+    pois: list = field(default_factory=list)
+    shelters: list = field(default_factory=list)
 
     def to_json(self):
         return json.dumps({"version": VERSION, **asdict(self)}, sort_keys=True, indent=2)
@@ -504,12 +584,16 @@ def generate_city(settings=CitySettings()):
 
     road_list = [Road(a, b, tier) for (a, b), tier in sorted(roads.items())]
     paths = _build_paths(settings, roads, locations)
-    lots = _place_lots(settings, locations, roads)
+    pois = _place_pois(settings, locations, roads, paths) if settings.points_of_interest else []
+    reserved = {block for poi in pois for block in poi.blocks}
+    lots = _place_lots(settings, locations, roads, reserved)
     # Stable priority sampling avoids truncating one geographical side of the city.
     lots.sort(key=lambda lot: stream(settings.seed, "budget", lot.id).random())
     eligible = len(lots)
     lots = sorted(lots[:settings.max_buildings], key=lambda lot: lot.id)
-    return CityPlan(settings, locations, road_list, paths, lots, eligible, driving_loops)
+    shelters = _place_shelters(settings, roads, lots, pois) if settings.points_of_interest else []
+    return CityPlan(settings, locations, road_list, paths, lots, eligible, driving_loops,
+                    pois, shelters)
 
 
 def _pick_condition(style, rng):
@@ -521,7 +605,7 @@ def _pick_condition(style, rng):
     return 'INTACT'
 
 
-def _place_lots(settings, locations, roads):
+def _place_lots(settings, locations, roads, reserved=frozenset()):
     lots = []
     size = settings.block_size
     # Use actual adjacent street envelopes rather than the widest road citywide.
@@ -531,6 +615,8 @@ def _place_lots(settings, locations, roads):
             nodes[node] = max(nodes.get(node, 0), ROAD_WIDTHS[tier] / 2)
     for x in range(-settings.radius, settings.radius):
         for y in range(-settings.radius, settings.radius):
+            if (x, y) in reserved:
+                continue
             borders = {"S": edge((x, y), (x + 1, y)),
                        "N": edge((x, y + 1), (x + 1, y + 1)),
                        "W": edge((x, y), (x, y + 1)),
@@ -607,3 +693,226 @@ def _place_lots(settings, locations, roads):
                                     condition=condition, interiors=interiors,
                                     damage=damage))
     return lots
+
+
+# -- points of interest ------------------------------------------------------
+
+SIDE_ROTATION = {"S": 0, "E": math.pi / 2, "N": math.pi, "W": -math.pi / 2}
+
+
+def _side_edges(x, y, wx, wy):
+    """Lattice edges along each outer side of a wx x wy block group at (x, y)."""
+    return {"S": [edge((x + i, y), (x + i + 1, y)) for i in range(wx)],
+            "N": [edge((x + i, y + wy), (x + i + 1, y + wy)) for i in range(wx)],
+            "W": [edge((x, y + j), (x, y + j + 1)) for j in range(wy)],
+            "E": [edge((x + wx, y + j), (x + wx, y + j + 1)) for j in range(wy)]}
+
+
+def _inner_edges(x, y, wx, wy):
+    inner = [edge((x + i, y + j), (x + i, y + j + 1)) for i in range(1, wx) for j in range(wy)]
+    inner += [edge((x + i, y + j), (x + i + 1, y + j)) for j in range(1, wy) for i in range(wx)]
+    return inner
+
+
+def _best_front(rule, sides, roads, along):
+    """The side a site faces: best road tier, most road along it, required length."""
+    best = None
+    for side, edges in sides.items():
+        if len(edges) != along:
+            continue
+        tiers = [roads.get(e) for e in edges]
+        if "HIGHWAY" in tiers:
+            continue
+        allowed = [e for e, t in zip(edges, tiers)
+                   if t is not None and (rule['front'] is None or t in rule['front'])]
+        if not allowed:
+            continue
+        frontage = min(allowed, key=lambda e: (ROAD_RANK[roads[e]], e))
+        key = (ROAD_RANK[roads[frontage]], -sum(t is not None for t in tiers), side)
+        if best is None or key < best[0]:
+            best = (key, side, frontage)
+    return None if best is None else best[1:]
+
+
+def _path_rows(paths):
+    rows = []
+    for path in paths:
+        half = path['width'] / 2
+        for a, b in zip(path['points'], path['points'][1:]):
+            rows.append((a[0], a[1], b[0], b[1], half))
+    return rows
+
+
+def _gap(px, py, rows):
+    best = math.inf
+    for x0, y0, x1, y1, half in rows:
+        dx, dy = x1 - x0, y1 - y0
+        length = dx * dx + dy * dy
+        t = 0.0 if not length else max(0.0, min(1.0, ((px - x0) * dx + (py - y0) * dy) / length))
+        best = min(best, math.hypot(px - x0 - dx * t, py - y0 - dy * t) - half)
+    return best
+
+
+def _poi_pad(settings, x, y, wx, wy, nodes, rows):
+    """Pad rectangle inside a block group, clear of every footway (fillets too)."""
+    size = settings.block_size
+    walk = settings.sidewalk_width
+    rect = [x * size, y * size, (x + wx) * size, (y + wy) * size]
+    for side, edges in _side_edges(x, y, wx, wy).items():
+        half = max(max(nodes.get(a, 0), nodes.get(b, 0)) for a, b in edges)
+        margin = half + walk + POI_VERGE if half > 0 else POI_VERGE
+        index, sign = {"W": (0, 1), "S": (1, 1), "E": (2, -1), "N": (3, -1)}[side]
+        rect[index] += sign * margin
+    near = [r for r in rows
+            if min(r[0], r[2]) - r[4] - 40 < rect[2] and max(r[0], r[2]) + r[4] + 40 > rect[0]
+            and min(r[1], r[3]) - r[4] - 40 < rect[3] and max(r[1], r[3]) + r[4] + 40 > rect[1]]
+    need = walk + .5
+    for _ in range(8):
+        x0, y0, x1, y1 = rect
+        if x1 - x0 < 10 or y1 - y0 < 10:
+            return None
+        lines = {"S": ((x0, y0), (x1, y0)), "N": ((x0, y1), (x1, y1)),
+                 "W": ((x0, y0), (x0, y1)), "E": ((x1, y0), (x1, y1))}
+        worst = {}
+        for side, ((ax, ay), (bx, by)) in lines.items():
+            length = math.hypot(bx - ax, by - ay)
+            count = max(2, int(length / 2))
+            for k in range(count + 1):
+                t = (.4 + (length - .8) * k / count) / length
+                value = _gap(ax + (bx - ax) * t, ay + (by - ay) * t, near) - need
+                if value < worst.get(side, 0.0):
+                    worst[side] = value
+        if not worst:
+            return tuple(rect)
+        for side, value in worst.items():
+            index, sign = {"W": (0, 1), "S": (1, 1), "E": (2, -1), "N": (3, -1)}[side]
+            rect[index] += sign * (.1 - value)
+    return None
+
+
+def _place_pois(settings, locations, roads, paths):
+    size = settings.block_size
+    nodes = {}
+    for (a, b), tier in roads.items():
+        for node in (a, b):
+            nodes[node] = max(nodes.get(node, 0), ROAD_WIDTHS[tier] / 2)
+    rows = _path_rows(paths)
+    radius = settings.radius
+    urban = sum(1 for x in range(-radius, radius) for y in range(-radius, radius)
+                if density_at(settings, (x + .5) * size, (y + .5) * size) >= POI_MIN_DENSITY and
+                any(e in roads for e in _side_edges(x, y, 1, 1)["S"] + _side_edges(x, y, 1, 1)["N"] +
+                    _side_edges(x, y, 1, 1)["W"] + _side_edges(x, y, 1, 1)["E"]))
+    taken = set()
+    pois = []
+    for kind, rule in POI_RULES.items():
+        rng = stream(settings.seed, "poi", kind)
+        expected = rule['count'] * urban / 100
+        quota = int(expected) + (1 if rng.random() < expected - int(expected) else 0)
+        quota = max(quota, rule['minimum'])
+        candidates = []
+        for along, away in rule['blocks']:
+            for wx, wy, fronts in ((along, away, "SN"), (away, along, "WE")):
+                for x in range(-radius, radius - wx + 1):
+                    for y in range(-radius, radius - wy + 1):
+                        group = tuple((x + i, y + j) for i in range(wx) for j in range(wy))
+                        if any(b in taken for b in group):
+                            continue
+                        if any(e in roads for e in _inner_edges(x, y, wx, wy)):
+                            continue
+                        sides = {k: v for k, v in _side_edges(x, y, wx, wy).items() if k in fronts}
+                        front = _best_front(rule, sides, roads, along)
+                        if front is None:
+                            continue
+                        cx, cy = (x + wx / 2) * size, (y + wy / 2) * size
+                        density = density_at(settings, cx, cy)
+                        if density < POI_MIN_DENSITY:
+                            continue
+                        district = district_at(settings, cx, cy, locations)
+                        # Sites favour blocks the lot pass would leave sparse.
+                        occupancy = min(1.0, density * STYLE_PROFILE[district.style]['density'])
+                        weight = rule['districts'].get(district.style, 0.0) * (1.25 - occupancy)
+                        # Bigger shapes first in the rule's list are preferred.
+                        weight *= 1.0 if (along, away) == rule['blocks'][0] else .5
+                        key = stream(settings.seed, "poi", kind, x, y, wx, wy).random()
+                        candidates.append((weight > 0, key ** (1 / max(weight, .02)),
+                                           (x, y, wx, wy), group, front, district))
+        candidates.sort(key=lambda c: (c[0], c[1]), reverse=True)
+        placed = []
+        for preferred, _, (x, y, wx, wy), group, (side, frontage), district in candidates:
+            if len(placed) >= quota or (not preferred and len(placed) >= rule['minimum']):
+                break
+            if any(b in taken for b in group):
+                continue
+            cx, cy = (x + wx / 2) * size, (y + wy / 2) * size
+            if any(math.dist((cx, cy), p.center) < rule['spacing'] * size for p in placed):
+                continue
+            pad = _poi_pad(settings, x, y, wx, wy, nodes, rows)
+            if pad is None:
+                continue
+            x0, y0, x1, y1 = pad
+            width, depth = (x1 - x0, y1 - y0) if side in "SN" else (y1 - y0, x1 - x0)
+            min_w, min_d = POI_MIN_PAD[kind]
+            if width < min_w or depth < min_d:
+                continue
+            (ax, ay), (bx, by) = frontage
+            mid = ((ax + bx) * size / 2, (ay + by) * size / 2)
+            to_front = {"S": y0 - mid[1], "N": mid[1] - y1, "W": x0 - mid[0], "E": mid[0] - x1}[side]
+            approach = to_front - ROAD_WIDTHS[roads[frontage]] / 2 - settings.sidewalk_width
+            ident = f"poi_{kind.lower()}_{x}_{y}"
+            seed_rng = stream(settings.seed, ident)
+            condition = _pick_condition(district.style, stream(settings.seed, "condition", ident))
+            profile = STYLE_PROFILE[district.style]
+            damage = min(1.0, max(settings.damage * profile['damage'] * CONDITION_DAMAGE[condition],
+                                  CONDITION_MIN_DAMAGE[condition]))
+            poi = Poi(ident, kind, ((x0 + x1) / 2, (y0 + y1) / 2), round(width, 3), round(depth, 3),
+                      SIDE_ROTATION[side], frontage, group, district.style, district.id,
+                      seed_rng.randrange(2**31), round(approach, 3), condition, damage)
+            placed.append(poi)
+            taken.update(group)
+        pois.extend(placed)
+    return pois
+
+
+def _place_shelters(settings, roads, lots, pois):
+    """Transit stops mid-block on arterial and collector footways, clear of
+    every lot's and site's front."""
+    size = settings.block_size
+    walk = settings.sidewalk_width
+    fronts = {}
+    for item in list(lots) + list(pois):
+        (ax, ay), (bx, by) = item.frontage
+        horizontal = ay == by
+        axis = 0 if horizontal else 1
+        line = ay * size if horizontal else ax * size
+        side = 1 if item.center[1 - axis] > line else -1
+        half = item.width / 2 + (size if isinstance(item, Poi) else 0)
+        fronts.setdefault((item.frontage, side), []).append(
+            (item.center[axis] - half, item.center[axis] + half))
+    shelters = []
+    for key in sorted(roads):
+        tier = roads[key]
+        if tier not in ("ARTERIAL", "COLLECTOR"):
+            continue
+        rng = stream(settings.seed, "shelter", key)
+        if rng.random() > .35:
+            continue
+        (ax, ay), (bx, by) = key
+        horizontal = ay == by
+        side = rng.choice((-1, 1))
+        offset = ROAD_WIDTHS[tier] / 2 + walk - .7
+        a, b = (ax, bx) if horizontal else (ay, by)
+        for t in (.5, .35, .65):
+            along = (a + (b - a) * t) * size
+            if any(lo - 1 < along + 2.6 and along - 2.6 < hi + 1
+                   for lo, hi in fronts.get((key, side), ())):
+                continue
+            if horizontal:
+                position = (along, ay * size + side * offset)
+                rotation = 0.0 if side > 0 else math.pi
+            else:
+                position = (ax * size + side * offset, along)
+                rotation = -math.pi / 2 if side > 0 else math.pi / 2
+            variant = "SHELTER" if walk >= 1.8 and rng.random() < .75 else "STOP"
+            shelters.append(Shelter(f"shelter_{len(shelters)}", position, rotation, variant, key))
+            break
+    return shelters

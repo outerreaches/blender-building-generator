@@ -79,6 +79,8 @@ def build_building(params):
     rubble.exterior_piles(mesh, rng, spec, params)
     for x, y, rx, ry, peak, base in field.debris:
         x, y, rx, ry = _clear_of_party_walls(spec, x, y, rx, ry)
+        if base > 0:
+            x, y, rx, ry = _inside_storey(spec, base, x, y, rx, ry)
         # Upper-floor debris sinks into its slab so its underside shares no
         # plane with partitions standing on the same floor.
         rubble.mound(mesh, rng, x, y, rx, ry, peak, segments=9,
@@ -86,6 +88,19 @@ def build_building(params):
     if params.get('interior_mound'):
         rubble.interior_mound(mesh, rng, spec)
     return Building(mesh, spec, plan, field)
+
+
+def _inside_storey(spec, floor, x, y, rx, ry):
+    """Debris on an upper floor stays inside that storey's walls rather than
+    hanging out of a blast hole (or past a set-back tower's facade)."""
+    level = min(spec.levels, key=lambda lv: abs(lv.z - floor))
+    x0, y0, x1, y1 = spec.interior_rect(level.index)
+    reach = 1.16           # rubble.mound jitters its rim out to 1.15 radii.
+    rx = min(rx, (x1 - x0) / 2 / reach)
+    ry = min(ry, (y1 - y0) / 2 / reach)
+    x = min(max(x, x0 + rx * reach), x1 - rx * reach)
+    y = min(max(y, y0 + ry * reach), y1 - ry * reach)
+    return x, y, rx, ry
 
 
 def _clear_of_party_walls(spec, x, y, rx, ry):

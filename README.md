@@ -1,5 +1,20 @@
 # Procedural Building Shell Generator
 
+## v0.12.1: Rubble stays inside towers
+
+- **Fixed: rubble fill on podium towers.** In filled and partly filled
+  buildings the rubble fill was sized to the ground-floor footprint all the
+  way up. On towers with a wider podium, it stuck out past the set-back
+  tower's faces. The fill now follows each tier's walls and changes width
+  inside the slab where the tower steps in.
+- **Fixed: debris in blast holes.** Debris on the floor of a blown-out
+  storey could hang out through the blast hole. It now stays inside that
+  storey.
+- **Unchanged: street spill.** Ground-level debris spilling onto the street
+  from a collapse is deliberate and still there.
+- **New test.** Above the ground storey, rubble must stay inside the
+  building or rest on a lower roof. The old code failed it.
+
 ## v0.12.0: Dense downtown
 
 - **Built out to the street.** Downtown blocks fill out to a building line

@@ -45,15 +45,15 @@ def pile(mesh, rng, cx, cy, radius, height, base=0.0):
         mesh.face((ring[index], ring[(index + 1) % sides], apex), MAT_RUBBLE)
 
 
-def slanted_fill(mesh, rng, rect, height, cap):
+def slanted_fill(mesh, rng, rect, height, cap, base=0.0):
     """Box of rubble with a tilted, uneven top (partially filled storeys)."""
     x0, y0, x1, y1 = rect
     sx, sy = rng.uniform(-.3, .3), rng.uniform(-.3, .3)
     heights = []
     for x, y in ((x0, y0), (x1, y0), (x1, y1), (x0, y1)):
         h = height + sx * (x - x0) + sy * (y - y0) + rng.uniform(-.2, .2)
-        heights.append(min(cap, max(.3, h)))
-    corners = [(x0, y0, 0.0), (x1, y0, 0.0), (x1, y1, 0.0), (x0, y1, 0.0)]
+        heights.append(min(cap, max(base + .3, h)))
+    corners = [(x0, y0, base), (x1, y0, base), (x1, y1, base), (x0, y1, base)]
     corners += [(x, y, h) for (x, y, _), h in zip(corners, heights)]
     solids.hexahedron(mesh, corners, MAT_RUBBLE)
 
@@ -63,22 +63,19 @@ def interior_fill(mesh, rng, spec, field, params):
     mode = params.get('interior_fill', 'NONE')
     if mode == 'NONE':
         return
-    x0, y0, x1, y1 = spec.interior_rect(0)
-    # Inset so the fill never shares a plane with slab edges or wall faces.
-    rect = (x0 + .03, y0 + .03, x1 - .03, y1 - .03)
     cap = min(spec.top - .1, field.lowest() - .1)
     if params.get('has_patio') and len(spec.levels) >= 2:
         cap = min(cap, spec.levels[-1].z - .1)
     if mode == 'FILLED':
-        solids.box(mesh, rect[0], rect[1], 0.0, rect[2], rect[3], max(.3, cap), MAT_RUBBLE)
+        _tiered_fill(mesh, rng, spec, max(.3, cap))
     elif mode == 'PARTIAL':
         floors = len(spec.levels)
         fill = min(int(params.get('fill_floors', max(1, floors // 2))), floors - 1)
         if fill > 0:
             height = min(spec.levels[fill].z - rng.uniform(.3, .6), cap - .5)
-            slanted_fill(mesh, rng, rect, height, cap)
+            _tiered_fill(mesh, rng, spec, height, cap)
     elif mode == 'RUBBLE_PILES':
-        x0, y0, x1, y1 = rect
+        x0, y0, x1, y1 = _fill_rect(spec, spec.tiers[0])
         density = float(params.get('rubble_density', .3))
         placed = []
         for _ in range(min(5, 2 + int(density * 3))):
@@ -89,6 +86,37 @@ def interior_fill(mesh, rng, spec, field, params):
                     placed.append((cx, cy, radius))
                     pile(mesh, rng, cx, cy, radius, rng.uniform(.3, .8))
                     break
+
+
+def _fill_rect(spec, tier):
+    """A tier's interior, inset so the fill never shares a plane with slab
+    edges or wall faces."""
+    x0, y0, x1, y1 = tier.rect
+    inset = spec.t + .03
+    return (x0 + inset, y0 + inset, x1 - inset, y1 - inset)
+
+
+def _tiered_fill(mesh, rng, spec, height, cap=None):
+    """Fill up to ``height`` inside each tier's own walls: a podium's fill
+    stops in the slab under the set-back tower, which carries on narrower.
+    With ``cap``, the top piece gets a tilted, uneven surface."""
+    tiers = spec.tiers
+    for index, tier in enumerate(tiers):
+        base = 0.0 if index == 0 else spec.levels[tier.first].z - spec.slab / 2
+        if height <= base + .3:
+            break
+        ceiling = (spec.levels[tiers[index + 1].first].z - spec.slab / 2
+                   if index + 1 < len(tiers) else math.inf)
+        rect = _fill_rect(spec, tier)
+        if rect[2] - rect[0] < .5 or rect[3] - rect[1] < .5:
+            break
+        if height <= ceiling and cap is not None:
+            slanted_fill(mesh, rng, rect, height, min(cap, ceiling), base)
+        else:
+            solids.box(mesh, rect[0], rect[1], base, rect[2], rect[3], min(height, ceiling),
+                       MAT_RUBBLE)
+        if height <= ceiling:
+            break
 
 
 def exterior_piles(mesh, rng, spec, params):

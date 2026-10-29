@@ -4,7 +4,7 @@ This generator supplies the main static environment for a low-poly first-person 
 
 ## Try it
 
-Install `output/procedural_building_shell_v0.12.0.zip` as a Blender add-on. Use **Shift+A → Mesh → Generate City**, **Generate Building by Style** or **Generate Site (Point of Interest)**. Start with **Layout Preview**; select **Detailed Shells** for windows, doors, floors, damage and optional interiors. Both modes use the same plan. Each run creates a new collection at the 3D cursor. Undo removes that run; failure rolls back its own objects.
+Install `output/procedural_building_shell_v0.12.1.zip` as a Blender add-on. Use **Shift+A → Mesh → Generate City**, **Generate Building by Style** or **Generate Site (Point of Interest)**. Start with **Layout Preview**; select **Detailed Shells** for windows, doors, floors, damage and optional interiors. Both modes use the same plan. Each run creates a new collection at the 3D cursor. Undo removes that run; failure rolls back its own objects.
 
 The original single-building and bulk operators remain available. Architecture uses six district archetypes built from rectangular shells:
 

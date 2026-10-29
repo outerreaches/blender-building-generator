@@ -105,6 +105,9 @@ class BuildingSpec:
                         if self.roof_kind == 'FLAT' and p.get('roof_parapet', False) else 0.0)
         self.lobby = p.get('lobby', 'NONE')
         self.facade_system = p.get('facade_system', 'PUNCHED')
+        # Sides built against a neighbour (row and block buildings): blank and
+        # without projecting details wherever the wall stands on the lot line.
+        self.party = frozenset(p.get('party_walls', ()) or ())
         self.levels = self._levels()
         self.top = self.levels[-1].ceiling      # Roof surface / eaves.
         self.tiers = self._tiers()
@@ -322,7 +325,19 @@ class BuildingSpec:
         """Highest opening head on a storey (keeps a lintel under the slab)."""
         return level.height - self.slab - dims.LINTEL
 
+    def is_party(self, facade, tier=None):
+        """True for a facade standing on a party wall (on the lot line of a
+        party side); set-back storeys above it keep their windows."""
+        if facade.side not in self.party:
+            return False
+        rect = (tier or self.tiers[facade.tier]).rect
+        edge = {'left': rect[0], 'front': rect[1], 'right': rect[2] - self.width,
+                'back': rect[3] - self.depth}[facade.side]
+        return abs(edge) < 1e-6
+
     def _openings(self, facade, level, tier):
+        if self.is_party(facade, tier):
+            return []
         p = self.params
         bays = facade.bays
         count = len(bays) - 1
@@ -608,6 +623,8 @@ class BuildingSpec:
     def door_bays(self, side):
         """Default ground doors on a side: [(first_bay, last_bay, width, height, kind)]."""
         facade = self.ground_facade(side)
+        if self.is_party(facade, self.tiers[0]):
+            return []
         saved, self.door_overrides = self.door_overrides, self.base_doors
         try:
             return self._doors(facade, self.levels[0], self.tiers[0])

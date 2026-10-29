@@ -8,7 +8,7 @@ import json
 import math
 import random
 
-VERSION = 6
+VERSION = 7
 ROAD_WIDTHS = {"HIGHWAY": 20.0, "ARTERIAL": 12.0, "COLLECTOR": 8.0, "LOCAL": 6.0}
 ROAD_RANK = {name: i for i, name in enumerate(ROAD_WIDTHS)}
 # Corner radius at a route bend, before the curve_radius multiplier and clamping.
@@ -147,6 +147,7 @@ class CitySettings:
     style: str = "MIXED"
     points_of_interest: bool = True   # Sites (sites.py) and transit stops.
     highway_reach: float = 3000.0     # Highway beyond the city edge (m), fading out at its end.
+    downtown_superblocks: float = .35  # Share of downtown local streets closed to join blocks.
 
     def validate(self):
         for name, lo, hi in (("radius", 2, 25), ("primary_count", 1, 16),
@@ -162,7 +163,7 @@ class CitySettings:
                              ("road_density", 0, 1), ("curve_radius", 0, 1),
                              ("damage", 0, 1), ("interior_ratio", 0, 1),
                              ("setback", 1, 8), ("wasteland", 0, 20000),
-                             ("highway_reach", 0, 20000),
+                             ("highway_reach", 0, 20000), ("downtown_superblocks", 0, 1),
                              ("sidewalk_width", 1.2, 5), ("curb_height", 0, .25)):
             value = getattr(self, name)
             if not math.isfinite(value) or not lo <= value <= hi:
@@ -206,6 +207,8 @@ class Lot:
     condition: str = 'INTACT'
     interiors: bool = False
     damage: float = 0.0
+    party_walls: tuple = ()   # Sides (front/back/left/right) built against a neighbour.
+    group: str = ''           # Buildings of one downtown block share a budget draw.
 
 
 @dataclass(frozen=True)
@@ -585,13 +588,16 @@ def generate_city(settings=CitySettings()):
                     reached.add(other)
                     frontier.append(other)
 
+    _close_downtown_streets(settings, locations, roads)
     road_list = [Road(a, b, tier) for (a, b), tier in sorted(roads.items())]
     paths = _build_paths(settings, roads, locations)
     pois = _place_pois(settings, locations, roads, paths) if settings.points_of_interest else []
     reserved = {block for poi in pois for block in poi.blocks}
-    lots = _place_lots(settings, locations, roads, reserved)
-    # Stable priority sampling avoids truncating one geographical side of the city.
-    lots.sort(key=lambda lot: stream(settings.seed, "budget", lot.id).random())
+    downtown, dense = _place_downtown(settings, locations, roads, paths, reserved)
+    lots = downtown + _place_lots(settings, locations, roads, reserved | dense)
+    # Stable priority sampling avoids truncating one geographical side of the
+    # city; the buildings of one downtown block are kept or dropped together.
+    lots.sort(key=lambda lot: (stream(settings.seed, "budget", lot.group or lot.id).random(), lot.id))
     eligible = len(lots)
     lots = sorted(lots[:settings.max_buildings], key=lambda lot: lot.id)
     shelters = _place_shelters(settings, roads, lots, pois) if settings.points_of_interest else []
@@ -756,20 +762,21 @@ def _gap(px, py, rows):
     return best
 
 
-def _poi_pad(settings, x, y, wx, wy, nodes, rows):
-    """Pad rectangle inside a block group, clear of every footway (fillets too)."""
+def _poi_pad(settings, x, y, wx, wy, nodes, rows, verge=POI_VERGE):
+    """Pad rectangle inside a block group, ``verge`` metres back from every
+    footway (fillets too)."""
     size = settings.block_size
     walk = settings.sidewalk_width
     rect = [x * size, y * size, (x + wx) * size, (y + wy) * size]
     for side, edges in _side_edges(x, y, wx, wy).items():
         half = max(max(nodes.get(a, 0), nodes.get(b, 0)) for a, b in edges)
-        margin = half + walk + POI_VERGE if half > 0 else POI_VERGE
+        margin = half + walk + verge if half > 0 else verge
         index, sign = {"W": (0, 1), "S": (1, 1), "E": (2, -1), "N": (3, -1)}[side]
         rect[index] += sign * margin
     near = [r for r in rows
             if min(r[0], r[2]) - r[4] - 40 < rect[2] and max(r[0], r[2]) + r[4] + 40 > rect[0]
             and min(r[1], r[3]) - r[4] - 40 < rect[3] and max(r[1], r[3]) + r[4] + 40 > rect[1]]
-    need = walk + .5
+    need = walk + min(.5, verge)
     for _ in range(8):
         x0, y0, x1, y1 = rect
         if x1 - x0 < 10 or y1 - y0 < 10:
@@ -878,7 +885,7 @@ def _place_pois(settings, locations, roads, paths):
 
 def _place_shelters(settings, roads, lots, pois):
     """Transit stops mid-block on arterial and collector footways, clear of
-    every lot's and site's front."""
+    building entrances and site fronts."""
     size = settings.block_size
     walk = settings.sidewalk_width
     fronts = {}
@@ -888,7 +895,9 @@ def _place_shelters(settings, roads, lots, pois):
         axis = 0 if horizontal else 1
         line = ay * size if horizontal else ax * size
         side = 1 if item.center[1 - axis] > line else -1
-        half = item.width / 2 + (size if isinstance(item, Poi) else 0)
+        # A stop may stand in front of a building, just not across its entrance
+        # (front doors sit mid-frontage); site fronts stay clear entirely.
+        half = item.width / 2 + size if isinstance(item, Poi) else min(item.width / 2, 4.0)
         fronts.setdefault((item.frontage, side), []).append(
             (item.center[axis] - half, item.center[axis] + half))
     shelters = []
@@ -956,4 +965,246 @@ def _outer_roads(settings, paths):
                           'direction': list(direction), 'width': ROAD_WIDTHS['HIGHWAY'],
                           'length': round(reach, 3), 'fade': round(reach * OUTER_FADE, 3)})
     return roads
+
+
+# -- dense downtown ------------------------------------------------------------
+
+DOWNTOWN_VERGE = .5          # Building line behind the footway, downtown.
+DOWNTOWN_MIN_WIDTH = 12.0    # Narrowest downtown building frontage.
+DOWNTOWN_MAX_WIDTH = 48.0    # Widest single tower.
+# Local sides seen from a building facing each world side: front, back, left, right.
+LOCAL_SIDES = {"S": {"S": "front", "N": "back", "W": "left", "E": "right"},
+               "N": {"N": "front", "S": "back", "E": "left", "W": "right"},
+               "E": {"E": "front", "W": "back", "S": "left", "N": "right"},
+               "W": {"W": "front", "E": "back", "N": "left", "S": "right"}}
+OPPOSITE = {"S": "N", "N": "S", "E": "W", "W": "E"}
+
+
+def _downtown(settings, locations, block):
+    x, y = block
+    radius = settings.radius
+    if not (-radius <= x < radius and -radius <= y < radius):
+        return False
+    size = settings.block_size
+    return district_at(settings, (x + .5) * size, (y + .5) * size, locations).style == 'DOWNTOWN'
+
+
+def _edge_blocks(key):
+    """The two blocks either side of a lattice edge."""
+    (ax, ay), (bx, by) = key
+    if ax == bx:
+        y = min(ay, by)
+        return (ax - 1, y), (ax, y)
+    x = min(ax, bx)
+    return (x, ay - 1), (x, ay)
+
+
+def _close_downtown_streets(settings, locations, roads):
+    """Close some downtown local streets so blocks join into superblocks.
+
+    A street closes only between two downtown blocks, only if the road network
+    stays connected, and only while the joined blocks fit in 2 x 2.
+    """
+    share = settings.downtown_superblocks
+    if share <= 0:
+        return
+    parent = {}
+
+    def find(block):
+        parent.setdefault(block, block)
+        while parent[block] != block:
+            parent[block] = parent[parent[block]]
+            block = parent[block]
+        return block
+
+    def members(root):
+        return [b for b in list(parent) if find(b) == root]
+
+    radius = settings.radius
+    # Blocks already joined across streetless edges.
+    for x in range(-radius, radius):
+        for y in range(-radius, radius):
+            for key in (edge((x + 1, y), (x + 1, y + 1)), edge((x, y + 1), (x + 1, y + 1))):
+                a, b = _edge_blocks(key)
+                if key not in roads and _downtown(settings, locations, a) and \
+                        _downtown(settings, locations, b):
+                    parent[find(a)] = find(b)
+    candidates = [key for key, tier in sorted(roads.items())
+                  if tier == "LOCAL" and all(_downtown(settings, locations, b)
+                                             for b in _edge_blocks(key))]
+    rng = stream(settings.seed, "superblocks")
+    rng.shuffle(candidates)
+    budget = int(round(len(candidates) * share))
+    for key in candidates:
+        if budget <= 0:
+            break
+        a, b = _edge_blocks(key)
+        joined = set(members(find(a))) | set(members(find(b))) | {a, b}
+        xs = [blk[0] for blk in joined]
+        ys = [blk[1] for blk in joined]
+        if max(xs) - min(xs) > 1 or max(ys) - min(ys) > 1:
+            continue
+        tier = roads.pop(key)
+        if not _connected(roads, key[0], key[1]):
+            roads[key] = tier
+            continue
+        parent[find(a)] = find(b)
+        budget -= 1
+
+
+def _connected(roads, start, goal):
+    adjacency = {}
+    for a, b in roads:
+        adjacency.setdefault(a, []).append(b)
+        adjacency.setdefault(b, []).append(a)
+    if start not in adjacency or goal not in adjacency:
+        return False
+    seen, pending = {start}, [start]
+    while pending:
+        node = pending.pop()
+        if node == goal:
+            return True
+        for other in adjacency[node]:
+            if other not in seen:
+                seen.add(other)
+                pending.append(other)
+    return False
+
+
+def _place_downtown(settings, locations, roads, paths, reserved):
+    """Downtown blocks built out to the footway, split into party-walled towers.
+
+    Blocks joined across streetless edges (natural or closed) are laid out as
+    one 2 x 1 or 2 x 2 superblock. Returns the lots and every downtown block
+    this pass owns (the parcel pass skips them).
+    """
+    size = settings.block_size
+    radius = settings.radius
+    nodes = {}
+    for (a, b), tier in roads.items():
+        for node in (a, b):
+            nodes[node] = max(nodes.get(node, 0), ROAD_WIDTHS[tier] / 2)
+    rows = _path_rows(paths)
+    verge = max(DOWNTOWN_VERGE, settings.setback - settings.sidewalk_width + .1)
+    owned = {(x, y) for x in range(-radius, radius) for y in range(-radius, radius)
+             if (x, y) not in reserved and _downtown(settings, locations, (x, y))}
+    candidates = []
+    for wx, wy in ((2, 2), (2, 1), (1, 2), (1, 1)):
+        for x, y in sorted(owned):
+            group = tuple((x + i, y + j) for i in range(wx) for j in range(wy))
+            if any(b not in owned for b in group):
+                continue
+            if any(e in roads for e in _inner_edges(x, y, wx, wy)):
+                continue
+            key = stream(settings.seed, "downtown", x, y, wx, wy).random()
+            candidates.append((-wx * wy, key, x, y, wx, wy, group))
+    candidates.sort()
+    taken = set()
+    lots = []
+    profile = STYLE_PROFILE['DOWNTOWN']
+    for _, _, x, y, wx, wy, group in candidates:
+        if any(b in taken for b in group):
+            continue
+        sides = {}
+        for side, edges in _side_edges(x, y, wx, wy).items():
+            usable = [e for e in edges if roads.get(e) not in (None, "HIGHWAY")]
+            if usable:
+                sides[side] = usable
+        if not sides:
+            continue
+        pad = _poi_pad(settings, x, y, wx, wy, nodes, rows, verge)
+        if pad is None:
+            continue
+        taken.update(group)
+        rng = stream(settings.seed, "downtown", "group", x, y, wx, wy)
+        cx, cy = (pad[0] + pad[2]) / 2, (pad[1] + pad[3]) / 2
+        if rng.random() > min(1.0, density_at(settings, cx, cy) * profile['density']):
+            continue
+        district = district_at(settings, cx, cy, locations)
+        lots.extend(_split_downtown(settings, roads, pad, sides, district, rng,
+                                    f"dt_{x}_{y}_{wx}{wy}"))
+    return lots, owned
+
+
+def _split_downtown(settings, roads, pad, sides, district, rng, group):
+    """Cut a downtown pad into towers: one or two rows (back to back, or across
+    a service alley), each split into frontages along its street."""
+    x0, y0, x1, y1 = pad
+    main = min(sides, key=lambda side: (min(ROAD_RANK[roads[e]] for e in sides[side]),
+                                        -len(sides[side]), side))
+    horizontal = main in "SN"
+    along = (x1 - x0) if horizontal else (y1 - y0)
+    deep = (y1 - y0) if horizontal else (x1 - x0)
+    rows = [(0.0, deep, main)]
+    alley = 0.0
+    if OPPOSITE[main] in sides and deep >= 34 and rng.random() < .75:
+        alley = 6.0 if rng.random() < .3 else 0.0
+        split = (deep - alley) * rng.uniform(.42, .58)
+        rows = [(0.0, split, main), (split + alley, deep, OPPOSITE[main])]
+
+    def world(a0, a1, b0, b1):
+        """Block-frame rectangle (a along the main street, b back from it)."""
+        if main == "S":
+            return (x0 + a0, y0 + b0, x0 + a1, y0 + b1)
+        if main == "N":
+            return (x0 + a0, y1 - b1, x0 + a1, y1 - b0)
+        if main == "W":
+            return (x0 + b0, y0 + a0, x0 + b1, y0 + a1)
+        return (x1 - b1, y0 + a0, x1 - b0, y0 + a1)
+
+    # World sides of the block frame: a- and a+ ends, and the far side.
+    a_low, a_high = ("W", "E") if horizontal else ("S", "N")
+    profile = STYLE_PROFILE[district.style]
+    lots = []
+    size = settings.block_size
+    for row, (b0, b1, front) in enumerate(rows):
+        count = max(1, int(round(along / rng.uniform(18.0, 30.0))),
+                    int(math.ceil(along / DOWNTOWN_MAX_WIDTH)))
+        while count > 1 and along / count < DOWNTOWN_MIN_WIDTH:
+            count -= 1
+        weights = [rng.uniform(.7, 1.3) for _ in range(count)]
+        cuts = [0.0]
+        for weight in weights:
+            cuts.append(cuts[-1] + along * weight / sum(weights))
+        cuts = [round(c, 2) for c in cuts[:-1]] + [round(along, 2)]
+        for index, (a0, a1) in enumerate(zip(cuts, cuts[1:])):
+            # Centimetre grid: centres and widths round-trip to the same edges.
+            rect = tuple(round(v, 2) for v in world(a0, a1, b0, b1))
+            touching = set()
+            if index > 0:
+                touching.add(a_low)
+            if index < count - 1:
+                touching.add(a_high)
+            if len(rows) == 2 and alley == 0.0:
+                touching.add(OPPOSITE[front])
+            local = LOCAL_SIDES[front]
+            party = tuple(sorted(local[side] for side in touching))
+            cx, cy = (rect[0] + rect[2]) / 2, (rect[1] + rect[3]) / 2
+            sx, sy = rect[2] - rect[0], rect[3] - rect[1]
+            width, depth = (sx, sy) if front in "SN" else (sy, sx)
+            axis = 0 if front in "SN" else 1
+            frontage = min(sides[front], key=lambda e: (abs((e[0][axis] + e[1][axis]) * size / 2 -
+                                                            (cx, cy)[axis]), e))
+            ident = f"lot_{math.floor(cx / size)}_{math.floor(cy / size)}_{group}r{row}t{index}"
+            item_rng = stream(settings.seed, ident)
+            condition_rng = stream(settings.seed, "condition", ident)
+            condition = _pick_condition(district.style, condition_rng)
+            low, high = profile['floors']
+            # Slender plots stay lower.
+            floors = min(item_rng.randint(low, high), max(low, int(min(width, depth) * .9) + 4))
+            if condition == 'WALL_RING':
+                floors = min(floors, item_rng.randint(2, 4))
+            damage = min(1.0, max(
+                settings.damage * profile['damage'] * CONDITION_DAMAGE[condition],
+                CONDITION_MIN_DAMAGE[condition]))
+            if floors > 8:
+                damage = min(1.0, damage * (1 + min(.5, (floors - 8) * .045)))
+            interiors = (condition in INTERIOR_CONDITIONS and
+                         condition_rng.random() < settings.interior_ratio)
+            lots.append(Lot(ident, (round(cx, 3), round(cy, 3)), round(width, 3), round(depth, 3),
+                            {"S": 0, "E": math.pi / 2, "N": math.pi, "W": -math.pi / 2}[front],
+                            district.style, district.id, floors, item_rng.randrange(2**31),
+                            frontage, condition=condition, interiors=interiors, damage=damage,
+                            party_walls=party, group=group))
+    return lots
 

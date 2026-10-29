@@ -78,6 +78,7 @@ def build_building(params):
     rubble.interior_fill(mesh, rng, spec, field, params)
     rubble.exterior_piles(mesh, rng, spec, params)
     for x, y, rx, ry, peak, base in field.debris:
+        x, y, rx, ry = _clear_of_party_walls(spec, x, y, rx, ry)
         # Upper-floor debris sinks into its slab so its underside shares no
         # plane with partitions standing on the same floor.
         rubble.mound(mesh, rng, x, y, rx, ry, peak, segments=9,
@@ -85,6 +86,20 @@ def build_building(params):
     if params.get('interior_mound'):
         rubble.interior_mound(mesh, rng, spec)
     return Building(mesh, spec, plan, field)
+
+
+def _clear_of_party_walls(spec, x, y, rx, ry):
+    """Keep a debris mound on this side of a party wall: the neighbour stands
+    beyond it."""
+    reach = 1.16           # rubble.mound jitters its rim out to 1.15 radii.
+    for side in spec.party:
+        if side in ('left', 'right'):
+            rx = min(rx, spec.width / 2 / reach)
+            x = max(x, rx * reach) if side == 'left' else min(x, spec.width - rx * reach)
+        else:
+            ry = min(ry, spec.depth / 2 / reach)
+            y = max(y, ry * reach) if side == 'front' else min(y, spec.depth - ry * reach)
+    return x, y, rx, ry
 
 
 # -- damage on facades -------------------------------------------------------
@@ -122,8 +137,10 @@ def _trim_broken_windows(spec, field):
 def _damage_openings(spec, field, params, rng):
     """Ground breaches (exposed fills) and blast holes, replacing whole windows."""
     base = spec.tiers[0]
-    if params.get('expose_fill'):
-        facade = rng.choice(base.facades)
+    # Party walls stay whole: a hole there would open into the neighbour.
+    outer = [f for f in base.facades if not spec.is_party(f, base)]
+    if params.get('expose_fill') and outer:
+        facade = rng.choice(outer)
         bays = facade.bays
         if len(bays) >= 2:
             span = min(len(bays) - 1, rng.choice((1, 2)))
@@ -134,6 +151,8 @@ def _damage_openings(spec, field, params, rng):
                                rng, grounded=True)
     for tier in spec.tiers:
         for facade in tier.facades:
+            if spec.is_party(facade, tier):
+                continue
             for u0, u1, z0, z1 in field.blast_spans(facade.origin, facade.direction, facade.ua,
                                                     facade.ub, facade.base + .3, facade.top):
                 corner = (u0 <= facade.ua + .05, u1 >= facade.ub - .05)
@@ -443,7 +462,7 @@ def _pilasters(mesh, spec, field, tier, params):
              'ALL': ('front', 'back', 'left', 'right')}.get(params.get('pilaster_sides', 'FRONT'),
                                                               ('front',))
     for facade in tier.facades:
-        if facade.side not in sides:
+        if facade.side not in sides or spec.is_party(facade, tier):
             continue
         positions = set()
         if style in ('CORNERS', 'CORNERS_CENTER', 'FULL'):
@@ -477,11 +496,20 @@ def _cornices(mesh, spec, field):
         bands.append((z - spec.slab - .05, z + .1, .12))
     if tier is spec.tiers[-1]:
         bands.append((tier.top - .45, tier.top - .1, .3))
+    # The band runs round the corners, except into a neighbour's party wall.
+    turns = {'front': ('left', 'right'), 'back': ('right', 'left')}
     for z0, z1, depth in bands:
         for facade in tier.facades:
+            if spec.is_party(facade, tier):
+                continue
             profile = field.wall_profile(facade.origin, facade.direction, 0.0, facade.length,
                                          side=facade.side)
-            ends = (-depth, facade.length + depth) if facade.side in ('front', 'back') else (0.0, facade.length)
+            if facade.side in turns:
+                start, end = turns[facade.side]
+                ends = (0.0 if start in spec.party else -depth,
+                        facade.length + (0.0 if end in spec.party else depth))
+            else:
+                ends = (0.0, facade.length)
             for a, b in _intact_runs(profile, ends, z1):
                 if any(o.u0 < b and o.u1 > a and max(z for _, z in o.top) > z0 and
                        min(z for _, z in o.bottom) < z1 for o in facade.openings):

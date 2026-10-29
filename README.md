@@ -1,5 +1,24 @@
 # Procedural Building Shell Generator
 
+## v0.12.0: Dense downtown
+
+- **Built out to the street.** Downtown blocks fill out to a building line
+  0.5 m behind the footway, instead of one tower standing back in each block.
+- **Shared blocks.** Each block holds a row of towers that share party walls,
+  or two rows back to back or across a service alley.
+- **Superblocks.** Some downtown local streets close (**Downtown
+  Superblocks**, default 0.35), so blocks join into 2 x 1 and 2 x 2
+  superblocks, like the school and hospital sites. Streets close only while
+  the road network stays connected.
+- **Party walls.** Party walls are blank. Damage leaves them whole and debris
+  stays on its own side; nothing projects into the neighbour. Towers rise
+  flush with a party wall or set back from it above their podium.
+- **Transit stops.** Stops may stand in front of buildings, clear of their
+  entrances.
+- **`ares_city_base`.** Downtown goes from 65 to about 150 towers; the scene
+  has 471 buildings, 30 sites and 27 stops, a 55 MB `.blend` and a 73 MB FBX.
+- **Plan schema 7.** Adds `party_walls` and `group` to each lot.
+
 ## v0.11.1: Highways out of the city, game-asset props
 
 - **Highways leave the city.** The main highway continues straight out of

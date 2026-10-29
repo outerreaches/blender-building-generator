@@ -45,7 +45,9 @@ def _pick(rng, weighted):
 
 
 def building_recipe(style, width, depth, floors, seed, damage=0, interiors=False,
-                    condition='INTACT'):
+                    condition='INTACT', party_walls=()):
+    """Generator parameters for a district building. ``party_walls`` lists the
+    sides (front/back/left/right) built against a neighbour."""
     if style not in STYLE_COLORS:
         raise ValueError(f'Unknown building style: {style}')
     rng = random.Random((seed * 69069) ^ zlib.crc32(style.encode()) ^ 0x57E1)
@@ -70,11 +72,14 @@ def building_recipe(style, width, depth, floors, seed, damage=0, interiors=False
         seed=seed, auto_clean=True, mark_uv_seams=True,
         roof_kind='FLAT', roof_height=0.0, roof_overhang=0.0, roof_box=None,
         lobby='NONE', facade_system='PUNCHED', cornice=False,
+        party_walls=tuple(party_walls),
     )
     profile['ground_floor_height'] = profile['floor_height']
     if style == 'DOWNTOWN':
         system = _pick(rng, (('CURTAIN', 4), ('RIBBON', 3.5), ('PUNCHED', 2.5)))
         lobby = _pick(rng, (('GRAND', 3.5), ('RETAIL', 3), ('ARCADE', 2), ('PILOTIS', 1.5)))
+        if party_walls and lobby == 'PILOTIS':
+            lobby = 'GRAND'        # No open ground storey under a neighbour's wall.
         ground = {'GRAND': rng.uniform(6.4, 7.8), 'RETAIL': rng.uniform(4.8, 5.4),
                   'ARCADE': rng.uniform(5.2, 6.0), 'PILOTIS': rng.uniform(5.0, 5.8)}[lobby]
         profile.update(floor_height=3.9, ground_floor_height=ground, wall_thickness=.3,
@@ -88,13 +93,23 @@ def building_recipe(style, width, depth, floors, seed, damage=0, interiors=False
                        mechanical_every=12 if floors >= 14 else 0)
         setbacks = []
         if floors >= 10 and width >= 18 and depth >= 18:
-            # Podium of 2-4 storeys, tower set back above it.
+            # Podium of 2-4 storeys, tower set back above it. Against a
+            # neighbour the tower either rises flush with the party wall or
+            # stands back from it, leaving a light gap above the podium.
             podium = rng.randint(2, min(4, floors - 6))
             inset = rng.uniform(2.4, 4.0)
             back = inset if rng.random() < .5 else 0.0
-            setbacks.append((podium, (inset, inset, inset, back)))
+            flush = rng.random() < .5
+            sides = {'left': inset, 'front': inset, 'right': inset, 'back': back}
+            if flush:
+                for side in party_walls:
+                    sides[side] = 0.0
+            setbacks.append((podium, tuple(sides[k] for k in ('left', 'front', 'right', 'back'))))
             if floors >= 18 and min(width, depth) - 2 * inset >= 18:
-                setbacks.append((int(floors * rng.uniform(.62, .78)), (2.0, 2.0, 2.0, 2.0)))
+                upper = {k: 0.0 if flush and k in party_walls else 2.0
+                         for k in ('left', 'front', 'right', 'back')}
+                setbacks.append((int(floors * rng.uniform(.62, .78)),
+                                 tuple(upper[k] for k in ('left', 'front', 'right', 'back'))))
         profile['setbacks'] = setbacks
     elif style == 'OLD_TOWN':
         profile.update(floor_height=3.6, ground_floor_height=4.2, wall_thickness=.45,

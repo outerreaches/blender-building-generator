@@ -322,6 +322,9 @@ class MESH_OT_generate_city(bpy.types.Operator):
     interior_ratio: FloatProperty(name='Interior Ratio', default=.25, min=0, max=1,
                                  description='Fraction of enterable buildings that get full interior layouts')
     route_guides: BoolProperty(name='Show Driving Route Guides', default=False)
+    downtown_superblocks: FloatProperty(name='Downtown Superblocks', default=.35, min=0, max=1,
+                                        description='Share of downtown local streets closed so '
+                                                    'blocks join into towers on 2x1 and 2x2 superblocks')
     points_of_interest: BoolProperty(name='Points of Interest', default=True,
                                      description='Gas stations, schools, hospitals, parks, parking, malls '
                                                  'and transit stops on reserved blocks')
@@ -339,7 +342,8 @@ class MESH_OT_generate_city(bpy.types.Operator):
         for title, names in (
             ('City Growth', ('seed', 'radius', 'block_size', 'primary_count', 'secondary_count', 'driving_loop_count')),
             ('Density and Access', ('curve_radius', 'core_radius', 'core_density', 'outskirts_density', 'road_density', 'setback', 'sidewalk_width', 'curb_height', 'wasteland', 'highway_reach')),
-            ('Buildings', ('style', 'damage', 'max_buildings', 'points_of_interest', 'detail')),
+            ('Buildings', ('style', 'damage', 'max_buildings', 'downtown_superblocks',
+                           'points_of_interest', 'detail')),
         ):
             group = layout.box()
             group.label(text=title)
@@ -398,7 +402,7 @@ class MESH_OT_generate_city(bpy.types.Operator):
                 col = districts[lot.district]
                 params = building_recipe(lot.style, lot.width, lot.depth, lot.floors,
                                          lot.seed, lot.damage, lot.interiors,
-                                         lot.condition)
+                                         lot.condition, lot.party_walls)
                 if self.detail == 'SHELLS':
                     if lot.condition == 'COLLAPSED':
                         obj = create_rubble(lot.id, params, col)
@@ -415,6 +419,8 @@ class MESH_OT_generate_city(bpy.types.Operator):
                 obj.location = (origin.x + lot.center[0], origin.y + lot.center[1], origin.z + self.curb_height)
                 obj.rotation_euler.z = lot.rotation
                 obj['city_style'], obj['asset_seed'], obj['district'] = lot.style, lot.seed, lot.district
+                if lot.party_walls:
+                    obj['party_walls'] = ','.join(lot.party_walls)
                 sunken = None
                 if self.detail == 'SHELLS' and lot.condition != 'COLLAPSED':
                     x0, y0, x1, y1 = BuildingSpec(params).levels[0].rect

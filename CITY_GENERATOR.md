@@ -1,10 +1,10 @@
-# City generator — v0.11 points of interest
+# City generator — v0.12 dense downtown
 
 This generator supplies the main static environment for a low-poly first-person Unity game. Existing signs, ruined cars and other props remain separate assets.
 
 ## Try it
 
-Install `output/procedural_building_shell_v0.11.0.zip` as a Blender add-on. Use **Shift+A → Mesh → Generate City**, **Generate Building by Style** or **Generate Site (Point of Interest)**. Start with **Layout Preview**; select **Detailed Shells** for windows, doors, floors, damage and optional interiors. Both modes use the same plan. Each run creates a new collection at the 3D cursor. Undo removes that run; failure rolls back its own objects.
+Install `output/procedural_building_shell_v0.12.0.zip` as a Blender add-on. Use **Shift+A → Mesh → Generate City**, **Generate Building by Style** or **Generate Site (Point of Interest)**. Start with **Layout Preview**; select **Detailed Shells** for windows, doors, floors, damage and optional interiors. Both modes use the same plan. Each run creates a new collection at the 3D cursor. Undo removes that run; failure rolls back its own objects.
 
 The original single-building and bulk operators remain available. Architecture uses six district archetypes built from rectangular shells:
 
@@ -37,6 +37,7 @@ The original single-building and bulk operators remain available. Architecture u
 | Building Damage | Base damage; district and condition scale it, and it does not reroute roads |
 | Interior Ratio | Fraction of enterable buildings that get full interior layouts (default 0.25) |
 | Building Budget | Stable sampling cap on eligible lots; reports when capped |
+| Downtown Superblocks | Share of downtown local streets closed so blocks join into 2 x 1 and 2 x 2 superblocks (default 0.35) |
 | Points of Interest | Reserve blocks for gas stations, fast food, schools, hospitals, police and fire stations, transit, parks, parking and malls, and put transit stops on the footways (default on) |
 | Worn Lane Markings | Optional broken paint on highway/arterial/collector roads |
 | Show Driving Route Guides | Colored curves, excluded from FBX export |
@@ -74,14 +75,43 @@ Each district changes all of the following, not just the material colour:
 
 | District | Parcels per block | Footprint | Density | Extra setback | Local streets | Corner radius | Damage |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| Downtown | 1 | 72–92% | ×1.25 | 2 m | ×1.2 | ×0.5 | ×1.0 |
+| Downtown | Built out (below) | 100% to the building line | ×1.25 | 0.5 m | ×1.2 | ×0.5 | ×1.0 |
 | Old town | 2×2 | 80–100% | ×1.0 | 0 m | ×1.0 | ×1.0 | ×1.0 |
 | Residential | 2×2 | 80–100% | ×1.0 | 0 m | ×1.0 | ×1.0 | ×0.9 |
 | Brutalist | 2×2 | 85–100% | ×0.95 | 0.5 m | ×0.85 | ×0.8 | ×0.8 |
 | Industrial | 1 | 75–95% | ×0.8 | 2 m | ×0.6 | ×1.3 | ×1.2 |
 | Suburban | 2×2 | 45–65% | ×1.0 | 3 m | ×0.5 | ×1.4 | ×0.3 |
 
-"Footprint" is the fraction of the parcel the shell may occupy; the remainder becomes the yard, plaza or hardstanding. Downtown gets one tower per block, industrial one wide shed, and suburban four small houses with gardens. Local street growth multiplies the road-density probability, so downtown is a tighter grid while the industrial and suburban edges have fewer, longer blocks. Corner radii scale the per-tier fillet, which makes suburban bends wider and downtown corners tighter. Damage scales the city setting, so the suburbs stay mostly intact.
+"Footprint" is the fraction of the parcel the shell may occupy; the remainder becomes the yard, plaza or hardstanding. Industrial gets one wide shed per block and suburban four small houses with gardens. Local street growth multiplies the road-density probability, so downtown is a tighter grid while the industrial and suburban edges have fewer, longer blocks. Corner radii scale the per-tier fillet, which makes suburban bends wider and downtown corners tighter. Damage scales the city setting, so the suburbs stay mostly intact.
+
+### Dense downtown
+
+Downtown blocks are built out to a building line 0.5 m behind the footway and
+filled with towers that share party walls:
+
+- **Superblocks.** A share of the local streets between downtown blocks
+  (**Downtown Superblocks**, default 0.35) is closed. A street closes only if
+  the road network stays connected, only between downtown blocks, and only
+  while the joined blocks fit in 2 x 2. Blocks joined across a closed or
+  streetless edge are laid out as one 2 x 1 or 2 x 2 superblock, like the
+  school and hospital sites.
+- **Rows.** Each block or superblock faces its best street. With a street
+  behind as well and enough depth, it holds two rows back to back, or two
+  rows either side of a 6 m service alley (30% of the time).
+- **Frontages.** Each row is cut into frontages 12–48 m wide (18–30 m
+  typical). Narrow plots stay lower: floors are capped at 0.9 x the plot's
+  shorter side plus 4.
+- **Party walls.** Sides that touch a neighbour are party walls, listed per
+  lot as `party_walls`. They are blank (no windows, doors, damage holes or
+  projecting cornices and pilasters), and debris stays on the building's own
+  side. A tower above its podium either rises flush with the party wall or
+  sets back from it, leaving a light gap. Towers with neighbours never stand
+  on pilotis.
+- **Budget.** The buildings of one block are kept or dropped together by the
+  building budget.
+
+The default city (radius 6) gets about 50 downtown towers instead of 30, the
+`ares_city_base` scene about 150 instead of 65.
 
 ## Building conditions
 
@@ -228,10 +258,11 @@ Output stays as separate meshes for culling and future chunk/LOD work. No textur
 
 Workspace `output` examples:
 
-- `ares_city_base.blend`: radius 8 (about 900 m across): 383 detailed buildings across six districts and all nine conditions, 30 sites and 27 transit stops, sidewalks/foundations, and the highway running 3 km out of each end; street-level camera. Guide curves are hidden after the overview render.
-- `ares_city_base.fbx`: the same base, 864 static mesh objects, without guide curves.
+- `ares_city_base.blend`: radius 8 (about 900 m across): 471 detailed buildings across six districts and all nine conditions (about 150 of them party-walled downtown towers), 30 sites and 27 transit stops, sidewalks/foundations, and the highway running 3 km out of each end; street-level camera. Guide curves are hidden after the overview render.
+- `ares_city_base.fbx`: the same base, 1040 static mesh objects, without guide curves.
 - `v0.11.0_review/`: every site kind and layout (intact, weathered, collapsed) and the sites in the city.
 - `v0.11.1_review/`: the radius-8 base city, its sites, and the highway leaving the city and fading out (`highway_out_*`).
+- `v0.12.0_review/`: the dense downtown (`downtown_*`), plus the same site and highway views.
 - `street_level.png`: geometry preview at Ares camera-pivot height.
 - `driving_circuits.png`: overview with three colored circuits on curved centerlines.
 - `district_downtown.png`, `district_industrial.png`, `district_suburban.png`: QA plan views of the three district archetypes.
@@ -242,7 +273,7 @@ Workspace `output` examples:
 - `metro_overview.png`, `metro_plan.png`, `metro_wasteland.png`: metro view, plan view and the highway running into the wasteland.
 - `conditions.png`, `conditions_shaded.png`, `conditions_plan.png`: one building per condition (nine states), elevation, shaded elevation and plan.
 
-The base scene's `City_Streets` mesh is 237k vertices / 365k polygons, `City_Highway_Outskirts` 14.5k polygons and `City_Ground` 5.9k polygons. The metro scene is 1.85M polygons in 1711 mesh objects; its ground spans about 25.6 km. A JSON text datablock stores the versioned plan. Coordinates are relative to the collection's stored `origin`; road nodes multiply by `block_size`, while lot positions/dimensions and path points are metres. Schema version 6 adds `outer_roads`. Version 5 added `pois` (kind, centre, width along the frontage, depth, rotation, frontage edge, blocks, seed, condition, damage, approach) and `shelters` (position, rotation, variant, road edge); a site's layout is chosen by `sites.compose` from its seed. Version 4 added `kind`, `condition`, `interiors` and `damage` to each lot alongside the version-3 `paths`: one entry per continuous same-tier route with its lattice `nodes`, flattened metre-space `points` and `width`. Locations and lots carry their district `style`; the per-style profile table is code (`STYLE_PROFILE`), not part of the file. v0.8 lot positions, conditions and interior flags differ from v0.7 with the same seed. No legacy-plan or game-side importer is included.
+The base scene's `City_Streets` mesh is 224k vertices / 345k polygons, `City_Highway_Outskirts` 14.5k polygons and `City_Ground` 5.9k polygons. The metro scene is 1.85M polygons in 1711 mesh objects; its ground spans about 25.6 km. A JSON text datablock stores the versioned plan. Coordinates are relative to the collection's stored `origin`; road nodes multiply by `block_size`, while lot positions/dimensions and path points are metres. Schema version 7 adds `party_walls` and `group` to each lot (downtown towers built against neighbours). Version 6 added `outer_roads`. Version 5 added `pois` (kind, centre, width along the frontage, depth, rotation, frontage edge, blocks, seed, condition, damage, approach) and `shelters` (position, rotation, variant, road edge); a site's layout is chosen by `sites.compose` from its seed. Version 4 added `kind`, `condition`, `interiors` and `damage` to each lot alongside the version-3 `paths`: one entry per continuous same-tier route with its lattice `nodes`, flattened metre-space `points` and `width`. Locations and lots carry their district `style`; the per-style profile table is code (`STYLE_PROFILE`), not part of the file. v0.8 lot positions, conditions and interior flags differ from v0.7 with the same seed. No legacy-plan or game-side importer is included.
 
 ## Code and verification
 
@@ -266,7 +297,7 @@ Verified on Blender 5.1.2. The first script covers registration, original operat
 
 See [ROADMAP.md](ROADMAP.md) for the city dressing plan: interior budget, collapse conditions, common locations and street patterns, split into shippable phases.
 
-1. **Parcels and block structure:** parcels are still axis-aligned sub-cells of a square lattice, so block edges and building rows remain rectilinear even though the streets curve. Downtown already uses one tower per block and the suburbs set houses well back, but L/U/courtyard footprints, curved frontages and irregular block subdivision are the next step.
+1. **Parcels and block structure:** parcels are still axis-aligned sub-cells of a square lattice, so block edges and building rows remain rectilinear even though the streets curve. Downtown blocks are now built out with party-walled towers and superblocks, and the suburbs set houses well back, but L/U/courtyard footprints, curved frontages and irregular block subdivision are the next step.
 2. **Vertical routes and terrain:** elevation changes, rail and subway lines, bridges, tunnel entrances and an optional river or dried coastline with a port (see ROADMAP "Later"). Highway currently means a wide at-grade corridor; no bridges exist yet.
 3. **Asset variety:** the six archetypes cover massing and roofs, and v0.11 adds the common sites (hospital, schools, stations, malls, parking); a courthouse or city hall, auto repair, an enclosed mall, authored facade kits, rooftop clutter and per-district palettes remain.
 4. **Game delivery:** chunk/LOD export, collision proxies, navigation checks, vehicle swept-clearance tests and connected ruin/vegetation dressing.

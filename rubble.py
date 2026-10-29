@@ -123,8 +123,9 @@ def interior_mound(mesh, rng, spec):
     """Mound inside a standing wall ring, visible from above."""
     x0, y0, x1, y1 = spec.interior_rect(0)
     peak = min(spec.top * .55, rng.uniform(1.8, 3.6))
-    mound(mesh, rng, (x0 + x1) / 2, (y0 + y1) / 2, max(1.5, (x1 - x0) / 2 - .5),
-          max(1.5, (y1 - y0) / 2 - .5), peak)
+    # The rim jitters out to 1.15 radii: keep it inside the walls.
+    mound(mesh, rng, (x0 + x1) / 2, (y0 + y1) / 2, max(1.5, (x1 - x0) / 2 / 1.16 - .3),
+          max(1.5, (y1 - y0) / 2 / 1.16 - .3), peak)
 
 
 def collapsed_lot(mesh, rng, width, depth):

@@ -84,8 +84,13 @@ Everything left of `mesh_builder` is pure Python and runs under plain
    solid stretches between openings), so they never land on a window.
 5. **Every room is reachable** through a door the player fits, from a street
    door on the ground floor or the stair above it.
+6. **Party walls stay on the lot line.** A side listed in `party_walls`
+   (row and block buildings) carries no openings, no damage holes and no
+   projecting details wherever the wall stands on the lot line, and debris
+   stays on the building's side. Storeys set back from it keep their windows.
 
-The tests enforce 1, 2, 4 and 5 for every style and condition.
+The tests enforce 1, 2, 4 and 5 for every style and condition, and 6 for
+party-walled downtown towers in every condition.
 
 ## Damage model
 

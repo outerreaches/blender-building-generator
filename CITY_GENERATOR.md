@@ -32,6 +32,7 @@ The original single-building and bulk operators remain available. Architecture u
 | Minimum Road Setback | Extra parcel clearance beyond street/ramp reservations |
 | Sidewalk Width / Curb Height | Default 2 m footway and 0.15 m curb |
 | Wasteland Extent | Open ground beyond the city edge, default 12000 m. The city stays inside the invisible game walls; the ground keeps going to the horizon |
+| Highway Reach | How far the highways continue past the city edge, default 3000 m (never past the wasteland); the last 40% breaks up into the ground. 0 ends them at the edge |
 | Architecture | Mixed districts or one style throughout |
 | Building Damage | Base damage; district and condition scale it, and it does not reroute roads |
 | Interior Ratio | Fraction of enterable buildings that get full interior layouts (default 0.25) |
@@ -132,6 +133,27 @@ weights per district are in [ROADMAP.md](ROADMAP.md); downtown, for example,
 runs 20% intact, 26% weathered, 20% semi-collapsed, 12% rubble-filled, 6% lower
 floors, 10% shell and 6% collapsed.
 
+## Highways beyond the city
+
+The highway runs from map edge to map edge through the centre. At each end it
+continues straight on across the wasteland for **Highway Reach** metres
+(`City_Highway_Outskirts`, a child of `City_Streets`).
+
+- **Join.** The city street mesh carries the highway, footways and all, 40 m
+  past the edge, clear of any junction at the end node. The outer road takes
+  over there from the street mesh's own cut-line vertices, so there is no
+  crack. The footways ramp down onto the shoulders over 2 m.
+- **Fade.** The road keeps its carriageway and shoulders until the last 40%.
+  There the surface breaks up into patches, from the edges inward, using
+  seeded value noise on 4 m rows, and the patches thin out to bare ground
+  before the end. Worn lane dashes run on and stop where the surface goes.
+- **Ground.** Breaks show the ground material at road level; the edges and the
+  far end drop to the curb bottom. The wasteland ground leaves a gap for the
+  road, so no two surfaces overlap.
+
+Each end is listed in the plan's `outer_roads` (start node, direction, width,
+length, fade).
+
 ## Points of interest
 
 Before the lot pass, the plan reserves whole blocks for sites, laid out by
@@ -158,8 +180,8 @@ between the blocks.
   arterial and collector footways, clear of lot and site fronts.
 
 The radius-6 default city gets 13–15 sites over about 20 blocks, which costs
-it about a fifth of its lots. The `ares_city_base` scene (radius 4) gets one
-of each kind.
+it about a fifth of its lots. The `ares_city_base` scene (radius 8) gets 30
+sites, every kind at least once.
 
 | Site | Layouts | Pad (min) |
 | --- | --- | --- |
@@ -177,8 +199,12 @@ of each kind.
 | Shopping plaza | Pair, Anchor | 80 x 70 m |
 
 Each site is a `<id>_Grounds` mesh (pad, paint, lawns, walks, canopies,
-pumps, signs, trees, benches, fences, play equipment, using 13 `Site_*`
-material slots). Its buildings are shells parented to the grounds, with the
+pumps, signs, benches, play equipment, using 13 `Site_*` material slots).
+Trees, chain-link fences and flagpoles are game assets, so the grounds only
+mark where they go:
+- concrete post footings (0.3 m, at most 2.5 m apart) along each fence line;
+- a 0.7 m plinth for each flagpole;
+- planters and planted parking islands for trees. Its buildings are shells parented to the grounds, with the
 grounds origin at the pad centre. Transit stops of one kind share a mesh.
 
 ## Street-level geometry
@@ -202,9 +228,10 @@ Output stays as separate meshes for culling and future chunk/LOD work. No textur
 
 Workspace `output` examples:
 
-- `ares_city_base.blend`: 89 detailed buildings across six districts and all nine conditions, 12 sites (one of each kind) and 9 transit stops, sidewalks/foundations; street-level camera. Guide curves are hidden after the overview render.
-- `ares_city_base.fbx`: the same base, 219 static mesh objects, without guide curves.
+- `ares_city_base.blend`: radius 8 (about 900 m across): 383 detailed buildings across six districts and all nine conditions, 30 sites and 27 transit stops, sidewalks/foundations, and the highway running 3 km out of each end; street-level camera. Guide curves are hidden after the overview render.
+- `ares_city_base.fbx`: the same base, 864 static mesh objects, without guide curves.
 - `v0.11.0_review/`: every site kind and layout (intact, weathered, collapsed) and the sites in the city.
+- `v0.11.1_review/`: the radius-8 base city, its sites, and the highway leaving the city and fading out (`highway_out_*`).
 - `street_level.png`: geometry preview at Ares camera-pivot height.
 - `driving_circuits.png`: overview with three colored circuits on curved centerlines.
 - `district_downtown.png`, `district_industrial.png`, `district_suburban.png`: QA plan views of the three district archetypes.
@@ -215,7 +242,7 @@ Workspace `output` examples:
 - `metro_overview.png`, `metro_plan.png`, `metro_wasteland.png`: metro view, plan view and the highway running into the wasteland.
 - `conditions.png`, `conditions_shaded.png`, `conditions_plan.png`: one building per condition (nine states), elevation, shaded elevation and plan.
 
-The base scene's `City_Streets` mesh is 64.9k vertices / 101.5k polygons; `City_Ground` is 1.6k polygons. The metro scene is 1.85M polygons in 1711 mesh objects; its ground spans about 25.6 km. A JSON text datablock stores the versioned plan. Coordinates are relative to the collection's stored `origin`; road nodes multiply by `block_size`, while lot positions/dimensions and path points are metres. Schema version 5 adds `pois` (kind, centre, width along the frontage, depth, rotation, frontage edge, blocks, seed, condition, damage, approach) and `shelters` (position, rotation, variant, road edge); a site's layout is chosen by `sites.compose` from its seed. Version 4 added `kind`, `condition`, `interiors` and `damage` to each lot alongside the version-3 `paths`: one entry per continuous same-tier route with its lattice `nodes`, flattened metre-space `points` and `width`. Locations and lots carry their district `style`; the per-style profile table is code (`STYLE_PROFILE`), not part of the file. v0.8 lot positions, conditions and interior flags differ from v0.7 with the same seed. No legacy-plan or game-side importer is included.
+The base scene's `City_Streets` mesh is 237k vertices / 365k polygons, `City_Highway_Outskirts` 14.5k polygons and `City_Ground` 5.9k polygons. The metro scene is 1.85M polygons in 1711 mesh objects; its ground spans about 25.6 km. A JSON text datablock stores the versioned plan. Coordinates are relative to the collection's stored `origin`; road nodes multiply by `block_size`, while lot positions/dimensions and path points are metres. Schema version 6 adds `outer_roads`. Version 5 added `pois` (kind, centre, width along the frontage, depth, rotation, frontage edge, blocks, seed, condition, damage, approach) and `shelters` (position, rotation, variant, road edge); a site's layout is chosen by `sites.compose` from its seed. Version 4 added `kind`, `condition`, `interiors` and `damage` to each lot alongside the version-3 `paths`: one entry per continuous same-tier route with its lattice `nodes`, flattened metre-space `points` and `width`. Locations and lots carry their district `style`; the per-style profile table is code (`STYLE_PROFILE`), not part of the file. v0.8 lot positions, conditions and interior flags differ from v0.7 with the same seed. No legacy-plan or game-side importer is included.
 
 ## Code and verification
 

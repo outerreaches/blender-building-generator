@@ -8,7 +8,8 @@ Pure Python. ``compose(kind, width, depth, seed)`` lays out a pad of
 along the front edge (y = -depth / 2), z = 0 at pad level (curb height in the
 city). The result is a list of buildings (generator parameters plus a
 position and quarter-turn) and a ground mesh of closed solids: pads, paint,
-curbs, canopies, pumps, trees, benches, fences and signs.
+curbs, canopies, pumps, benches, signs, and bases where the game places
+fences and flagpoles (trees, fences and flagpoles are game assets).
 
 Rules shared with the buildings: every prop is a closed solid; props touch
 only with opposite-facing faces; stacked surface layers use distinct heights
@@ -119,7 +120,6 @@ class Ground:
 
     def __init__(self):
         self.mesh = MeshData()
-        self.dead = 0.0     # Share of trees standing dead (damaged sites).
 
     # -- surfaces --------------------------------------------------------
     def pad(self, rect, material):
@@ -154,31 +154,6 @@ class Ground:
         solids.cylinder(self.mesh, cx, cy, radius, z0, z1, material, segments)
 
     # -- props -----------------------------------------------------------
-    def tree(self, x, y, rng, scale=1.0, base=0.0):
-        s = scale * rng.uniform(.85, 1.15)
-        if self.dead and rng.random() < self.dead:
-            # Bare trunk with two broken limbs.
-            top = base + 3.4 * s
-            self.cylinder(x, y, .13 * s, base, top, S_WOOD, 6)
-            for z, sign in ((base + 2.1 * s, 1), (base + 2.7 * s, -1)):
-                self.box(min(x, x + sign * 1.1 * s), y - .05, z, max(x, x + sign * 1.1 * s), y + .05,
-                         z + .1, S_WOOD)
-            return
-        trunk = 1.9 * s
-        self.cylinder(x, y, .14 * s, base, base + trunk, S_WOOD, 6)
-        phase = rng.uniform(0, math.tau)
-        wide = 1.9 * s
-        middle = base + trunk + 1.3 * s
-        solids.frustum(self.mesh, solids.circle(x, y, .5 * s, 8, phase),
-                       solids.circle(x, y, wide, 8, phase), base + trunk, middle, S_FOLIAGE)
-        solids.frustum(self.mesh, solids.circle(x, y, wide, 8, phase),
-                       solids.circle(x, y, .45 * s, 8, phase), middle, middle + 2.3 * s, S_FOLIAGE)
-
-    def shrub(self, x, y, rng, size=1.0, base=0.0):
-        phase = rng.uniform(0, math.tau)
-        solids.frustum(self.mesh, solids.circle(x, y, .55 * size, 7, phase),
-                       solids.circle(x, y, .3 * size, 7, phase), base, base + .9 * size, S_FOLIAGE)
-
     def bench(self, x, y, quarter=0, base=0.0):
         part = Ground()
         part.box(-.8, -.22, base + .42, .8, .22, base + .5, S_WOOD)
@@ -206,9 +181,8 @@ class Ground:
         part.boxc(0, 0, width, .4, panel_bottom, base + top, S_SIGN)
         self.mesh.place(part.mesh, x, y, quarter)
 
-    def fence(self, points, height=1.8, base=0.0, closed=False):
-        """Rails between posts; rails stop at post faces so nothing overlaps."""
-        post = .1
+    def fence_bases(self, points, base=0.0, closed=False):
+        """Post footings along a fence line (the fence itself is a game asset)."""
         pts = list(points) + ([points[0]] if closed else [])
         placed = set()
         for a, b in zip(pts, pts[1:]):
@@ -216,19 +190,13 @@ class Ground:
             if length < .3:
                 continue
             count = max(1, int(math.ceil(length / 2.5)))
-            ux, uy = (b[0] - a[0]) / length, (b[1] - a[1]) / length
-            stations = [(a[0] + ux * length * k / count, a[1] + uy * length * k / count)
-                        for k in range(count + 1)]
-            for px, py in stations:
+            for k in range(count + 1):
+                px = a[0] + (b[0] - a[0]) * k / count
+                py = a[1] + (b[1] - a[1]) * k / count
                 key = (round(px, 3), round(py, 3))
                 if key not in placed:
                     placed.add(key)
-                    self.boxc(px, py, post, post, base, base + height, S_METAL)
-            for (px, py), (qx, qy) in zip(stations, stations[1:]):
-                pa = (px + ux * post / 2, py + uy * post / 2)
-                pb = (qx - ux * post / 2, qy - uy * post / 2)
-                for z in (base + .35, base + height - .15):
-                    self.strip(pa, pb, .05, S_METAL, z + .05, z0=z)
+                    self.boxc(px, py, .3, .3, base, base + .15, S_CONCRETE)
 
     def canopy(self, rect, z0, z1, columns, column_size=.4, base=0.0, fascia=S_SIGN):
         """Flat canopy: columns up to a slab whose edge reads as a fascia band."""
@@ -260,9 +228,9 @@ class Ground:
             solids.frustum(self.mesh, solids.circle(x, y, 1.3, 8), solids.circle(x, y, .08, 8),
                            2.1, 2.55, S_SIGN)
 
-    def flagpole(self, x, y, height=9.0):
-        self.cylinder(x, y, .07, 0.0, height, S_METAL, 6)
-        self.box(x + .07, y - .02, height - 1.6, x + 2.3, y + .02, height - .3, S_SIGN)
+    def flagpole_base(self, x, y):
+        """Plinth where a flagpole (a game asset) stands."""
+        self.boxc(x, y, .7, .7, 0.0, .3, S_CONCRETE)
 
     def booth(self, x, y, quarter=0):
         part = Ground()
@@ -366,7 +334,6 @@ class Composer:
         self.front_material = S_ASPHALT
         self._planned = {}
         self._attached = []
-        self.g.dead = {'INTACT': 0.0, 'WEATHERED': .2}.get(condition, .45)
 
     @contextmanager
     def attached(self, building):
@@ -590,7 +557,10 @@ def _local_rect(c, building, x0, y0, x1, y1):
 
 
 def _parking_field(c, rect, angled=False, islands=True, trees=True, lights=True):
-    """Fill a rect with double-loaded stall rows along x, planted islands at row ends."""
+    """Fill a rect with double-loaded stall rows along x, planted islands at row ends.
+
+    ``trees`` leaves the islands bare for the game's tree assets; otherwise
+    they carry lamps."""
     g, rng = c.g, c.rng
     x0, y0, x1, y1 = rect
     stall, aisle, gap = 5.0, 6.5, .4
@@ -615,9 +585,7 @@ def _parking_field(c, rect, angled=False, islands=True, trees=True, lights=True)
             near, far = sorted((edge, edge + facing * stall))
             for ix0, ix1 in ((x0, x0 + end - .2), (x1 - end + .2, x1)):
                 g.poly([(ix0, near), (ix1, near), (ix1, far), (ix0, far)], S_GRASS, 0.0, LAYER['island'])
-                if trees:
-                    g.tree((ix0 + ix1) / 2, (near + far) / 2, rng, .8, base=LAYER['island'])
-                elif lights:
+                if lights and not trees:
                     g.lamp((ix0 + ix1) / 2, (near + far) / 2, 7.0, base=LAYER['island'])
 
 
@@ -805,8 +773,6 @@ def _gas_station(c):
         g.stalls(kx + kw / 2 + 1.5, x1 - STRIP - .5, y1 - STRIP, 5.0, -1)
     elif side:
         g.stalls(kx + kw / 2 + 1.5, cx - cw / 2 - 1.0, y1 - STRIP, 5.0, -1)
-    for tx in (x0 + STRIP / 2, x1 - STRIP / 2):
-        g.tree(tx, y0 + 6.5, rng, .8, base=LAYER['lawn'])
     g.boxc(x0 + STRIP + .6, y0 + 5.5, .5, .5, 0.0, 1.4, S_METAL)   # Air and water.
 
 
@@ -925,16 +891,12 @@ def _school(c):
             _covered_walk(c, classroom, annex, wx - 1.6, wx + 1.6, cy + cd / 2, wy0)
             yard_x1 = x1 - STRIP - 1 - ww - 1.5
         yard_y0 = cy + cd / 2 + 2.0
-    # Front lawn with an entrance plaza, flagpole and trees.
+    # Front lawn with an entrance plaza and a flagpole base.
     door = _main_door(c, classroom)
     door_x = cx - cl / 2 + (door[0] if door else cl / 2)
     _front_lawn(c, y0 + lawn_d - .3, [(door_x - 4, door_x + 4)])
     g.layer((door_x - 4, y0 - c.approach, door_x + 4, y0 + lawn_d), S_CONCRETE, 'apron')
-    g.flagpole(door_x - 6.0, y0 + 2.5)
-    for k in range(int((c.W - 12) // 9)):
-        tx = x0 + 4 + k * 9
-        if abs(tx - door_x) > 7:
-            g.tree(tx, y0 + 2.6, rng, .9, base=LAYER['lawn'])
+    g.flagpole_base(door_x - 6.0, y0 + 2.5)
     _entrance_canopy(c, classroom, width=7.0)
     # Yard: court, field, playground, fence.
     yard = (x0 + STRIP + 1, yard_y0, yard_x1, y1 - STRIP - 1)
@@ -954,8 +916,8 @@ def _school(c):
             g.layer(play, S_RUBBER, 'rubber')
             g.play_structure(play[0] + 4.0, (play[1] + play[3]) / 2, rng, base=LAYER['rubber'])
             g.swings(play[0] + 8.8, (play[1] + play[3]) / 2, base=LAYER['rubber'])
-    g.fence([(yard[0] - .5, yard[1]), (yard[0] - .5, yard[3] + .5), (yard[2] + .5, yard[3] + .5),
-             (yard[2] + .5, yard[1])], 2.0)
+    g.fence_bases([(yard[0] - .5, yard[1]), (yard[0] - .5, yard[3] + .5), (yard[2] + .5, yard[3] + .5),
+             (yard[2] + .5, yard[1])])
 
 
 def _school_court(c):
@@ -981,15 +943,12 @@ def _school_court(c):
         role='classrooms')
     _entrance_canopy(c, wing, width=6.0)
     _entrance_canopy(c, gym, width=6.0)
-    # Front lawn, a path to the yard gate, flagpole and trees.
+    # Front lawn, a path to the yard gate and a flagpole base.
     gate = (gx + gym_w / 2 + 2.0 + wx - wd / 2) / 2
     _front_lawn(c, y0 + lawn_d - .3, [(gate - 2.5, gate + 2.5), (gx - 3.0, gx + 3.0)])
     g.layer((gate - 2.5, y0 - c.approach, gate + 2.5, y0 + lawn_d + 2.0), S_CONCRETE, 'apron')
     g.layer((gx - 3.0, y0 - c.approach, gx + 3.0, gy - gym_d / 2), S_CONCRETE, 'apron')
-    g.flagpole(gate + 4.5, y0 + 2.5)
-    for x in _spaced(x0 + 4, x1 - 4, 9.0):
-        if abs(x - gate) > 5.5 and abs(x - gx) > 5.5:
-            g.tree(x, y0 + 2.6, rng, .9, base=LAYER['lawn'])
+    g.flagpole_base(gate + 4.5, y0 + 2.5)
     # Yard between the gym and the wing; play area behind the gym.
     yard = (gx + gym_w / 2 + 2.0, y0 + lawn_d + 2.0, wx - wd / 2 - 3.5, y1 - STRIP - 1)
     yw, yd = yard[2] - yard[0], yard[3] - yard[1]
@@ -1011,8 +970,8 @@ def _school_court(c):
         if behind[2] - behind[0] > 17:
             g.swings(behind[2] - 3.4, py, base=LAYER['rubber'])
     # Fenced on the gym side and the back; the wing closes the yard.
-    g.fence([(yard[0] - .5, yard[1]), (yard[0] - .5, yard[3] + .5),
-             (wx - wd / 2 - .4, yard[3] + .5)], 2.0)
+    g.fence_bases([(yard[0] - .5, yard[1]), (yard[0] - .5, yard[3] + .5),
+             (wx - wd / 2 - .4, yard[3] + .5)])
 
 
 def _hospital(c):
@@ -1070,8 +1029,6 @@ def _hospital(c):
     # Drop-off loop round a planted island in front of the entrance.
     g.poly([(mx - 7, y0 + 3.0), (mx + 7, y0 + 3.0), (mx + 7, y0 + 6.0), (mx - 7, y0 + 6.0)],
            S_GRASS, 0.0, LAYER['island'])
-    for k in range(3):
-        g.tree(mx - 5 + k * 5, y0 + 4.5, rng, .8, base=LAYER['island'])
     g.layer((mx - 9, y0 + 7.0, mx + 9, my - dp / 2), S_CONCRETE, 'walk')
     # Parking beyond the emergency drive.
     if x1 - STRIP - ex1 > 14:
@@ -1140,7 +1097,7 @@ def _police(c):
         _entrance_canopy(c, station, width=6.0)
         g.sign(drive[0] - 3.0, y0 + 1.6, 2.6, 1.2, 2.4)
     for offset in (-6.5, 6.5):
-        g.flagpole(dx_ + offset, y0 + 2.5)
+        g.flagpole_base(dx_ + offset, y0 + 2.5)
     for k in range(5):
         g.bollard(dx_ - 3.0 + k * 1.5, y0 + .8, base=LAYER['apron'])
     # Fenced back lot with a sally port garage.
@@ -1152,7 +1109,7 @@ def _police(c):
                                           doors=[('front', gw / 2, 3.4, 3.4)]),
                    lot[2] - gd / 2 - .5, lot[3] - gw / 2 - .5, quarter=3, role='sally port')
         g.stalls(lot[0] + 1.0, lot[2] - gd - 3.0, lot[3], 5.0, -1)
-        g.fence([(lot[0], lot[1]), (lot[0], lot[3]), (lot[2], lot[3]), (lot[2], lot[1] + 6.0)], 2.2)
+        g.fence_bases([(lot[0], lot[1]), (lot[0], lot[3]), (lot[2], lot[3]), (lot[2], lot[1] + 6.0)])
     if c.condition == 'INTACT':
         spec = c.spec(station)
         ax, ay = c.to_site(station, bw * .8, bd * .7)
@@ -1198,7 +1155,7 @@ def _fire_station(c):
                 LAYER['apron'] + .01, z0=LAYER['apron'])
     with c.attached(hall):
         g.box(hx - hw / 2 + .8, front - .3, 6.1, hx + hw / 2 - .8, front + .04, 6.9, S_SIGN)
-    g.flagpole(x1 - STRIP - 2.0, y0 + 3.0)
+    g.flagpole_base(x1 - STRIP - 2.0, y0 + 3.0)
     g.cylinder(x0 + STRIP + .6, y0 + 7.0, .18, 0.0, .8, S_SIGN)    # Hydrant.
     back = hy + hd / 2 + 1.0
     if y1 - STRIP - back > 6:
@@ -1303,8 +1260,7 @@ def _park(c):
             for y in _spaced(y0 + 3, y1 - 3, 8.0):
                 if abs(x - cx) < 8 and abs(y - cy) < 8:
                     continue
-                g.box(x - .9, y - .9, 0.0, x + .9, y + .9, .6, S_CONCRETE)
-                g.tree(x, y, rng, .85, base=.6)
+                g.box(x - .9, y - .9, 0.0, x + .9, y + .9, .6, S_CONCRETE)    # Planter.
         g.boxc(x1 - 4.0, y1 - 4.0, 3.0, 3.0, 0.0, 2.8, S_METAL)
         solids.frustum(g.mesh, [(x1 - 5.8, y1 - 5.8), (x1 - 2.2, y1 - 5.8), (x1 - 2.2, y1 - 2.2),
                                 (x1 - 5.8, y1 - 2.2)],
@@ -1339,7 +1295,7 @@ def _park(c):
         g.layer((0 - w / 2, y0, 0 + w / 2, ring[1]), S_CONCRETE, 'path')
         inner = (ring[0] + w, ring[1] + w, ring[2] - w, ring[3] - w)
         iw, idp = inner[2] - inner[0], inner[3] - inner[1]
-        # Rubber play pad in the middle, lawn round it with tables and trees.
+        # Rubber play pad in the middle, lawn round it with tables.
         pw, pd = min(18.0, iw - 6), min(12.0, idp - 5)
         if pw > 7 and pd > 6:
             pad = (-pw / 2, (inner[1] + inner[3]) / 2 - pd / 2, pw / 2, (inner[1] + inner[3]) / 2 + pd / 2)
@@ -1356,13 +1312,8 @@ def _park(c):
             for k, x in enumerate(_spaced(inner[0] + 2.5, inner[2] - 2.5, 7.0)):
                 if pad[3] + 3.0 < inner[3] - 1.5:
                     g.table(x, inner[3] - 2.0, umbrella=k % 2 == 0)
-        for x, y in ((inner[0] + 2.5, inner[1] + 2.5), (inner[2] - 2.5, inner[1] + 2.5)):
-            g.tree(x, y, rng, .9)
-        for x, y in ((x0 + 1.5, y0 + 1.5), (x1 - 1.5, y0 + 1.5), (x0 + 1.5, y1 - 1.5),
-                     (x1 - 1.5, y1 - 1.5)):
-            g.tree(x, y, rng, 1.0)
         return
-    # GREEN: diagonal paths to a fountain plaza, trees off the paths.
+    # GREEN: diagonal paths to a fountain plaza.
     radius = min(c.W, c.D) * .12 + 2.6
     g.poly(solids.circle(0, 0, radius, 16), S_CONCRETE, 0.0, LAYER['plaza'])
     paths = []
@@ -1382,28 +1333,11 @@ def _park(c):
         angle = math.pi / 4 + k * math.pi / 2 + math.pi / 4
         g.bench(math.cos(angle) * (radius - .9), math.sin(angle) * (radius - .9),
                 quarter=round(angle / (math.pi / 2)) % 4, base=LAYER['plaza'])
-    for x in _spaced(x0 + 3, x1 - 3, 7.5):
-        for y in _spaced(y0 + 3, y1 - 3, 7.5):
-            jx, jy = x + rng.uniform(-1.2, 1.2), y + rng.uniform(-1.2, 1.2)
-            if math.hypot(jx, jy) < radius + 2.5:
-                continue
-            if any(_segment_distance((jx, jy), a, b) < 3.2 for a, b in paths):
-                continue
-            g.tree(jx, jy, rng, rng.uniform(.8, 1.15))
     for a, b in paths:
         mx, my = (a[0] + b[0]) / 2, (a[1] + b[1]) / 2
         length = math.dist(a, b) or 1
         nx, ny = -(b[1] - a[1]) / length, (b[0] - a[0]) / length
         g.lamp(mx + nx * 1.8, my + ny * 1.8, 4.5)
-
-
-def _segment_distance(p, a, b):
-    ax, ay = a
-    bx, by = b
-    dx, dy = bx - ax, by - ay
-    length = dx * dx + dy * dy
-    t = 0.0 if length < 1e-9 else max(0.0, min(1.0, ((p[0] - ax) * dx + (p[1] - ay) * dy) / length))
-    return math.hypot(p[0] - (ax + dx * t), p[1] - (ay + dy * t))
 
 
 def _parking_lot(c):

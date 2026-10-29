@@ -7,7 +7,8 @@ from .city_plan import CONDITIONS, VERSION, CitySettings, generate_city, stream
 from .dims import GROUND_SLAB
 from .spec import BuildingSpec
 from .sites import KINDS as SITE_KINDS, VARIANTS as SITE_VARIANTS, compose as compose_site
-from .streets import build_street_mesh, build_ground_mesh, junctions
+from .streets import (build_ground_mesh, build_outer_road_mesh, build_street_mesh, junctions,
+                      outer_road_dashes)
 from .styles import STYLE_ITEMS, STYLE_COLORS, building_recipe
 from .building_assets import (create_rubble, create_shell, create_shelter, create_site,
                               create_site_preview, material)
@@ -44,6 +45,7 @@ def box(name, width, depth, height, collection, mat):
 
 
 def build_roads(plan, collection):
+    """City streets, plus the highways running on out into the wasteland."""
     vertices, faces, indices = build_street_mesh(plan)
     obj = mesh_object('City_Streets', vertices, faces, collection,
                       material('City_Asphalt', (.085, .09, .10, 1)))
@@ -52,6 +54,18 @@ def build_roads(plan, collection):
     for poly, index in zip(obj.data.polygons, indices):
         poly.material_index = index
     obj['surface_role'] = 'streets'
+    outer_vertices, outer_faces, outer_indices = build_outer_road_mesh(plan, vertices)
+    if outer_faces:
+        outer = mesh_object('City_Highway_Outskirts', outer_vertices, outer_faces, collection,
+                            material('City_Asphalt', (.085, .09, .10, 1)))
+        for name, color in (('City_Pavement', (.42, .41, .38, 1)), ('City_Curb', (.52, .50, .46, 1)),
+                            ('City_Ground', (.23, .21, .17, 1))):
+            outer.data.materials.append(material(name, color))
+        for poly, index in zip(outer.data.polygons, outer_indices):
+            poly.material_index = index
+        outer['surface_role'] = 'streets_outskirts'
+        outer['reach_m'] = [road['length'] for road in plan.outer_roads]
+        outer.parent = obj
     return obj
 
 
@@ -145,6 +159,11 @@ def build_markings(plan, collection):
                 faces.append(tuple(range(base, base + 4)))
                 base += 4
             start += 7
+    # Outer highways: worn dashes that thin out and stop where the road breaks up.
+    for quad in outer_road_dashes(plan):
+        base = len(vertices)
+        vertices.extend((x, y, .004) for x, y in quad)
+        faces.append(tuple(range(base, base + 4)))
     if not faces:
         return None
     obj = mesh_object('City_LanePaint', vertices, faces, collection,
@@ -291,6 +310,10 @@ class MESH_OT_generate_city(bpy.types.Operator):
     curb_height: FloatProperty(name='Curb Height (m)', default=.15, min=0, max=.25)
     wasteland: FloatProperty(name='Wasteland Extent (m)', default=12000, min=0, max=20000,
                              description='Open ground beyond the city edge; the city itself stays inside the invisible walls')
+    highway_reach: FloatProperty(name='Highway Reach (m)', default=3000, min=0, max=20000,
+                                 description='How far the highways run on beyond the city edge, '
+                                             'breaking up into the ground over the last 40%; '
+                                             'never past the wasteland')
     damage: FloatProperty(name='Building Damage', default=.35, min=0, max=1)
     max_buildings: IntProperty(name='Building Budget', default=600, min=1, max=10000)
     style: EnumProperty(name='Architecture', items=[('MIXED', 'Mixed Districts', 'Styles vary by primary location')] + STYLE_ITEMS)
@@ -315,7 +338,7 @@ class MESH_OT_generate_city(bpy.types.Operator):
         layout = self.layout
         for title, names in (
             ('City Growth', ('seed', 'radius', 'block_size', 'primary_count', 'secondary_count', 'driving_loop_count')),
-            ('Density and Access', ('curve_radius', 'core_radius', 'core_density', 'outskirts_density', 'road_density', 'setback', 'sidewalk_width', 'curb_height', 'wasteland')),
+            ('Density and Access', ('curve_radius', 'core_radius', 'core_density', 'outskirts_density', 'road_density', 'setback', 'sidewalk_width', 'curb_height', 'wasteland', 'highway_reach')),
             ('Buildings', ('style', 'damage', 'max_buildings', 'points_of_interest', 'detail')),
         ):
             group = layout.box()

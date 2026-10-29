@@ -8,7 +8,7 @@ import json
 import math
 import random
 
-VERSION = 5
+VERSION = 6
 ROAD_WIDTHS = {"HIGHWAY": 20.0, "ARTERIAL": 12.0, "COLLECTOR": 8.0, "LOCAL": 6.0}
 ROAD_RANK = {name: i for i, name in enumerate(ROAD_WIDTHS)}
 # Corner radius at a route bend, before the curve_radius multiplier and clamping.
@@ -146,6 +146,7 @@ class CitySettings:
     max_buildings: int = 600
     style: str = "MIXED"
     points_of_interest: bool = True   # Sites (sites.py) and transit stops.
+    highway_reach: float = 3000.0     # Highway beyond the city edge (m), fading out at its end.
 
     def validate(self):
         for name, lo, hi in (("radius", 2, 25), ("primary_count", 1, 16),
@@ -161,6 +162,7 @@ class CitySettings:
                              ("road_density", 0, 1), ("curve_radius", 0, 1),
                              ("damage", 0, 1), ("interior_ratio", 0, 1),
                              ("setback", 1, 8), ("wasteland", 0, 20000),
+                             ("highway_reach", 0, 20000),
                              ("sidewalk_width", 1.2, 5), ("curb_height", 0, .25)):
             value = getattr(self, name)
             if not math.isfinite(value) or not lo <= value <= hi:
@@ -246,6 +248,7 @@ class CityPlan:
     driving_loops: list
     pois: list = field(default_factory=list)
     shelters: list = field(default_factory=list)
+    outer_roads: list = field(default_factory=list)
 
     def to_json(self):
         return json.dumps({"version": VERSION, **asdict(self)}, sort_keys=True, indent=2)
@@ -593,7 +596,7 @@ def generate_city(settings=CitySettings()):
     lots = sorted(lots[:settings.max_buildings], key=lambda lot: lot.id)
     shelters = _place_shelters(settings, roads, lots, pois) if settings.points_of_interest else []
     return CityPlan(settings, locations, road_list, paths, lots, eligible, driving_loops,
-                    pois, shelters)
+                    pois, shelters, _outer_roads(settings, paths))
 
 
 def _pick_condition(style, rng):
@@ -916,3 +919,41 @@ def _place_shelters(settings, roads, lots, pois):
             shelters.append(Shelter(f"shelter_{len(shelters)}", position, rotation, variant, key))
             break
     return shelters
+
+
+# Share of an outer road's length over which its asphalt breaks up and
+# disappears under the ground.
+OUTER_FADE = .4
+
+
+def _outer_roads(settings, paths):
+    """Highways continue straight out of the city across the wasteland.
+
+    Each highway end on the map edge gets a road heading away from the city:
+    ``length`` metres beyond the end node (never past the ground), the last
+    ``fade`` metres breaking up into patches until only ground is left.
+    """
+    reach = min(settings.highway_reach, settings.wasteland)
+    if reach < 1:
+        return []
+    radius = settings.radius
+    roads = []
+    for path in paths:
+        if path['tier'] != 'HIGHWAY':
+            continue
+        for node in (path['nodes'][0], path['nodes'][-1]):
+            x, y = node
+            if abs(x) == radius:
+                direction = (1.0 if x > 0 else -1.0, 0.0)
+            elif abs(y) == radius:
+                direction = (0.0, 1.0 if y > 0 else -1.0)
+            else:
+                continue
+            if any(r['node'] == list(node) for r in roads):
+                continue
+            roads.append({'id': f'outer_{len(roads)}', 'node': list(node), 'tier': 'HIGHWAY',
+                          'start': [x * settings.block_size, y * settings.block_size],
+                          'direction': list(direction), 'width': ROAD_WIDTHS['HIGHWAY'],
+                          'length': round(reach, 3), 'fade': round(reach * OUTER_FADE, 3)})
+    return roads
+

@@ -1,5 +1,26 @@
 # Procedural Building Shell Generator
 
+## v0.11.1: Highways out of the city, game-asset props
+
+- **Highways leave the city.** The main highway continues straight out of
+  both ends of the city across the wasteland, 3 km by default (**Highway
+  Reach** in Generate City; never past the ground).
+  - Over its last 40% the surface breaks up from the edges inward into
+    thinning patches until only ground is left.
+  - Lane dashes wear away with it.
+  - It is a separate `City_Highway_Outskirts` mesh joined crack-free to the
+    city streets 40 m past the edge; the footways ramp down onto its shoulders.
+  - The wasteland ground is cut around it, so nothing overlaps.
+  - Plan schema 6 adds `outer_roads`.
+- **Game-asset props.** Sites no longer model trees, chain-link fences or
+  flagpoles; the game places its own assets:
+  - fence lines keep 0.3 m concrete post footings every 2.5 m or less;
+  - flagpoles keep a 0.7 m plinth;
+  - planters and parking islands stay as tree spots.
+- **`ares_city_base` is twice as wide.** It is now radius 8 (about 900 m
+  across, was 450 m): 383 buildings, 30 sites and 27 transit stops; the
+  `.blend` is 36 MB, the FBX 47 MB.
+
 ## v0.11.0: Points of interest
 
 Cities now set whole blocks aside for points of interest, or 2 x 1 and 2 x 2

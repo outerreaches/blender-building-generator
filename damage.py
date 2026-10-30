@@ -114,8 +114,11 @@ class BreakField:
 
     def __init__(self, width, depth, top, level_zs, seed=0, damage=0.0,
                  pointiness=.5, resolution=1.0, min_height=0.0, cap_height=None,
-                 chunk_cut=False, collapse=None, tiers=None):
+                 chunk_cut=False, collapse=None, tiers=None, roof=None):
         self.width, self.depth, self.top = width, depth, top
+        # Underside of the roof slab (single-storey buildings keep their roof
+        # only while every wall still reaches it).
+        self.roof = roof
         # (z_from, z_to, rect): the footprint standing at each height, so a
         # collapse lands on the walls that exist there (podiums, setbacks).
         self.tiers = tiers or [(0.0, top, (0.0, 0.0, width, depth))]
@@ -307,10 +310,13 @@ class BreakField:
             shared = (raw[name][-1] + raw[following][0]) / 2
             shared = min(shared, raw[name][-2] + max_step, raw[following][1] + max_step)
             raw[name][-1] = raw[following][0] = shared
+        upper = [z for z in self.level_zs if z > 0]
+        if not upper:
+            self._single_storey_top(raw, walls)
+            return
         # One ragged storey above the break line; intact floors keep windows.
         candidates = [z for z in self.level_zs if 0 < z <= low + 1e-6]
-        upper = [z for z in self.level_zs if z > 0]
-        break_base = max(candidates) if candidates else (min(upper) if upper else low)
+        break_base = max(candidates) if candidates else min(upper)
         ceiling = min([z for z in self.level_zs if z > break_base + 1e-6] + [total])
         if cap_height is not None:
             ceiling = min(ceiling, max(cap_height, break_base + .4))
@@ -322,6 +328,30 @@ class BreakField:
             count = len(heights)
             self.ragged[name] = [(length * index / (count - 1), max(self.min_height, h))
                                  for index, h in enumerate(heights)]
+
+    def _single_storey_top(self, raw, walls):
+        """Ragged walls of a one-storey building.
+
+        The heights spread over everything above the protected ground-floor
+        height instead of flattening against it, and the roof stays only if
+        every wall still reaches its underside; otherwise it has fallen in and
+        the shell stands open (the break line is the ground floor).
+        """
+        total = self.top
+        floor = min(self.min_height, total)
+        lowest = min(min(heights) for heights in raw.values())
+        span = total - lowest
+        self.ragged = {}
+        for name, length in walls:
+            heights = raw[name]
+            if span > 1e-6:
+                heights = [floor + (h - lowest) * (total - floor) / span for h in heights]
+            count = len(heights)
+            self.ragged[name] = [(length * index / (count - 1), max(self.min_height, h))
+                                 for index, h in enumerate(heights)]
+        standing = min(min(z for _, z in profile) for profile in self.ragged.values())
+        if self.roof is None or standing < self.roof - 1e-6:
+            self.break_base = 0.0
 
     @staticmethod
     def _clip(profile, ua, ub):

@@ -289,24 +289,28 @@ class Ground:
             self.strip((x, y_edge + facing * .2), (x, y_edge + facing * (depth - .2)), .12,
                        S_PAINT, name)
 
-    def court_lines(self, rect, material=S_PAINT):
-        """Court outline, centre line and circle; crossing lines on separate layers."""
+    def court_lines(self, rect, material=S_PAINT, base=0.0):
+        """Court outline, centre line and circle; crossing lines on separate
+        layers. ``base`` lifts them onto a surface (a lawn pitch)."""
         x0, y0, x1, y1 = rect
         w = .1
-        self.strip((x0, y0 + w / 2), (x1, y0 + w / 2), w, material, 'paint')
-        self.strip((x0, y1 - w / 2), (x1, y1 - w / 2), w, material, 'paint')
-        self.strip((x0 + w / 2, y0 + w), (x0 + w / 2, y1 - w), w, material, 'paint_cross')
-        self.strip((x1 - w / 2, y0 + w), (x1 - w / 2, y1 - w), w, material, 'paint_cross')
+
+        def line(a, b, layer):
+            self.strip(a, b, w, material, base + LAYER[layer], z0=base)
+        line((x0, y0 + w / 2), (x1, y0 + w / 2), 'paint')
+        line((x0, y1 - w / 2), (x1, y1 - w / 2), 'paint')
+        line((x0 + w / 2, y0 + w), (x0 + w / 2, y1 - w), 'paint_cross')
+        line((x1 - w / 2, y0 + w), (x1 - w / 2, y1 - w), 'paint_cross')
         cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
         if x1 - x0 > y1 - y0:
-            self.strip((cx, y0 + w), (cx, y1 - w), w, material, 'paint_cross')
+            line((cx, y0 + w), (cx, y1 - w), 'paint_cross')
         else:
-            self.strip((x0 + w, cy), (x1 - w, cy), w, material, 'paint_cross')
+            line((x0 + w, cy), (x1 - w, cy), 'paint_cross')
         radius = min(x1 - x0, y1 - y0) * .18
         ring = solids.circle(cx, cy, radius, 14)
         for index, (a, b) in enumerate(zip(ring, ring[1:] + ring[:1])):
             # Neighbouring segments overlap at their joints: alternate layers.
-            self.strip(a, b, w, material, 'paint_mark' if index % 2 else 'paint_mark2')
+            line(a, b, 'paint_mark' if index % 2 else 'paint_mark2')
 
     def arrow(self, x, y, quarter=0):
         part = Ground()
@@ -845,6 +849,16 @@ def _fast_food(c):
     g.sign(x0 + 2.2, y0 + 1.8, 3.0, 2.2, 9.0, two_posts=False)
 
 
+# Real sizes (m) for school grounds: a hard court, a play pad, the longest
+# classroom block, and the pitch's length limits and length:width range.
+SCHOOL_COURT = (28.0, 15.0)
+SCHOOL_HALF_COURT = (15.0, 14.0)
+SCHOOL_PLAY = (14.0, 10.0)
+SCHOOL_BLOCK_MAX = 54.0
+PITCH_LENGTH = (30.0, 90.0)
+PITCH_ASPECT = (1.45, 1.7)
+
+
 def _school(c):
     if c.variant == 'WING' and c.D < 56:
         if c.W >= 70:
@@ -858,15 +872,26 @@ def _school(c):
     lawn_d = 6.0
     gym_w, gym_d = min(24.0, c.W * .32), 18.0
     wing = c.variant == 'WING' and c.D >= 56
+    usable = c.W - 2 * STRIP - 2
+    cy = y0 + lawn_d + cd / 2
+    side = 0.0
     if not wing:
-        cl = c.W - 2 * STRIP - 2 - gym_w - 1
-        cx = x0 + STRIP + 1 + cl / 2
+        # Classrooms and gym side by side on the street. When the strip behind
+        # them is too shallow for sport, the grounds take the end of the lot
+        # instead; otherwise a wide pad's spare frontage becomes a car park
+        # rather than a longer block.
+        behind = c.D - 2 * STRIP - 1 - lawn_d - max(cd, gym_d) - 2
+        if behind < SCHOOL_COURT[1] + 3 and usable - gym_w - 1 - 26 >= 30:
+            side = min(36.0, usable - gym_w - 1 - 26 - 2)
+        cl = min(SCHOOL_BLOCK_MAX, usable - gym_w - 1 - (side + 2 if side else 0))
+        spare = usable - gym_w - 1 - cl - (side + 2 if side else 0)
+        cx = x1 - STRIP - 1 - gym_w - 1 - cl / 2
         gx, gy = x1 - STRIP - 1 - gym_w / 2, y0 + lawn_d + gym_d / 2
     else:
-        cl = c.W - 2 * STRIP - 2
-        cx = 0.0
+        cl = min(SCHOOL_BLOCK_MAX, usable)
+        spare = usable - cl
+        cx = x1 - STRIP - 1 - cl / 2
         gx, gy = x0 + STRIP + 1 + gym_w / 2, y1 - STRIP - 1 - gym_d / 2
-    cy = y0 + lawn_d + cd / 2
     classroom = c.building('classrooms', designed(
         cl, cd, floors, 3.8, c.seed, 'SCHOOL', ground_floor_height=4.0, facade_system='RIBBON',
         window_width=2.6, window_spacing=.7, window_height=1.8, sill_height=.9,
@@ -875,8 +900,13 @@ def _school(c):
                                window_height=1.6, window_width=3.0, window_spacing=1.5,
                                parapet_height=.6, doors=[('front', gym_w / 2, 2.4)]),
                gx, gy, role='gym')
-    yard_y0 = y0 + lawn_d + max(cd, gym_d if not wing else 0) + 2.0
+    front_back = y0 + lawn_d + max(cd, gym_d if not wing else 0)
+    left = x0 + STRIP + 1 + (side + 2 if side else 0)
+    if spare >= 14:
+        _parking_field(c, (left - 1, y0 + 1.0, left + spare - 1.0, front_back),
+                       islands=False, trees=False, lights=False)
     yard_x1 = x1 - STRIP - 1
+    yard_y1 = y1 - STRIP - 1
     if wing:
         # A separate wing behind the main block, joined by a covered walk.
         ww, gap = 14.0, 4.0
@@ -890,34 +920,110 @@ def _school(c):
                 wall_thickness=.35), wx, wy0 + wl / 2, quarter=3, role='wing')
             _covered_walk(c, classroom, annex, wx - 1.6, wx + 1.6, cy + cd / 2, wy0)
             yard_x1 = x1 - STRIP - 1 - ww - 1.5
-        yard_y0 = cy + cd / 2 + 2.0
+        # The gym stands in the back corner: the grounds lie in front of it.
+        yard_y1 = gy - gym_d / 2 - 2.0
+        front_back = cy + cd / 2
     # Front lawn with an entrance plaza and a flagpole base.
     door = _main_door(c, classroom)
     door_x = cx - cl / 2 + (door[0] if door else cl / 2)
-    _front_lawn(c, y0 + lawn_d - .3, [(door_x - 4, door_x + 4)])
+    lawn_x0 = left - 1 + spare if spare >= 14 else (left - 1 if side else x0)
     g.layer((door_x - 4, y0 - c.approach, door_x + 4, y0 + lawn_d), S_CONCRETE, 'apron')
+    for a, b in ((lawn_x0, door_x - 4), (door_x + 4, x1)):
+        if b - a > .6:
+            g.layer((a, y0, b, y0 + lawn_d - .3), S_GRASS, 'lawn')
     g.flagpole_base(door_x - 6.0, y0 + 2.5)
     _entrance_canopy(c, classroom, width=7.0)
-    # Yard: court, field, playground, fence.
-    yard = (x0 + STRIP + 1, yard_y0, yard_x1, y1 - STRIP - 1)
-    yw, yd = yard[2] - yard[0], yard[3] - yard[1]
-    if yd > 10 and yw > 16:
-        court_w = min(26.0, yw * .45)
-        court = (yard[0] + 1.5, yard[1] + 1.5, yard[0] + 1.5 + court_w,
-                 yard[1] + 1.5 + min(15.0, yd - 3))
-        g.court_lines(court)
-        field = (court[2] + 3.0, yard[1] + 1.0, yard[2] - 1.0, yard[3] - 1.0)
-        if field[2] - field[0] > 12:
-            g.layer(field, S_GRASS, 'lawn')
-            g.goal(field[0] + 1.0, (field[1] + field[3]) / 2, quarter=1)
-            g.goal(field[2] - 1.0, (field[1] + field[3]) / 2, quarter=3)
-        if yd > 22:
-            play = (yard[0] + 1.5, court[3] + 2.0, yard[0] + 13.0, min(yard[3] - 1.0, court[3] + 11.0))
-            g.layer(play, S_RUBBER, 'rubber')
-            g.play_structure(play[0] + 4.0, (play[1] + play[3]) / 2, rng, base=LAYER['rubber'])
-            g.swings(play[0] + 8.8, (play[1] + play[3]) / 2, base=LAYER['rubber'])
-    g.fence_bases([(yard[0] - .5, yard[1]), (yard[0] - .5, yard[3] + .5), (yard[2] + .5, yard[3] + .5),
-             (yard[2] + .5, yard[1])])
+    fence_back = y1 - STRIP - .5
+    if side:
+        grounds = (x0 + STRIP + 1, y0 + 1.0, x0 + STRIP + 1 + side, y1 - STRIP - 1)
+        _school_grounds(c, grounds)
+        g.fence_bases([(grounds[2] + .5, y0 + .5), (grounds[0] - .5, y0 + .5),
+                       (grounds[0] - .5, fence_back), (grounds[2] + .5, fence_back),
+                       (grounds[2] + .5, front_back + 2.0)])
+        yard = (grounds[2] + 2.5, front_back + 2.0, yard_x1, yard_y1)
+        if yard[3] - yard[1] > 6:
+            _play_pad(c, (yard[0], yard[1] + .5, yard[0] + SCHOOL_PLAY[0],
+                          yard[1] + .5 + min(SCHOOL_PLAY[1], yard[3] - yard[1] - 1)))
+        return
+    yard = (x0 + STRIP + 1, front_back + 2.0, yard_x1, yard_y1)
+    _school_grounds(c, yard)
+    g.fence_bases([(yard[0] - .5, yard[1]), (yard[0] - .5, fence_back), (yard[2] + .5, fence_back),
+                   (yard[2] + .5, yard[1])])
+
+
+def _school_grounds(c, yard, play=True):
+    """Hard court, play pad and pitch at real sizes inside ``yard``, laid out
+    along its long side from the front; whatever is left stays open
+    playground instead of stretching them to fit."""
+    g = c.g
+    x0, y0, x1, y1 = yard
+    if min(x1 - x0, y1 - y0) < 12 or max(x1 - x0, y1 - y0) < 16:
+        return
+    portrait = (y1 - y0) > (x1 - x0)
+    length, across = (y1 - y0, x1 - x0) if portrait else (x1 - x0, y1 - y0)
+
+    def world(u0, v0, u1, v1):
+        return (x0 + v0, y0 + u0, x0 + v1, y0 + u1) if portrait else (x0 + u0, y0 + v0, x0 + u1, y0 + v1)
+    cursor = 1.5
+    for size in (SCHOOL_COURT, SCHOOL_HALF_COURT):
+        cl, cw = size
+        if length - cursor - 1.5 >= cl and across - 3 >= cw:
+            g.court_lines(world(cursor, 1.5, cursor + cl, 1.5 + cw))
+            if play and across - cw - 3 - 2 >= SCHOOL_PLAY[1] + 1:
+                pw, pd = SCHOOL_PLAY
+                _play_pad(c, world(cursor, cw + 3.5, cursor + min(pw, cl), cw + 3.5 + pd))
+                play = False
+            cursor += cl + 3.0
+            break
+    if play and length - cursor - 1.5 >= SCHOOL_PLAY[0] + 10 and across - 3 >= SCHOOL_PLAY[1]:
+        pw, pd = SCHOOL_PLAY
+        _play_pad(c, world(cursor, 1.5, cursor + pw, 1.5 + pd))
+        cursor += pw + 3.0
+    _pitch(c, world(cursor, 1.0, length - 1.0, across - 1.0))
+
+
+def _play_pad(c, pad):
+    """Rubber pad with a play structure (and swings when it is long enough);
+    equipment runs along the pad's longer side."""
+    g, rng = c.g, c.rng
+    g.layer(pad, S_RUBBER, 'rubber')
+    x0, y0, x1, y1 = pad
+    if x1 - x0 >= y1 - y0:
+        py = (y0 + y1) / 2
+        if x1 - x0 >= 9:
+            g.play_structure(x0 + 4.2, py, rng, base=LAYER['rubber'])
+        if x1 - x0 >= 13:
+            g.swings(x1 - 3.4, py, base=LAYER['rubber'])
+    elif y1 - y0 >= 9:
+        g.play_structure((x0 + x1) / 2, y0 + 4.2, rng, base=LAYER['rubber'])
+
+
+def _pitch(c, area):
+    """The largest pitch of real proportions that fits ``area``, centred in it."""
+    g = c.g
+    x0, y0, x1, y1 = area
+    aw, ad = x1 - x0, y1 - y0
+    along_x = aw >= ad
+    long_side, short_side = (aw, ad) if along_x else (ad, aw)
+    lo, hi = PITCH_ASPECT
+    length = min(long_side, short_side * hi, PITCH_LENGTH[1])
+    width = min(short_side, length / lo)
+    length = min(length, width * hi)
+    if length < PITCH_LENGTH[0] or length / width < lo - 1e-6:
+        return
+    cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
+    hx, hy = (length / 2, width / 2) if along_x else (width / 2, length / 2)
+    rect = (cx - hx, cy - hy, cx + hx, cy + hy)
+    g.layer(rect, S_GRASS, 'lawn')
+    inner = (rect[0] + 1.0, rect[1] + 1.0, rect[2] - 1.0, rect[3] - 1.0)
+    g.court_lines(inner, base=LAYER['lawn'])
+    goal = min(7.3, width * .2)
+    if along_x:
+        g.goal(inner[0] + .4, cy, width=goal, quarter=1)
+        g.goal(inner[2] - .4, cy, width=goal, quarter=3)
+    else:
+        g.goal(cx, inner[1] + .4, width=goal)
+        g.goal(cx, inner[3] - .4, width=goal, quarter=2)
 
 
 def _school_court(c):
@@ -934,7 +1040,8 @@ def _school_court(c):
                                      parapet_height=.6, doors=[('front', gym_w / 2, 2.4)]),
                      gx, gy, role='gym')
     wd = 15.0
-    wy0, wy1 = y0 + lawn_d, y1 - STRIP - 1
+    wy0 = y0 + lawn_d
+    wy1 = min(y1 - STRIP - 1, wy0 + SCHOOL_BLOCK_MAX)
     wx = x1 - STRIP - 1 - wd / 2
     wing = c.building('classrooms', designed(
         wy1 - wy0, wd, 2, 3.8, c.seed, 'SCHOOL', ground_floor_height=4.0, facade_system='RIBBON',
@@ -949,29 +1056,18 @@ def _school_court(c):
     g.layer((gate - 2.5, y0 - c.approach, gate + 2.5, y0 + lawn_d + 2.0), S_CONCRETE, 'apron')
     g.layer((gx - 3.0, y0 - c.approach, gx + 3.0, gy - gym_d / 2), S_CONCRETE, 'apron')
     g.flagpole_base(gate + 4.5, y0 + 2.5)
-    # Yard between the gym and the wing; play area behind the gym.
+    # Grounds between the gym and the wing; play area behind the gym.
     yard = (gx + gym_w / 2 + 2.0, y0 + lawn_d + 2.0, wx - wd / 2 - 3.5, y1 - STRIP - 1)
-    yw, yd = yard[2] - yard[0], yard[3] - yard[1]
-    if yw > 14 and yd > 12:
-        court_w = min(26.0, yw * .45)
-        court = (yard[0] + 1.5, yard[1] + 1.5, yard[0] + 1.5 + court_w,
-                 yard[1] + 1.5 + min(15.0, yd - 3))
-        g.court_lines(court)
-        field = (court[2] + 3.0, yard[1] + 1.0, yard[2] - 1.0, yard[3] - 1.0)
-        if field[2] - field[0] > 12:
-            g.layer(field, S_GRASS, 'lawn')
-            g.goal(field[0] + 1.0, (field[1] + field[3]) / 2, quarter=1)
-            g.goal(field[2] - 1.0, (field[1] + field[3]) / 2, quarter=3)
     behind = (x0 + STRIP + 1, gy + gym_d / 2 + 2.0, gx + gym_w / 2, y1 - STRIP - 1)
-    if behind[3] - behind[1] > 7 and behind[2] - behind[0] > 12:
-        g.layer(behind, S_RUBBER, 'rubber')
-        py = (behind[1] + behind[3]) / 2
-        g.play_structure(behind[0] + 4.2, py, rng, base=LAYER['rubber'])
-        if behind[2] - behind[0] > 17:
-            g.swings(behind[2] - 3.4, py, base=LAYER['rubber'])
+    has_play = behind[3] - behind[1] > 7 and behind[2] - behind[0] > 12
+    _school_grounds(c, yard, play=not has_play)
+    if has_play:
+        pw = min(SCHOOL_PLAY[0], behind[2] - behind[0])
+        pd = min(SCHOOL_PLAY[1], behind[3] - behind[1])
+        _play_pad(c, (behind[0], behind[1], behind[0] + pw, behind[1] + pd))
     # Fenced on the gym side and the back; the wing closes the yard.
     g.fence_bases([(yard[0] - .5, yard[1]), (yard[0] - .5, yard[3] + .5),
-             (wx - wd / 2 - .4, yard[3] + .5)])
+                   (wx - wd / 2 - .4, yard[3] + .5)])
 
 
 def _hospital(c):

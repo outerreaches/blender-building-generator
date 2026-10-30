@@ -53,6 +53,7 @@ def make_field(spec, params):
         resolution=float(params.get('damage_resolution', 1.0)),
         min_height=min(min_height, spec.top), cap_height=params.get('damage_cap_height'),
         chunk_cut=bool(params.get('chunk_cut')), collapse=params.get('collapse'),
+        roof=spec.top - spec.roof_slab,
         tiers=[(spec.levels[tier.first].z, spec.levels[tier.last].ceiling, tier.rect)
                for tier in spec.tiers])
 

@@ -1,5 +1,26 @@
 # Procedural Building Shell Generator
 
+## v0.12.2: Weathered one-storey roofs, school proportions
+
+- **Fixed: floating roofs on weathered one-storey buildings.** This affected
+  industrial sheds, the fire station's engine hall and one-storey houses.
+  Weathering cut their walls down flat against the protected ground-floor
+  height while the roof stayed up, floating above them. Now the ragged wall
+  tops spread over the whole allowed range, so they look weathered rather
+  than flat. The roof stays only while every wall still reaches its
+  underside; otherwise it has fallen in. Multi-storey buildings already
+  behaved this way.
+- **Fixed: stretched schools.** Schools on 2-block superblocks had a
+  classroom block up to 66 m long and a court and pitch stretched to fill
+  the yard. Classroom blocks now stop at 54 m.
+  - **Real-size grounds:** courts are full (28 x 15 m) or half (15 x 14 m),
+    the play pad is 14 x 10 m, and the pitch keeps real proportions
+    (length:width 1.45–1.7, 30–90 m long), centred in its space.
+  - **Spare space:** it becomes open playground or a staff car park.
+  - **Shallow lots:** on a shallow 2 x 1 lot, the sports ground sits at the
+    end of the lot instead of in a thin strip behind the buildings.
+- **New tests.** Two tests check these fixes; both fail on the old code.
+
 ## v0.12.1: Rubble stays inside towers
 
 - **Fixed: rubble fill on podium towers.** In filled and partly filled

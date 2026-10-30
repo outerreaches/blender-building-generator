@@ -124,6 +124,9 @@ party-walled downtown towers in every condition.
   `params['collapse']` forces a type; tall weathered towers draw from the
   milder sawtooth, blowout and corner.
 - Under craters the top only weathers lightly (craters do the heavy damage).
+- One-storey buildings have no storey above the break line: their ragged
+  walls span the height above the protected ground floor, and the roof
+  stands only while every wall still reaches its underside.
 - Windows the break passes through above the sill are filled, so broken walls
   read as masonry rather than holes in thin spikes.
 - **Breaches** (exposed fills) and **blast holes** are jagged openings that

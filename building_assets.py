@@ -80,9 +80,16 @@ def create_shell(name, params, collection):
             builder.bm.free()
 
 
+def addon_version():
+    """Version of the add-on that generated an object (to spot stale installs)."""
+    import importlib
+    return importlib.import_module(__package__).version()
+
+
 def _annotate(obj, building):
     """Facts the game side can use without re-deriving them from geometry."""
     spec, plan = building.spec, building.plan
+    obj['addon_version'] = addon_version()
     obj['floors'] = len(spec.levels)
     obj['height'] = round(spec.top, 3)
     obj['enterable_floors'] = len(plan.levels)

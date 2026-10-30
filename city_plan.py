@@ -972,6 +972,7 @@ def _outer_roads(settings, paths):
 DOWNTOWN_VERGE = .5          # Building line behind the footway, downtown.
 DOWNTOWN_MIN_WIDTH = 12.0    # Narrowest downtown building frontage.
 DOWNTOWN_MAX_WIDTH = 48.0    # Widest single tower.
+DOWNTOWN_MAX_DEPTH = 40.0    # Deepest tower plot; deeper blocks keep a yard or courtyard.
 # Local sides seen from a building facing each world side: front, back, left, right.
 LOCAL_SIDES = {"S": {"S": "front", "N": "back", "W": "left", "E": "right"},
                "N": {"N": "front", "S": "back", "E": "left", "W": "right"},
@@ -1130,17 +1131,34 @@ def _split_downtown(settings, roads, pad, sides, district, rng, group):
     """Cut a downtown pad into towers: one or two rows (back to back, or across
     a service alley), each split into frontages along its street."""
     x0, y0, x1, y1 = pad
-    main = min(sides, key=lambda side: (min(ROAD_RANK[roads[e]] for e in sides[side]),
-                                        -len(sides[side]), side))
+
+    def priority(side):
+        # Face a long side of the pad (a superblock's frontage), then the
+        # best street, then the most street along it.
+        length, other = ((x1 - x0), (y1 - y0)) if side in "SN" else ((y1 - y0), (x1 - x0))
+        return (0 if length >= other - 1e-6 else 1, min(ROAD_RANK[roads[e]] for e in sides[side]),
+                -len(sides[side]), side)
+    main = min(sides, key=priority)
     horizontal = main in "SN"
     along = (x1 - x0) if horizontal else (y1 - y0)
     deep = (y1 - y0) if horizontal else (x1 - x0)
-    rows = [(0.0, deep, main)]
     alley = 0.0
+    abut = False
     if OPPOSITE[main] in sides and deep >= 34 and rng.random() < .75:
         alley = 6.0 if rng.random() < .3 else 0.0
-        split = (deep - alley) * rng.uniform(.42, .58)
-        rows = [(0.0, split, main), (split + alley, deep, OPPOSITE[main])]
+        if deep - alley > 2 * DOWNTOWN_MAX_DEPTH:
+            # Too deep for two rows back to back: a courtyard between them.
+            front = DOWNTOWN_MAX_DEPTH * rng.uniform(.75, 1.0)
+            back = DOWNTOWN_MAX_DEPTH * rng.uniform(.75, 1.0)
+            rows = [(0.0, front, main), (deep - back, deep, OPPOSITE[main])]
+        else:
+            split = (deep - alley) * rng.uniform(.42, .58)
+            rows = [(0.0, split, main), (split + alley, deep, OPPOSITE[main])]
+            abut = alley == 0.0
+    else:
+        # One row on the street; a deep block keeps a yard behind it.
+        depth = deep if deep <= DOWNTOWN_MAX_DEPTH else DOWNTOWN_MAX_DEPTH * rng.uniform(.8, 1.0)
+        rows = [(0.0, depth, main)]
 
     def world(a0, a1, b0, b1):
         """Block-frame rectangle (a along the main street, b back from it)."""
@@ -1175,7 +1193,7 @@ def _split_downtown(settings, roads, pad, sides, district, rng, group):
                 touching.add(a_low)
             if index < count - 1:
                 touching.add(a_high)
-            if len(rows) == 2 and alley == 0.0:
+            if abut:
                 touching.add(OPPOSITE[front])
             local = LOCAL_SIDES[front]
             party = tuple(sorted(local[side] for side in touching))

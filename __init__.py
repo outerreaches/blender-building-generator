@@ -4,16 +4,35 @@
 bl_info = {
     "name": "Procedural Building Shell Generator",
     "author": "Ares Project",
-    "version": (0, 12, 2),
+    "version": (0, 12, 3),
     "blender": (4, 5, 0),
     "location": "View3D > Add > Mesh > Procedural Building Shell",
     "description": "Generate customizable, game-ready building shells with windows, doors, and optional damage",
     "category": "Add Mesh",
 }
 
+import importlib
+import sys
+
 import bpy
 
-from . import operators, city_operators, city_export
+# Blender reloads only this file when an add-on is re-enabled or scripts are
+# reloaded; the submodules would keep running the previously installed code.
+# Reload them first, leaves before the modules that import them.
+_SUBMODULES = ('dims', 'meshdata', 'geom2d', 'util', 'solids', 'damage', 'spec', 'layouts',
+               'rubble', 'shell', 'mesh_builder', 'styles', 'sites', 'building_assets',
+               'city_plan', 'streets', 'operators', 'city_operators', 'city_export')
+for _name in _SUBMODULES:
+    _module = sys.modules.get(f'{__name__}.{_name}')
+    if _module is not None:
+        importlib.reload(_module)
+
+from . import operators, city_operators, city_export  # noqa: E402
+
+
+def version():
+    """Add-on version as 'major.minor.patch' (stamped on generated objects)."""
+    return '.'.join(str(part) for part in bl_info['version'])
 
 
 def menu_func(self, context):

@@ -10,8 +10,8 @@ from .sites import KINDS as SITE_KINDS, VARIANTS as SITE_VARIANTS, compose as co
 from .streets import (build_ground_mesh, build_outer_road_mesh, build_street_mesh, junctions,
                       outer_road_dashes)
 from .styles import STYLE_ITEMS, STYLE_COLORS, building_recipe
-from .building_assets import (create_rubble, create_shell, create_shelter, create_site,
-                              create_site_preview, material)
+from .building_assets import (addon_version, create_rubble, create_shell, create_shelter,
+                              create_site, create_site_preview, material)
 
 
 def mesh_object(name, vertices, faces, collection, mat):
@@ -366,6 +366,7 @@ class MESH_OT_generate_city(bpy.types.Operator):
             context.collection.children.link(root)
             root['city_seed'] = self.seed
             root['generator_version'] = VERSION
+            root['addon_version'] = addon_version()
             root['output_detail'] = self.detail
             root['interior_ratio'] = self.interior_ratio
             root['lane_markings'] = self.lane_markings

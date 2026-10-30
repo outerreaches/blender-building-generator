@@ -1,5 +1,23 @@
 # Procedural Building Shell Generator
 
+## v0.12.3: Downtown plot depth, add-on updates take effect
+
+- **Downtown plots stay at most 40 m deep.** A 2 x 1 superblock could be cut
+  across its short side into towers 20 m wide and 100 m deep. Downtown
+  blocks now face a long side of the pad.
+  - **Two streets:** a block with a street behind it holds two rows back to
+    back, or with a courtyard between them when it is deeper than two plots.
+  - **One street:** a block with a street on one side only keeps a yard
+    behind its row.
+- **Updating the add-on now updates all of it.** Blender only reloads an
+  add-on's main file when it is installed over an enabled copy and switched
+  off and on (or after **Reload Scripts**); the other modules kept running
+  the old code. This is why rubble fixed in v0.12.1 could still appear after
+  an update. The add-on now reloads all its modules.
+  - **Version stamp:** each city collection and building records
+    `addon_version`, so you can see which version made a file.
+  - **Restart:** to be safe, restart Blender after installing a new version.
+
 ## v0.12.2: Weathered one-storey roofs, school proportions
 
 - **Fixed: floating roofs on weathered one-storey buildings.** This affected

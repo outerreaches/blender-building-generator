@@ -4,7 +4,7 @@ This generator supplies the main static environment for a low-poly first-person 
 
 ## Try it
 
-Install `output/procedural_building_shell_v0.12.2.zip` as a Blender add-on. Use **Shift+A → Mesh → Generate City**, **Generate Building by Style** or **Generate Site (Point of Interest)**. Start with **Layout Preview**; select **Detailed Shells** for windows, doors, floors, damage and optional interiors. Both modes use the same plan. Each run creates a new collection at the 3D cursor. Undo removes that run; failure rolls back its own objects.
+Install `output/procedural_building_shell_v0.12.3.zip` as a Blender add-on (remove the old version and restart Blender first; each city collection records the `addon_version` that made it). Use **Shift+A → Mesh → Generate City**, **Generate Building by Style** or **Generate Site (Point of Interest)**. Start with **Layout Preview**; select **Detailed Shells** for windows, doors, floors, damage and optional interiors. Both modes use the same plan. Each run creates a new collection at the 3D cursor. Undo removes that run; failure rolls back its own objects.
 
 The original single-building and bulk operators remain available. Architecture uses six district archetypes built from rectangular shells:
 
@@ -95,9 +95,11 @@ filled with towers that share party walls:
   while the joined blocks fit in 2 x 2. Blocks joined across a closed or
   streetless edge are laid out as one 2 x 1 or 2 x 2 superblock, like the
   school and hospital sites.
-- **Rows.** Each block or superblock faces its best street. With a street
-  behind as well and enough depth, it holds two rows back to back, or two
-  rows either side of a 6 m service alley (30% of the time).
+- **Rows.** Each block or superblock faces a long side, then its best
+  street. Plots are at most 40 m deep. With a street behind as well and
+  enough depth, it holds two rows back to back, or either side of a 6 m
+  service alley (30% of the time), or round a courtyard when deeper than two
+  plots. A block on one street keeps a yard behind its row.
 - **Frontages.** Each row is cut into frontages 12–48 m wide (18–30 m
   typical). Narrow plots stay lower: floors are capped at 0.9 x the plot's
   shorter side plus 4.
@@ -111,7 +113,7 @@ filled with towers that share party walls:
   building budget.
 
 The default city (radius 6) gets about 50 downtown towers instead of 30, the
-`ares_city_base` scene about 150 instead of 65.
+`ares_city_base` scene about 165 instead of 65.
 
 ## Building conditions
 
@@ -258,8 +260,8 @@ Output stays as separate meshes for culling and future chunk/LOD work. No textur
 
 Workspace `output` examples:
 
-- `ares_city_base.blend`: radius 8 (about 900 m across): 471 detailed buildings across six districts and all nine conditions (about 150 of them party-walled downtown towers), 30 sites and 27 transit stops, sidewalks/foundations, and the highway running 3 km out of each end; street-level camera. Guide curves are hidden after the overview render.
-- `ares_city_base.fbx`: the same base, 1040 static mesh objects, without guide curves.
+- `ares_city_base.blend`: radius 8 (about 900 m across): 487 detailed buildings across six districts and all nine conditions (about 165 of them party-walled downtown towers), 30 sites and 27 transit stops, sidewalks/foundations, and the highway running 3 km out of each end; street-level camera. Guide curves are hidden after the overview render.
+- `ares_city_base.fbx`: the same base, 1072 static mesh objects, without guide curves.
 - `v0.11.0_review/`: every site kind and layout (intact, weathered, collapsed) and the sites in the city.
 - `v0.11.1_review/`: the radius-8 base city, its sites, and the highway leaving the city and fading out (`highway_out_*`).
 - `v0.12.0_review/`: the dense downtown (`downtown_*`), plus the same site and highway views.

@@ -1,10 +1,10 @@
-# City generator — v0.12 dense downtown
+# City generator
 
 This generator supplies the main static environment for a low-poly first-person Unity game. Existing signs, ruined cars and other props remain separate assets.
 
 ## Try it
 
-Install `output/procedural_building_shell_v0.13.0.zip` as a Blender add-on (remove the old version and restart Blender first; each city collection records the `addon_version` that made it). Use **Shift+A → Mesh → Generate City**, **Generate Building by Style** or **Generate Site (Point of Interest)**. Start with **Layout Preview**; select **Detailed Shells** for windows, doors, floors, damage and optional interiors. Both modes use the same plan. Each run creates a new collection at the 3D cursor. Undo removes that run; failure rolls back its own objects.
+Install the add-on as described in the [README](README.md#installation) (remove an old version and restart Blender first; each city collection records the `addon_version` that made it). Use **Shift+A → Mesh → Generate City**, **Generate Building by Style** or **Generate Site (Point of Interest)**. Start with **Layout Preview**; select **Detailed Shells** for windows, doors, floors, damage and optional interiors. Both modes use the same plan. Each run creates a new collection at the 3D cursor. Undo removes that run; failure rolls back its own objects.
 
 The original single-building and bulk operators remain available. Architecture uses six district archetypes built from rectangular shells:
 
@@ -52,7 +52,7 @@ The original single-building and bulk operators remain available. Architecture u
 
 Increase the budget for large dense layouts. Density means occupancy of eligible parcels, not buildings per square kilometre. Small maps can fit fewer locations/circuits than requested; circuit shortfalls produce a warning. Wide sidewalks and large setbacks can eliminate undersized parcels.
 
-**Scale.** Radius 6 is a district-sized map (about 670 m across); the `ares_metro` demo uses radius 14 (about 1.6 km across). Street-surface cost grows with the square of the radius (roughly 120k faces at radius 6 and 750k for the metro demo), before buildings; keep Layout Preview on while tuning large maps.
+**Scale.** Radius 6 is a district-sized map (about 670 m across); a radius-14 metro is about 1.6 km across. Street-surface cost grows with the square of the radius (roughly 120k faces at radius 6 and 750k for the metro demo), before buildings; keep Layout Preview on while tuning large maps.
 
 ## Growth and driving circuits
 
@@ -114,8 +114,8 @@ filled with towers that share party walls:
 - **Budget.** The buildings of one block are kept or dropped together by the
   building budget.
 
-The default city (radius 6) gets about 50 downtown towers instead of 30, the
-`ares_city_base` scene about 165 instead of 65.
+The default city (radius 6) gets about 50 downtown towers, and a radius-8 city
+about 165.
 
 ## Building conditions
 
@@ -130,16 +130,16 @@ failures run out through the roof rather than leaving floating holes. The
 perimeter usually outlives the floor plates, and the ground floor is the last
 part to go, acting as the plinth that holds the pile.
 
-The broken top is a ragged parapet at most **one storey above the break line**: the floors below keep their windows, and deeper missing walls come only from whole-chunk cuts. This avoids tall blank fins that do not read as floors.
+The broken top is a ragged parapet at most **one storey above the break line**: the floors below keep their windows, and deeper damage comes from the collapse archetypes. This avoids tall blank fins that do not read as floors. Windows the break passes through are notched rather than filled, so the window grid runs up to the broken top.
 
 The condition set follows those stages:
 
-- **Weathered** — envelope and top slabs degraded; floors keep their windows up to the break, with a ragged parapet at most one storey above it. Tall weathered towers may also lose one bay.
-- **Semi-collapsed** — one or two vertical corner/bay slices missing through the top.
+- **Weathered** — envelope and top slabs degraded; floors keep their windows up to the break, with a ragged parapet at most one storey above it. Towers of ten floors or more often also lose a piece (a sawtooth, blowout or corner collapse).
+- **Semi-collapsed** — a collapse through the top: a corner, stepped storeys, a sheared or cleaved side, roofline bites, a gutted middle or blown-out storeys.
 - **Rubble-filled** — top floors pancaked; the interior is a solid fill behind the facade, opened by a ground-floor bay and upper cut.
 - **Partial-filled** — only the lower floors pancaked; upper floors are open.
 - **Lower floors only** — the upper structure is gone, leaving one to three enterable storeys.
-- **Shell** — floor plates and roof gone, the facade standing.
+- **Shell** — roof gone, floor slabs exposed, the facade standing with a collapse cut.
 - **Wall ring** — only a low perimeter stands, with a rubble mound inside.
 - **Collapsed** — nothing but a mound.
 
@@ -154,7 +154,7 @@ minimum damage and the geometry treatment:
 | Rubble-filled | Interior packed solid; a jagged ground-floor breach and a crater expose the fill; no interior layout |
 | Partial-filled | Lower floors packed with rubble, upper floors open; jagged breach and crater; no interior layout |
 | Lower floors only | Full damage so the cut lands in the first few storeys; enterable |
-| Shell | No roof; floor slabs exposed; one vertical slice removed with a corner mound; no interior |
+| Shell | No roof; floor slabs exposed; a collapse cut with debris; no interior |
 | Wall ring | Low perimeter walls (2–4 storeys), no roof or upper slabs, rubble mound inside |
 | Collapsed | No shell; a low faceted rubble mound on the pad |
 
@@ -162,10 +162,18 @@ minimum damage and the geometry treatment:
 weathered, semi-collapsed, lower floors) that get a full interior layout. The
 flag is stored per lot in the plan, so a regenerated city is deterministic.
 Rubble-filled, partial-filled, shell, wall-ring and collapsed lots never get
-interiors; the filled states are solid or half-solid by design. The proposed
-weights per district are in [ROADMAP.md](ROADMAP.md); downtown, for example,
-runs 20% intact, 26% weathered, 20% semi-collapsed, 12% rubble-filled, 6% lower
-floors, 10% shell and 6% collapsed.
+interiors; the filled states are solid or half-solid by design.
+
+Condition weights per district (percent; `CONDITION_WEIGHTS` in `city_plan.py`):
+
+| District | Intact | Weathered | Semi | Filled | Partial | Lower | Shell | Ring | Collapsed |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Downtown | 8 | 20 | 28 | 10 | 10 | 6 | 12 | 3 | 3 |
+| Old town | 36 | 28 | 10 | 8 | 8 | 4 | 3 | 2 | 1 |
+| Residential | 42 | 28 | 8 | 7 | 7 | 4 | 2 | 1 | 1 |
+| Brutalist | 28 | 28 | 14 | 9 | 8 | 6 | 5 | 1 | 1 |
+| Industrial | 32 | 24 | 8 | 8 | 8 | 4 | 10 | 4 | 2 |
+| Suburban | 58 | 24 | 5 | 4 | 4 | 2 | 1 | 1 | 1 |
 
 ## Highways beyond the city
 
@@ -214,8 +222,8 @@ between the blocks.
   arterial and collector footways, clear of lot and site fronts.
 
 The radius-6 default city gets 13–15 sites over about 20 blocks, which costs
-it about a fifth of its lots. The `ares_city_base` scene (radius 8) gets 30
-sites, every kind at least once.
+it about a fifth of its lots. A radius-8 city gets about 30 sites, every kind
+at least once.
 
 | Site | Layouts | Pad (min) |
 | --- | --- | --- |
@@ -238,8 +246,10 @@ Trees, chain-link fences and flagpoles are game assets, so the grounds only
 mark where they go:
 - concrete post footings (0.3 m, at most 2.5 m apart) along each fence line;
 - a 0.7 m plinth for each flagpole;
-- planters and planted parking islands for trees. Its buildings are shells parented to the grounds, with the
-grounds origin at the pad centre. Transit stops of one kind share a mesh.
+- planters and planted parking islands for trees.
+
+A site's buildings are shells parented to the grounds, with the grounds origin
+at the pad centre. Transit stops of one kind share a mesh.
 
 ## Street-level geometry
 
@@ -294,57 +304,37 @@ Objects also carry custom properties that the FBX passes to Unity as user
 properties, such as `condition`, `party_walls`, `entrances` (object space)
 and `addon_version`.
 
-## Unity export and artifacts
+## Unity export
 
 Use **File → Export → Generated City for Unity (.fbx)** and choose the root city collection. This exports only its mesh objects, triangulates them, preserves UV/material assignments, and uses metre scale with Y-up axis conversion. It restores selection and active object. Hidden/excluded city objects and non-unit scene scales are rejected instead of silently omitted/rescaled. Editable source objects are not joined or destructively triangulated.
 
-Output stays as separate meshes for culling and future chunk/LOD work. No texture baking, Unity materials, colliders, NavMesh, static flags or prop placement are generated. `City_LanePaint` is tagged `decoration_no_collision`; exclude it from collision generation. Route guide curves are omitted from FBX.
+Output stays as separate meshes for culling and future chunk/LOD work. No texture baking, Unity materials, colliders, NavMesh or static flags are generated; the metadata's markers say where game assets go. `City_LanePaint` is tagged `decoration_no_collision`; exclude it from collision generation. Route guide curves are omitted from FBX.
 
-Workspace `output` examples:
+For scale: a radius-8 city with every building detailed has about 490 buildings and 1,070 mesh objects; its street mesh is about 345k polygons. A radius-14 metro is about 1.85M polygons in 1,700 objects, with ground spanning about 25.6 km.
 
-- `ares_city_base.blend`: radius 8 (about 900 m across): 487 detailed buildings across six districts and all nine conditions (about 165 of them party-walled downtown towers), 30 sites and 27 transit stops, sidewalks/foundations, and the highway running 3 km out of each end; street-level camera. Guide curves are hidden after the overview render.
-- `ares_city_base.fbx`: the same base, 1072 static mesh objects, without guide curves.
-- `ares_city_base.city.json`: its metadata (see "Game data" above).
-- `v0.11.0_review/`: every site kind and layout (intact, weathered, collapsed) and the sites in the city.
-- `v0.11.1_review/`: the radius-8 base city, its sites, and the highway leaving the city and fading out (`highway_out_*`).
-- `v0.12.0_review/`: the dense downtown (`downtown_*`), plus the same site and highway views.
-- `street_level.png`: geometry preview at Ares camera-pivot height.
-- `driving_circuits.png`: overview with three colored circuits on curved centerlines.
-- `district_downtown.png`, `district_industrial.png`, `district_suburban.png`: QA plan views of the three district archetypes.
-- `corner_curve.png` / `corner_plan.png`: QA close-up and plan view of one filleted arterial junction.
-- `city_preview.blend`: lightweight massing example generated by the smoke test.
-- `map_seed7.blend` and `map_seed7_*.png`: review map (seed 7, radius 14) generated with `tests/render_map.py`.
-- `ares_metro.blend`: radius 14 (about 1.6 km across), 854 shells, 12000 m wasteland; the scale demo.
-- `metro_overview.png`, `metro_plan.png`, `metro_wasteland.png`: metro view, plan view and the highway running into the wasteland.
-- `conditions.png`, `conditions_shaded.png`, `conditions_plan.png`: one building per condition (nine states), elevation, shaded elevation and plan.
+## Plan data
 
-The base scene's `City_Streets` mesh is 224k vertices / 345k polygons, `City_Highway_Outskirts` 14.5k polygons and `City_Ground` 5.9k polygons. The metro scene is 1.85M polygons in 1711 mesh objects; its ground spans about 25.6 km. A JSON text datablock stores the versioned plan. Coordinates are relative to the collection's stored `origin`; road nodes multiply by `block_size`, while lot positions/dimensions and path points are metres. Schema version 7 adds `party_walls` and `group` to each lot (downtown towers built against neighbours). Version 6 added `outer_roads`. Version 5 added `pois` (kind, centre, width along the frontage, depth, rotation, frontage edge, blocks, seed, condition, damage, approach) and `shelters` (position, rotation, variant, road edge); a site's layout is chosen by `sites.compose` from its seed. Version 4 added `kind`, `condition`, `interiors` and `damage` to each lot alongside the version-3 `paths`: one entry per continuous same-tier route with its lattice `nodes`, flattened metre-space `points` and `width`. Locations and lots carry their district `style`; the per-style profile table is code (`STYLE_PROFILE`), not part of the file. v0.8 lot positions, conditions and interior flags differ from v0.7 with the same seed. No legacy-plan or game-side importer is included.
+A JSON text datablock (`<collection>_plan.json`) stores the versioned plan. Coordinates are relative to the collection's stored `origin`; road nodes multiply by `block_size`, while lot positions/dimensions and path points are metres. Schema version 7 adds `party_walls` and `group` to each lot (downtown towers built against neighbours). Version 6 added `outer_roads`. Version 5 added `pois` (kind, centre, width along the frontage, depth, rotation, frontage edge, blocks, seed, condition, damage, approach) and `shelters` (position, rotation, variant, road edge); a site's layout is chosen by `sites.compose` from its seed. Version 4 added `kind`, `condition`, `interiors` and `damage` to each lot alongside the version-3 `paths`: one entry per continuous same-tier route with its lattice `nodes`, flattened metre-space `points` and `width`. Locations and lots carry their district `style`; the per-style profile table is code (`STYLE_PROFILE`), not part of the file. No legacy-plan importer is included.
 
 ## Code and verification
 
-`city_plan.py`: pure settings, district assignment, seeded routing, route grouping and corner fillets, circuits, points of interest, parcels, transit stops. `streets.py`: pure distance-field surface and terrain tessellation. `styles.py`: district building recipes (massing, openings, roofs, conditions). `sites.py`: point-of-interest layouts. The building core (`spec`, `layouts`, `damage`, `solids`, `shell`, `rubble`) is described in [ARCHITECTURE.md](ARCHITECTURE.md). `building_assets.py`: shell, rubble, site and transit-stop objects. `city_operators.py`: Blender adapter. `city_export.py`: city-only FBX export.
+`city_plan.py`: pure settings, district assignment, seeded routing, route grouping and corner fillets, circuits, points of interest, parcels, transit stops. `streets.py`: pure distance-field surface and terrain tessellation. `styles.py`: district building recipes (massing, openings, roofs, conditions). `sites.py`: point-of-interest layouts. `metadata.py`: the game metadata. The building core (`spec`, `layouts`, `damage`, `solids`, `shell`, `rubble`) is described in [ARCHITECTURE.md](ARCHITECTURE.md). `building_assets.py`: shell, rubble, site and transit-stop objects. `city_operators.py`: Blender adapter. `city_export.py`: city-only FBX export.
 
-Run `python -m unittest discover -s tests -v` for planning, district assignment and per-district ranges, condition weights and interior budget, circuit closure/tier diversity across seeds, route coverage and fillet continuity, parcel clearance against curved corridors, density, validation, distance-field classification, crack/overlap topology, curb heights, terrain coverage, the style recipes (archetypes, conditions, damage/interiors, unknown styles), point-of-interest placement (every kind placed, clear of footways and lots) and the site layouts (every kind, layout, pad size and condition).
-
-```
-blender --background --factory-startup --python-exit-code 1 --python tests/blender_smoke.py
-blender --background --factory-startup --python-exit-code 1 --python tests/blender_streets.py
-blender --background --factory-startup --python-exit-code 1 --python tests/blender_interiors.py
-blender --background --factory-startup --python-exit-code 1 --python tests/blender_sites.py
-blender --background --factory-startup --python-exit-code 1 --python tests/render_views.py
-```
-
-The third script regenerates the district and corner QA renders from the scene saved by the second. `tests/render_conditions.py` renders one building per condition. `tests/render_metro.py` separately builds the radius-14 metro scene and its three renders (about a minute; not part of the default loop).
-
-Verified on Blender 5.1.2. The first script covers registration, original operators, styles/interiors/damage, mesh validation and rollback. The second covers UVs, city-only export, selection restoration, triangulation, and world bounds after FBX reimport, then renders examples. `blender_interiors.py` verifies the switchback stair treads, wall caps, the house/office partitions and a >0.5 m interior-wall/window clearance. The declared Blender 4.5 minimum is not separately tested. Unity import/play-mode tests are pending.
+The project's tests (not yet published here) cover planning, district assignment, condition weights and the interior budget, circuit closure and tier diversity across seeds, route coverage and fillet continuity, parcel clearance against curved corridors, distance-field classification, crack and overlap topology, curb heights, terrain coverage, the style recipes, point-of-interest placement and every site layout, and the metadata. In Blender they cover registration, every operator, mesh validation and rollback, UVs, city-only export, selection restoration, triangulation and world bounds after FBX reimport. They run on Blender 5.1; the declared Blender 4.5 minimum is not tested separately, and Unity import and play-mode tests are pending.
 
 ## Next milestones and limits
 
-See [ROADMAP.md](ROADMAP.md) for the city dressing plan: interior budget, collapse conditions, common locations and street patterns, split into shippable phases.
+See [ROADMAP.md](ROADMAP.md) for what is planned.
 
 1. **Parcels and block structure:** parcels are still axis-aligned sub-cells of a square lattice, so block edges and building rows remain rectilinear even though the streets curve. Downtown blocks are now built out with party-walled towers and superblocks, and the suburbs set houses well back, but L/U/courtyard footprints, curved frontages and irregular block subdivision are the next step.
 2. **Vertical routes and terrain:** elevation changes, rail and subway lines, bridges, tunnel entrances and an optional river or dried coastline with a port (see ROADMAP "Later"). Highway currently means a wide at-grade corridor; no bridges exist yet.
 3. **Asset variety:** the six archetypes cover massing and roofs, and v0.11 adds the common sites (hospital, schools, stations, malls, parking); a courthouse or city hall, auto repair, an enclosed mall, authored facade kits, rooftop clutter and per-district palettes remain.
 4. **Game delivery:** chunk/LOD export, collision proxies, navigation checks, vehicle swept-clearance tests and connected ruin/vegetation dressing.
 
-Street surfaces have open bottoms below ground; they are not watertight solids. The 1.5 m surface sampling is a fixed budget decision: a tighter grid would reduce the ~0.5 m concave-corner deviation at the cost of roughly quadratic triangle growth. Roof extras are skipped when damage cuts the top floors, so a ruined shell keeps its jagged demolition silhouette. Corner collapse removes a footprint quadrant above a seeded base height; it is a ruin silhouette, not a structural simulation. Damage tops use the original fine facade profile, median-smoothed and slope-limited so isolated needles disappear while broad variation remains. Collapsed variants subtract whole upper volumes as vertical slices that run out through the roof; the cut boundary follows existing wall/window vertices, so it is blocky rather than a clean planar cut. Loose debris is gone: cuts leave a rubble mound at their base, wall rings hold an interior mound, and collapsed lots are mounds. Every chunk cut closes the wall thickness at its base with a horizontal cap, so a collapsed section shows a broken wall top instead of an open edge. Tall towers get an additional damage boost and larger slices. Filled interiors keep their rubble faces when a cut is made, which is what exposes them. Fixed-style runs change the street network because district road factors no longer vary. Legacy damaged shells/interiors are not certified manifold or fully navigable. Generation is synchronous; preview and conservative budgets are recommended for large cities.
+Limits:
+
+- Street surfaces have open bottoms below ground; they are not watertight solids.
+- The 1.5 m surface sampling is a fixed budget decision: a tighter grid would reduce the ~0.5 m concave-corner deviation at the cost of roughly quadratic triangle growth.
+- Collapses are ruin silhouettes, not structural simulations.
+- Choosing a single architecture style changes the street network, because district road factors no longer vary.
+- Generation is synchronous; use Layout Preview and a conservative building budget for large maps.

@@ -6,7 +6,8 @@ Thanks for your interest in contributing to the Procedural Building Shell Genera
 
 If you find a bug or have a feature request, please open an issue. Include as much detail as possible:
 - Blender version
-- Addon version
+- Add-on version (the `addon_version` custom property on a generated city collection or building)
+- The operator, seed and settings you used: generation is deterministic, so they reproduce the result
 - Steps to reproduce
 - Screenshots or error logs
 
@@ -24,6 +25,11 @@ If you find a bug or have a feature request, please open an issue. Include as mu
 - Use type hints where possible
 - Keep functions small and focused
 - Document complex logic
+- Keep the generator core free of Blender: only `__init__.py`, the operator and
+  export modules, `building_assets.py`, `mesh_builder.py` and `util.py` import `bpy`
+- Use a seeded `random.Random` rather than the global random state, so results stay deterministic
+- Keep the geometry rules in [ARCHITECTURE.md](ARCHITECTURE.md): every element a closed solid,
+  no same-facing coplanar faces
 
 ## License
 

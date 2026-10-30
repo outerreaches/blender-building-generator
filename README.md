@@ -1,604 +1,277 @@
 # Procedural Building Shell Generator
 
-## v0.13.1: Walkable stairs, no floating floors, windows through damage
+A Blender add-on that generates game-ready buildings and whole ruined cities:
+closed-solid building shells with real floor plans, nine damage and collapse
+states, points of interest such as gas stations and schools, a street network
+with driving circuits, and an FBX export with JSON metadata for Unity.
 
-- **Fixed: blocked stairs.** Each step of a stair flight was a solid block
-  down to the floor, so the flights of the storey above filled the headroom
-  over the flights below. Stacked stairs, as in towers, could not be climbed.
-  Flights now have a 0.3 m waist under the treads and the turning landing is
-  a 0.25 m slab. A new test walks the player capsule up every stair of 100
-  buildings: 90 had a blocked stair before, none do now.
-- **Fixed: floating pieces of floor.** Where damage cuts a slab, the
-  broken edge could leave small pieces or islands with nothing under them. A
-  piece is now dropped when it is smaller than 1.5 m² or touches neither a
-  wall nor a stair or shaft enclosure.
-- **Windows stay windows near damage.** Windows that the broken top passed
-  through, or that touched a blast hole, used to be filled in, which broke up
-  the window grid.
-  - **Broken tops:** a window the break crosses now loses everything above
-    its broken sill. The piers between neighbouring broken windows are
-    either gone or broken off at different heights, and the wall slopes down
-    into the gap at each end, so the top storey reads as ruined masonry
-    rather than battlements.
-  - **Blast holes:** a hole now takes in the windows it touches.
-  - **Below the damage:** the windows keep their full grid.
-
-## v0.13.0: Small-props switch, city metadata for Unity
-
-- **Small Props switch.** A new switch on Generate City and Generate Site
-  covers the props the game will replace with destructible assets: benches,
-  gas pumps, lamps, bollards, trash bins, dumpsters, tables, play equipment,
-  goals, booths, hydrants, air pumps and cart corrals. With it off they are
-  not modelled, but every one is still recorded.
-- **City metadata.** Each city records game data. The FBX export writes it
-  next to the FBX as `<name>.city.json`. It holds:
-  - roads, junctions, driving loops and outer highways;
-  - buildings and site buildings, with their street entrances, condition,
-    floors and party walls;
-  - sites and transit stops;
-  - markers: every small prop, tree spot, flagpole, fence line and parking
-    stall, where the game places its own assets.
-
-  Coordinates are Unity world space, checked against the FBX the exporter
-  writes. Objects are referred to by name, so the Unity side can bind
-  entries to the imported meshes. C# data classes for `JsonUtility` are in
-  `docs/unity/CityMetadata.cs`.
-- **Tree spots** removed in v0.11.1 are back as markers (no mesh).
-
-## v0.12.3: Downtown plot depth, add-on updates take effect
-
-- **Downtown plots stay at most 40 m deep.** A 2 x 1 superblock could be cut
-  across its short side into towers 20 m wide and 100 m deep. Downtown
-  blocks now face a long side of the pad.
-  - **Two streets:** a block with a street behind it holds two rows back to
-    back, or with a courtyard between them when it is deeper than two plots.
-  - **One street:** a block with a street on one side only keeps a yard
-    behind its row.
-- **Updating the add-on now updates all of it.** Blender only reloads an
-  add-on's main file when it is installed over an enabled copy and switched
-  off and on (or after **Reload Scripts**); the other modules kept running
-  the old code. This is why rubble fixed in v0.12.1 could still appear after
-  an update. The add-on now reloads all its modules.
-  - **Version stamp:** each city collection and building records
-    `addon_version`, so you can see which version made a file.
-  - **Restart:** to be safe, restart Blender after installing a new version.
-
-## v0.12.2: Weathered one-storey roofs, school proportions
-
-- **Fixed: floating roofs on weathered one-storey buildings.** This affected
-  industrial sheds, the fire station's engine hall and one-storey houses.
-  Weathering cut their walls down flat against the protected ground-floor
-  height while the roof stayed up, floating above them. Now the ragged wall
-  tops spread over the whole allowed range, so they look weathered rather
-  than flat. The roof stays only while every wall still reaches its
-  underside; otherwise it has fallen in. Multi-storey buildings already
-  behaved this way.
-- **Fixed: stretched schools.** Schools on 2-block superblocks had a
-  classroom block up to 66 m long and a court and pitch stretched to fill
-  the yard. Classroom blocks now stop at 54 m.
-  - **Real-size grounds:** courts are full (28 x 15 m) or half (15 x 14 m),
-    the play pad is 14 x 10 m, and the pitch keeps real proportions
-    (length:width 1.45–1.7, 30–90 m long), centred in its space.
-  - **Spare space:** it becomes open playground or a staff car park.
-  - **Shallow lots:** on a shallow 2 x 1 lot, the sports ground sits at the
-    end of the lot instead of in a thin strip behind the buildings.
-- **New tests.** Two tests check these fixes; both fail on the old code.
-
-## v0.12.1: Rubble stays inside towers
-
-- **Fixed: rubble fill on podium towers.** In filled and partly filled
-  buildings the rubble fill was sized to the ground-floor footprint all the
-  way up. On towers with a wider podium, it stuck out past the set-back
-  tower's faces. The fill now follows each tier's walls and changes width
-  inside the slab where the tower steps in.
-- **Fixed: debris in blast holes.** Debris on the floor of a blown-out
-  storey could hang out through the blast hole. It now stays inside that
-  storey.
-- **Unchanged: street spill.** Ground-level debris spilling onto the street
-  from a collapse is deliberate and still there.
-- **New test.** Above the ground storey, rubble must stay inside the
-  building or rest on a lower roof. The old code failed it.
-
-## v0.12.0: Dense downtown
-
-- **Built out to the street.** Downtown blocks fill out to a building line
-  0.5 m behind the footway, instead of one tower standing back in each block.
-- **Shared blocks.** Each block holds a row of towers that share party walls,
-  or two rows back to back or across a service alley.
-- **Superblocks.** Some downtown local streets close (**Downtown
-  Superblocks**, default 0.35), so blocks join into 2 x 1 and 2 x 2
-  superblocks, like the school and hospital sites. Streets close only while
-  the road network stays connected.
-- **Party walls.** Party walls are blank. Damage leaves them whole and debris
-  stays on its own side; nothing projects into the neighbour. Towers rise
-  flush with a party wall or set back from it above their podium.
-- **Transit stops.** Stops may stand in front of buildings, clear of their
-  entrances.
-- **`ares_city_base`.** Downtown goes from 65 to about 150 towers; the scene
-  has 471 buildings, 30 sites and 27 stops, a 55 MB `.blend` and a 73 MB FBX.
-- **Plan schema 7.** Adds `party_walls` and `group` to each lot.
-
-## v0.11.1: Highways out of the city, game-asset props
-
-- **Highways leave the city.** The main highway continues straight out of
-  both ends of the city across the wasteland, 3 km by default (**Highway
-  Reach** in Generate City; never past the ground).
-  - Over its last 40% the surface breaks up from the edges inward into
-    thinning patches until only ground is left.
-  - Lane dashes wear away with it.
-  - It is a separate `City_Highway_Outskirts` mesh joined crack-free to the
-    city streets 40 m past the edge; the footways ramp down onto its shoulders.
-  - The wasteland ground is cut around it, so nothing overlaps.
-  - Plan schema 6 adds `outer_roads`.
-- **Game-asset props.** Sites no longer model trees, chain-link fences or
-  flagpoles; the game places its own assets:
-  - fence lines keep 0.3 m concrete post footings every 2.5 m or less;
-  - flagpoles keep a 0.7 m plinth;
-  - planters and parking islands stay as tree spots.
-- **`ares_city_base` is twice as wide.** It is now radius 8 (about 900 m
-  across, was 450 m): 383 buildings, 30 sites and 27 transit stops; the
-  `.blend` is 36 MB, the FBX 47 MB.
-
-## v0.11.0: Points of interest
-
-Cities now set whole blocks aside for points of interest, or 2 x 1 and 2 x 2
-superblocks where no street crosses between the blocks. Each kind has two to
-four layouts, and the new pure-Python `sites.py` lays them out:
-
-| Site | Layouts | Contents |
-| --- | --- | --- |
-| Gas station | Back, Side | Kiosk shop, canopy over pump islands with bollards, price pylon, parking stalls; Side adds a car wash |
-| Fast food | Mansard, Box, Diner | Restaurant (dining room, kitchen) with a mansard roof, a raised entrance box or a hipped diner roof; curbed drive-through lane with a window and menu board, patio, pole sign, bin enclosure |
-| School | Bar, Wing | 2-3 storey classroom block and gym, entrance canopy, flagpole, fenced yard with a court, playing field and play area; Wing adds a second block joined by a covered walk, or a courtyard plan on shallow pads |
-| Hospital | Tower, Slab | Podium and setback tower, or a long slab with an outpatient block; grand lobby, drive-under emergency canopy at the ambulance doors, drop-off island, parking, rooftop helipad |
-| Police station | Civic, Modern | Masonry station with a portico or canopy, flagpoles, bollards, fenced back lot with a sally-port garage, roof mast |
-| Fire station | Classic, Modern | Drive-through apparatus hall (2-4 bays) with living quarters, apron, sign band; Classic adds a drill tower |
-| Transit station | Terminal, Hub | Station hall with a canopy; raised platforms under shelters (Terminal), or a bus island and a clock tower (Hub) |
-| Park | Green, Playground, Plaza, Sports | Paths to a fountain; play equipment and picnic tables; planters and a monument; a pitch with goals, stands and floodlights |
-| Parking lot | Rows, Angled | Painted stalls, planted end islands with trees or lamps, booth and barrier |
-| Parking garage | Decks, Tall | Open decks (4-6 or 7-9 levels) linked by ramps, vehicle entrances, booth |
-| Strip mall | Row, L | Shop units with front and back doors, arcade on columns, unit signs, parking, pylon |
-| Shopping plaza | Pair, Anchor | Two big boxes with shops between them, or an anchor and junior box with a shop wing; entrance portals, loading doors, an outparcel restaurant, cart corrals, a tall pylon |
-
-Transit stops (a shelter, or a pole and bench) stand mid-block on arterial and
-collector footways.
-
-- Site buildings are ordinary generator shells with their own floor plans
-  (shop units, dining room and kitchen, classrooms, apparatus bays), so they
-  are enterable and take damage like any other building.
-- Sites take a condition from their district. Props fixed to a building, such
-  as canopies, signs and porticos, go with it: they are dropped when the
-  building collapses, and where its wall broke below them. A collapsed site
-  keeps its pad and free-standing props, with a rubble heap scaled to the
-  building's height. Damaged sites have some dead trees.
-- New operator **Shift+A > Mesh > Generate Site (Point of Interest)**: kind,
-  layout, pad size, seed and condition.
-- The city has a **Points of Interest** switch. Plan schema 5 adds `pois` and
-  `shelters`.
-- Fixed: every city building's ground floor shared its plane with the lot
-  foundation, so the floors z-fought. Under the ground storey, the foundation
-  now drops to the underside of the ground slab.
-- Tests check every kind, layout, pad size and condition:
-  - the grounds are closed with no coplanar overlaps, including against the
-    buildings;
-  - buildings fit the pad and plans are reachable;
-  - no prop covers a door or window, and no window faces a neighbour flush
-    against it;
-  - every kind is placed in the default city, clear of footways.
-
-## v0.10.1: Collapse variety
-
-Collapsed buildings now pick one of seven archetypes by seed: corner, stepped
-(breaking storey by storey), shear (a side sliced off on a diagonal), cleave
-(split along a plan diagonal), sawtooth (several roofline bites), gutted
-(facades standing, floors fallen in) and blowout (multi-storey holes blown
-through mid-height with the floors above intact). Collapses land on the tier
-standing at their height, so setback towers break where their walls are.
-Blast holes have ragged edges and spill debris to the street. Everything stays
-watertight; every archetype is tested on four styles.
-
-## v0.10.0: Closed-solid geometry, polygonal collapses, real floor plans
-
-The geometry pipeline is rebuilt (see [ARCHITECTURE.md](ARCHITECTURE.md) for
-the audit and design). Every wall, slab, partition and stair is now built as a
-closed solid from its final outline, so damage of any shape cannot leave holes,
-and no two faces z-fight. Tested on every style and condition: no open edges,
-no flipped faces, no coplanar overlaps.
-
-- **Damage.** Collapses are polygonal craters with sloped, jagged sides: facades
-  break in diagonals and steps, floor slabs step back storey by storey along
-  broken edges, and walls, slabs, partitions and stairs agree on what is
-  missing. Exposed fills get jagged breaches; weathered facades get blast holes.
-  Windows the break passes through are filled so ruins read as masonry.
-- **Interiors.** Real floor plans: corridor apartment blocks with flats (hall,
-  bath, kitchen, living room, bedroom), town-house walk-ups, shops either side
-  of a stair hall, houses, office floors around a stair-and-lift core, warehouses
-  and bars. Every room is reachable through a door the player fits through;
-  partitions never land on a window.
-- **Scale.** Sized for the Ares player: 1.2 x 2.3 m interior doors (were
-  0.9 m and, upstairs, 1.95 m clear), 1.8 m corridors, 1.3 m stair flights,
-  0.25 m slabs, taller ground floors for shops and lobbies, believable window
-  heads, thick masonry for old town.
-- **Towers.** Lobby types (grand double-height lobby with desk and canopy,
-  retail podium, colonnade arcade, pilotis), curtain/ribbon/punched facades,
-  podium and setback tiers, plant floors, stepped crowns, masts and plant rooms.
-- **Operators.** The single-building operator adds Lobby, Facade, Taller Ground
-  Floor, Cornices, Tower Core and the Office/House profiles; Generate Building
-  by Style adds a Lobby override and up to 40 floors.
-- Gable houses get a ceiling under the roof (the sky no longer shows through).
-- Generation is pure Python up to the Blender adapter; `python3 -m unittest
-  discover -s tests` checks real buildings without Blender.
-
-## v0.9.9: Skyscraper cores
-
-DOWNTOWN office towers now use a centered service core: two elevator shafts
-at the front, a rear switchback stair, core doors, and stair/elevator slab
-cutouts. Floor slabs support multiple openings. The core and stairs are built
-even for shell-only skyscrapers; furnished office floors add the meeting room
-and open plate around it. Wall tops and wall ends are capped at floor lines
-and on weathered roof spikes.
-
-## v0.9.8: Floor plates and wall tops
-
-Non-interior lots now get solid floor plates instead of stair cutouts, while
-interior lots get capped floor-cutout sides. Wall cells are capped at every
-floor, vertical wall ends and spike tips are paired into caps, and small open
-top loops are closed.
-
-## v0.9.7: Wall shell repair
-
-Damage and chunk cuts could remove a wall's inner facade while leaving the
-outer face, opening the wall cavity to the interior. Surviving outer wall faces
-are now mirrored inward wherever the inner face is missing, and the remaining
-top edges are paired into wall caps.
-
-## v0.9.6: Capped chunk cuts
-
-Chunk removals are bisected exactly at their cut planes. Exposed floor-slab
-edges, interior partitions and stair sections get cut caps; the exterior wall
-thickness keeps its shelf cap, while open rooms intentionally stay open.
-
-## v0.9.5: Window-clear interiors
-
-Stair cores keep a 1 m aisle from side facades and stop 0.6 m clear of the
-front/back window planes. Interior partitions are pulled 0.6 m clear of every
-exterior opening, so office and storefront walls no longer sit in or directly
-behind window reveals.
-
-## v0.9.4: Interior fit-out
-
-Interiors now use solid, capped wall boxes with real door openings and headers.
-Apartment, office, house, storefront, warehouse and bar profiles place their own
-walls on every floor; the stair core gets a double-flight switchback with a
-turning landing, solid steps and a matching floor-slab opening. Partitions that
-would land in an exterior door or window are pulled clear instead of vanishing,
-and the stair treads and wall caps survive mesh cleanup.
-
-## v0.9.3: Failure-model ruins
-
-New **Add → Mesh → Generate City** and **Generate Building by Style** commands
-add seeded city growth, six district archetypes, connected road tiers, driving
-circuits, sidewalks, curved corner fillets, foundations, density controls, and
-preview/detailed output. Streets are tessellated from a distance field, so
-junctions are the union of the curved corridors with no overlapping faces.
-**File → Export → Generated City for Unity (.fbx)** exports the static city meshes.
-The existing single
-and bulk building commands remain available.
-
-Buildings now fail the way neglected towers do: weathered tops, vertical
-corner/bay slices, solid rubble fills behind intact facades, half-filled lower
-floors, roofless shells, low wall rings with a mound inside, and full rubble
-mounds. Loose debris is replaced by rubble mounds at cut bases and inside wall
-rings, tall towers carry heavier damage, and filled states expose their rubble
-through a ground-floor bay and an upper cut instead of looking empty. District weights decide how often each appears, and only a
-configurable fraction of enterable buildings get full interior layouts. The
-ground extends far past the city as open wasteland (default 12 km), so the
-horizon reads as empty land while the game keeps the player inside invisible
-walls. The radius control scales the city from a district to a metro; the demo
-scene uses radius 14 (about 1.6 km across). Downtown gets tall glazed towers,
-the midtown ring keeps old town, residential and brutalist blocks, industrial
-edges get wide low sheds, and denser suburbs get small pitched-roof houses.
-
-A Blender 4.5+ addon for generating game-ready building shells with customizable windows, doors, and optional post-apocalyptic damage. Perfect for creating urban environments for games.
+It was built for **Ares**, a first-person boomer shooter, and everything is
+sized for the game's 2 m player capsule.
 
 <p align="center">
-  <img src="docs/generator.png" alt="Building Generator Preview" width="800">
+  <img src="docs/images/city_aerial.jpg" alt="Aerial view of a generated city" width="800">
 </p>
 
 ## Features
 
-- **Procedural Building Generation** - Create 1-10 floor urban building shells with a single click
-- **Customizable Windows & Doors** - Control window types, sizes, spacing, and door placement
-- **Storefront Mode** - Large display windows for ground floor retail spaces
-- **Interior Layouts** - Real floor plans with doors, stair cores and lifts (Storefront, Warehouse, Residential, Office, House, Bar)
-- **Damage System** - Ragged tops, polygonal collapses, breaches and blast holes, all watertight
-- **Lobbies and Massing** - Grand lobbies, retail podiums, arcades, pilotis, setbacks and crowns
-- **Facade Decoration** - Pilasters, cornices, canopies, roof parapets, and patios
-- **Bulk Generation** - Generate multiple buildings with randomized parameters
-- **Game-Ready Output** - Clean geometry with proper normals and UV seams
-- **Material Slots** - Pre-configured slots for easy texturing
+- **Six district styles.** Downtown towers (lobbies, retail podiums,
+  arcades, pilotis, setbacks, crowns), old town, residential and brutalist
+  blocks, industrial sheds and suburban houses.
+- **Real interiors.** Floor plans for apartments, shops, offices, houses,
+  warehouses and bars. Every room can be reached through a door the player
+  fits, stairs can be climbed (stacked flights keep their headroom), and
+  towers get stair-and-lift cores.
+- **Damage that holds together.** Nine conditions from intact to collapsed,
+  seven collapse archetypes, blast holes, rubble fills and mounds. Broken
+  tops keep the window grid. Every wall, slab, partition and stair is a
+  closed solid: no holes, no flipped faces, no z-fighting.
+- **Cities.** Seeded district growth, curved roads with filleted junctions
+  and connected driving circuits, footways and curbs, a dense downtown of
+  party-walled towers and superblocks, and highways that run out into the
+  wasteland.
+- **Points of interest.** Twelve kinds of site, each with two to four layouts:
+  gas stations, fast food, schools, hospitals, police and fire stations,
+  transit stations, parks, parking lots and garages, strip malls and
+  shopping plazas. Transit stops stand along the footways.
+- **Unity export.** A city-only FBX (metre scale, Y-up, triangulated) and a
+  `.city.json` with roads, junctions, buildings and their entrances, sites,
+  and markers for game assets (props, trees, fences, flagpoles, parking
+  stalls). C# classes for `JsonUtility` are included.
+- **Deterministic.** The same seed and settings give the same result. The
+  generator is pure Python up to a thin Blender adapter.
+
+<p align="center">
+  <img src="docs/images/conditions.jpg" alt="One building per condition: intact, weathered, semi-collapsed, shell, partly filled, wall ring" width="800">
+</p>
+
+<p align="center">
+  <img src="docs/images/interiors.jpg" alt="Cutaway of a residential floor plan with flats, corridor and stair" width="390">
+  <img src="docs/images/site_school.jpg" alt="A school site with a court and a playing field" width="390">
+</p>
+
+## Requirements
+
+Blender 4.5 or later. Development and testing use Blender 5.1; 4.5 is the
+declared minimum and is not tested separately.
 
 ## Installation
 
-1. Download the latest release (zip file)
-2. In Blender, go to **Edit → Preferences → Add-ons**
-3. Click **Install...** and select the downloaded zip file
-4. Enable "Procedural Building Shell Generator" in the add-ons list
+1. Download `procedural_building_shell_vX.Y.Z.zip` from the
+   [releases](https://github.com/outerreaches/blender-building-generator/releases).
+2. In Blender, open **Edit > Preferences > Add-ons**, choose **Install from
+   Disk**, and select the zip.
+3. Enable **Procedural Building Shell Generator**.
 
-Or manually copy the `procedural_building_shell` folder to your Blender addons directory:
-- **Windows**: `%APPDATA%\Blender Foundation\Blender\4.5\scripts\addons\`
-- **macOS**: `~/Library/Application Support/Blender/4.5/scripts/addons/`
-- **Linux**: `~/.config/blender/4.5/scripts/addons/`
+To install from a clone instead, copy the repository folder into Blender's
+add-ons directory **named `procedural_building_shell`**. Blender imports the
+folder by name, so the folder name GitHub gives a downloaded archive will not
+load.
 
-## Quick Start
+**Updating:** Blender only reloads part of an add-on when you install over an
+enabled copy. Remove the old version, install the new one and restart
+Blender. Every generated city and building records the `addon_version` that
+made it.
 
-### Single Building
-1. Press **Shift+A** → **Mesh** → **Procedural Building Shell**
-2. Adjust parameters in the dialog
-3. Click **OK** to generate
+## Quick start
 
-### Bulk Generation
-1. Press **Shift+A** → **Mesh** → **Bulk Generate Buildings**
-2. Set count, layout, and parameter ranges
-3. Click **OK** to generate a collection of buildings
+All generators are in the 3D viewport under **Shift+A > Mesh**:
 
-## Building Profiles
+| Command | What it makes |
+| --- | --- |
+| **Generate City** | A whole city: streets, districts, buildings, sites and transit stops |
+| **Generate Building by Style** | One building in a district style and condition |
+| **Generate Site (Point of Interest)** | One site: its pad, buildings and props |
+| **Procedural Building Shell** | One building from explicit parameters |
+| **Bulk Generate Buildings** | A row, grid or scatter of randomised buildings |
 
-| Profile | Description |
-|---------|-------------|
-| **Storefront** | Retail front with back room, residential above |
-| **Warehouse** | Large open space with optional office |
-| **Residential** | Apartments with hallway |
-| **Bar** | Multiple connected rooms for entertainment venues |
+To make a city:
 
----
+1. **Shift+A > Mesh > Generate City.** Keep **Output** on **Layout Preview**
+   while you tune the seed, radius and density; it is fast.
+2. Switch **Output** to **Detailed Shells** for windows, doors, floors,
+   damage and interiors. Both use the same plan.
+3. Export with **File > Export > Generated City for Unity (.fbx)** and pick
+   the city's root collection. The exporter writes the FBX and the metadata
+   (`<name>.city.json`) beside it.
 
-## Detailed Documentation
+Each run creates a new collection at the 3D cursor. Undo removes the run, and
+a failed run removes its own objects.
 
-### Single Building Parameters
+<p align="center">
+  <img src="docs/images/downtown_street.jpg" alt="Street level in a generated downtown" width="800">
+</p>
 
-#### Basic Settings
+## Documentation
+
+- [CITY_GENERATOR.md](CITY_GENERATOR.md): the city generator's controls,
+  districts, conditions, sites, street geometry, the Unity export and the
+  metadata format.
+- [ARCHITECTURE.md](ARCHITECTURE.md): how buildings are built, the rules the
+  geometry keeps, the damage model, interiors and dimensions.
+- [CHANGELOG.md](CHANGELOG.md): what changed in each version.
+- [ROADMAP.md](ROADMAP.md): what is planned.
+- [docs/unity/CityMetadata.cs](docs/unity/CityMetadata.cs): C# classes for
+  reading the city metadata in Unity.
+
+## Generate Building by Style
 
 | Parameter | Default | Description |
-|-----------|---------|-------------|
-| **Width** | 8.0m | Building width (X axis) |
-| **Depth** | 6.0m | Building depth (Y axis) |
-| **Floors** | 2 | Number of floors (1–4) |
-| **Floor Height** | 3.5m | Height of each floor |
-| **Wall Thickness** | 0.25m | Thickness of walls |
-| **Taller Ground Floor** | 0.0m | Extra height of the ground storey (shops, lobbies) |
+| --- | --- | --- |
+| **Architecture** | Downtown Tower | Downtown Tower, Old Town / Masonry, Residential, Brutalist, Industrial or Suburban House |
+| **Width / Depth** | 14 / 12 m | Footprint, 6-100 m |
+| **Floors** | 3 | 1-40 |
+| **Condition** | Intact | Intact, Weathered, Semi Collapsed, Rubble Filled, Partial Filled, Lower Floors, Shell, Wall Ring or Collapsed |
+| **Damage** | 0.35 | How far the damage goes; each condition also sets a minimum |
+| **Interiors** | Off | Full floor plans, for conditions that can be entered |
+| **Lobby** | Auto | Override the tower lobby: None, Grand Lobby, Retail Podium, Arcade or Pilotis |
+| **Seed** | 42 | Varies massing, openings and damage |
 
-#### Ground Floor and Facade
+The conditions are described in
+[CITY_GENERATOR.md](CITY_GENERATOR.md#building-conditions).
+
+## Generate Site (Point of Interest)
 
 | Parameter | Default | Description |
-|-----------|---------|-------------|
-| **Lobby** | None | Grand Lobby, Retail Podium, Arcade (colonnade) or Pilotis |
+| --- | --- | --- |
+| **Site** | Gas Station | One of the twelve kinds |
+| **Layout** | (per kind) | The kind's layouts, for example Back or Side for a gas station |
+| **Width (along street) / Depth** | 40 / 40 m | Pad size, 16-160 m; each kind has a minimum |
+| **Condition / Damage** | Intact / 0.35 | As for buildings; props fixed to a building go with it |
+| **Front Approach** | 2 m | Paved apron between the pad and the street |
+| **Small Props** | On | Model benches, pumps, lamps, bollards and similar props. Off: they are only recorded as markers |
+| **Output** | Detailed Shells | Or Layout Preview |
+| **Seed** | 42 | Varies the layout |
+
+The site kinds, their layouts and minimum pad sizes are listed in
+[CITY_GENERATOR.md](CITY_GENERATOR.md#points-of-interest).
+
+## Procedural Building Shell
+
+The single-building operator exposes every parameter directly.
+
+### Size and structure
+
+| Parameter | Default | Description |
+| --- | --- | --- |
+| **Width / Depth** | 8 / 6 m | Footprint, 2-50 m |
+| **Floors** | 2 | 1-10 |
+| **Floor Height** | 3.5 m | 2.5-6 m |
+| **Taller Ground Floor** | 0 m | Extra height for the ground storey (shops, lobbies) |
+| **Wall Thickness** | 0.25 m | 0.1-1 m |
+| **Flat Roof / Floor Slabs** | On / On | Without a roof the walls get top caps |
+
+### Facade
+
+| Parameter | Default | Description |
+| --- | --- | --- |
 | **Facade** | Punched | Punched windows, Ribbon bands, Curtain Wall or Deep Grid |
-| **Cornices** | Off | Bands at the first-floor line and below the roof |
-| **Tower Core** | Off | Stair and lift core on every floor, even without an interior profile |
+| **Lobby** | None | Grand Lobby, Retail Podium, Arcade (colonnade) or Pilotis |
+| **Window Type** | Rectangular | Rectangular, Tall or Square |
+| **Window Width / Height** | 1.2 / 1.4 m | Upper-floor windows |
+| **Windows Per Floor / Spacing** | 3 / 0.8 m | On the front and back walls |
+| **Sill Height** | 0.9 m | Above the floor |
+| **Window Sides** | All Sides | Which walls get windows |
+| **Ground Floor Windows** | Storefront | No Windows, Regular, Storefront or Wide Storefront, with their own count, width, height and sill |
+| **Cornices** | Off | Bands at the first-floor line and under the roof |
+| **Facade Pilasters** | Off | Corners only, corners and centre, between windows or full coverage, on chosen sides |
+| **Roof Parapet** | Off | With its height |
+| **Has Patio** | Off | A patio on one side with its own door |
 
-#### Window Settings
-
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| **Window Type** | Rectangular | Style: Rectangular, Tall, or Square |
-| **Window Width** | 1.2m | Width of each window |
-| **Window Height** | 1.4m | Height of upper floor windows |
-| **Windows Per Floor** | 3 | Number of windows on front/back walls |
-| **Window Spacing** | 0.8m | Space between windows |
-| **Sill Height** | 0.9m | Height of window sill from floor |
-
-#### Storefront Settings (Ground Floor)
+### Doors
 
 | Parameter | Default | Description |
-|-----------|---------|-------------|
-| **Storefront Ground Floor** | ✓ On | Enable larger storefront windows on ground floor |
-| **Storefront Window Height** | 2.2m | Height of storefront windows |
-| **Storefront Sill Height** | 0.3m | Lower sill for display windows |
+| --- | --- | --- |
+| **Door Width / Height** | 1.2 / 2.4 m | Street doors |
+| **Front Door Position** | 0.1 | Along the front wall (0 left, 1 right) |
+| **Back Exit / Position** | On / 0.5 | A back door |
 
-#### Door Settings
-
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| **Door Width** | 1.2m | Width of doors |
-| **Door Height** | 2.4m | Height of doors |
-| **Front Door Position** | 0.1 | Position along front wall (0=left, 1=right) |
-| **Back Exit** | ✓ On | Add a back exit door |
-| **Back Door Position** | 0.5 | Position along back wall |
-
-#### Structure Options
+### Interior
 
 | Parameter | Default | Description |
-|-----------|---------|-------------|
-| **Flat Roof** | ✓ On | Generate a flat roof |
-| **Floor Slabs** | ✓ On | Generate floor slabs between floors |
+| --- | --- | --- |
+| **Building Profile** | None | Storefront, Warehouse, Residential, Office, House or Bar/Entertainment floor plans |
+| **Tower Core** | Off | A stair and lift core on every floor, even without a profile |
+| **External Stair Access** | Off | A door for an outside stair (the stair itself is not modelled) |
+| **Interior Fill** | None | Completely or partially filled with rubble, or rubble piles, with filled floors and density |
+| **Exterior Rubble** | Off | Rubble piles around the building |
 
-> **Note:** When **Flat Roof** is disabled, walls automatically get top caps to close the geometry.
-
-#### Damage Settings (Post-Apocalyptic)
+### Damage
 
 | Parameter | Default | Description |
-|-----------|---------|-------------|
-| **Enable Damage** | Off | Master toggle for damage effects |
-| **Damage Amount** | 0.3 | How far the top breaks down; above ~0.5 whole storeys go |
-| **Pointiness** | 0.5 | Variation of the ragged wall tops |
+| --- | --- | --- |
+| **Enable Damage** | Off | Turns damage on |
+| **Damage Amount** | 0.3 | How far the top breaks down; above about 0.5 whole storeys go |
+| **Pointiness** | 0.5 | Variation of the ragged tops |
 | **Resolution** | 1.0 | Samples per 1.2 m along the broken tops |
 
-Collapses (polygonal craters), breaches and blast holes come from the city and
-style conditions (Semi-collapsed, Rubble-filled, ...). The ground storey never
-breaks, so entrances stay usable.
+The ground storey never breaks, so entrances stay usable. Collapses, blast
+holes and rubble fills come from the conditions of **Generate Building by
+Style** and the city.
 
-#### Generation Settings
-
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| **Random Seed** | 0 | Seed for deterministic generation |
-| **Auto Clean** | ✓ On | Merge coplanar faces into n-gons (the mesh stays watertight) |
-| **Create Material Slots** | ✓ On | Create material slots for easy texturing |
-
----
-
-### Bulk Generation
-
-Generate multiple buildings at once with randomized parameters.
-
-#### Bulk Settings
+### Output
 
 | Parameter | Default | Description |
-|-----------|---------|-------------|
-| **Building Count** | 5 | Number of buildings to generate |
-| **Spacing** | 2.0m | Space between buildings |
-| **Layout** | Row | Arrangement: Row, Grid, or Random |
-| **Grid Columns** | 3 | Columns when using Grid layout |
-| **Random Area Size** | 50m | Area size when using Random layout |
-| **Collection Name** | Generated_Buildings | Name of the collection for buildings |
+| --- | --- | --- |
+| **Random Seed** | 0 | Same seed and parameters give the same building |
+| **Auto Clean** | On | Merges coplanar faces into n-gons; the mesh stays watertight |
+| **Create Material Slots** | On | See below |
+| **Mark UV Seams / Auto Unwrap UVs** | On / On | UVs ready for texturing |
 
-#### Parameter Ranges
+## Bulk Generate Buildings
 
-Define min/max values for randomized parameters:
+Generates a collection of buildings in a row, a grid or a random scatter. You
+set the count, spacing and layout; a minimum and maximum for each size,
+window, door, storefront, pilaster, parapet, patio, fill and damage setting;
+and **Always**, **Never** or **Random** for each optional feature. Each
+building's seed is the **Base Seed** plus its index.
 
-| Range | Default Min | Default Max |
-|-------|-------------|-------------|
-| **Width** | 6.0m | 12.0m |
-| **Depth** | 5.0m | 10.0m |
-| **Floors** | 1 | 4 |
-| **Floor Height** | 3.0m | 4.0m |
+## Materials
 
-Buildings are generated with random values within these ranges, each with a unique seed based on the **Base Seed** + building index.
+Buildings get eight slots: `Building_Walls`, `Building_Floor`,
+`Building_Roof`, `Building_WindowFrame`, `Building_DoorFrame`,
+`Building_InteriorWall`, `Building_Stairs` and `Building_Rubble`. Sites add
+`Site_*` slots (asphalt, concrete, paint, grass, metal, signs, glass and
+others) and a wall colour per kind. Streets use `City_Asphalt`,
+`City_Pavement`, `City_Curb`, `City_Ground`, `City_LanePaint` and
+`City_WornPaint`. The colours are placeholders: replace them with your own
+materials.
 
----
+## Geometry
 
-### Material Slots
+- Buildings and site grounds are closed solids: each edge is shared by
+  exactly two faces and normals face outward. Street surfaces are open
+  underneath.
+- No modifiers or booleans; meshes are built from their final outlines.
+- Buildings, sites and street layers are separate objects, ready for culling.
+- See [ARCHITECTURE.md](ARCHITECTURE.md) for how this is kept.
 
-When **Create Material Slots** is enabled, the addon creates 5 material slots:
+## Troubleshooting
 
-| Slot | Material Name | Default Color | Usage |
-|------|---------------|---------------|-------|
-| 0 | Building_Walls | Concrete (tan) | Exterior walls |
-| 1 | Building_Floor | Gray | Floor slabs |
-| 2 | Building_Roof | Dark gray | Roof |
-| 3 | Building_WindowFrame | Brown | Window frame edges |
-| 4 | Building_DoorFrame | Dark brown | Door frame edges |
+- **A fix doesn't show after updating.** Restart Blender: an add-on
+  installed over an enabled copy keeps running the old modules. Check the
+  `addon_version` custom property on the city collection or building.
+- **Windows overlap or are missing.** Reduce **Windows Per Floor** or
+  **Window Spacing**, or widen the building. Windows avoid doors.
+- **Damage looks too extreme.** Lower **Damage Amount**; below about 0.3
+  only the parapet breaks.
+- **Large cities are slow.** Tune them with **Layout Preview** and use the
+  **Building Budget** to cap the number of detailed buildings.
 
-Replace these placeholder materials with your own textures for production use.
+## Development
 
----
-
-### Building Styles
-
-#### Small Storefront (Default)
-- 2 floors, 8×6m footprint
-- Storefront mode enabled
-- Door offset to the left (0.1)
-- Large ground floor windows, smaller upper floor windows
-
-#### Residential Apartment
-- Disable "Storefront Ground Floor"
-- Increase floors to 3-4
-- Center the front door (offset 0.5)
-- Uniform window sizes across all floors
-
-#### Abandoned/Damaged Building
-- Enable damage, Damage Amount 0.3–0.6
-- For collapses use **Generate Building by Style** with the Semi-collapsed,
-  Shell or Rubble-filled condition
-
-#### City Block (Bulk Generation)
-- Use Bulk Generate with Grid layout
-- 9–16 buildings (3×3 or 4×4 grid)
-- Vary floors 1–4, widths 6–15m
-- Enable storefront for ground floors
-- Optional light damage for post-apocalyptic feel
-
----
-
-### Tips
-
-#### Deterministic Generation
-- Use the **Random Seed** to get consistent results
-- Same seed + same parameters = same building
-- For bulk generation, Base Seed determines all building variations
-
-#### Geometry Quality
-- Every wall, slab, partition and stair is a closed solid: no holes, no
-  flipped faces, no coplanar faces fighting (see ARCHITECTURE.md)
-- **Auto Clean** merges coplanar faces into n-gons
-- Opening reveals show the wall depth at windows/doors
-
-#### Performance
-- About 0.1 s for a mid-size building with interiors in Blender
-- No modifiers or booleans
-
-#### Game Engine Export
-- Geometry is watertight (every edge shared by exactly two faces)
-- Normals face outward
-- Separate material slots for easy texturing
-- Export via **File → Export → FBX** (or your preferred format)
-
-#### Customization Workflow
-1. Generate building(s) with desired parameters
-2. Apply materials/textures to each slot
-3. Optionally apply modifiers (Bevel, Subdivision) for higher detail
-4. Export to game engine
-
----
-
-### Troubleshooting
-
-#### Windows Overlapping or Missing
-- Reduce **Windows Per Floor** or increase building **Width**
-- Increase **Window Spacing**
-- Windows automatically avoid door positions
-
-#### Door Not Visible
-- Ensure **Door Height** is less than **Floor Height**
-- Check **Front Door Position** isn't pushing door off the wall
-
-#### Damage Looks Too Extreme
-- Lower **Damage Amount**; below about 0.3 only the parapet breaks
-
-#### Materials Not Appearing
-- Ensure **Create Material Slots** is enabled
-- Check viewport shading mode (Material Preview or Rendered)
-
-#### Bulk Buildings Overlapping
-- Increase **Spacing** value
-- Use Grid layout for predictable arrangement
-- Reduce parameter ranges so building sizes are more consistent
-
----
-
-### Changelog
-
-#### v0.2.0
-- Added **Bulk Generate Buildings** operator
-  - Row, Grid, and Random layouts
-  - Parameter ranges for width, depth, floors, floor height
-  - Generates buildings into a named collection
-- Added **wall top caps** when roof is disabled
-- Improved geometry cleanup (edge dissolution for cleaner meshes)
-- Fixed floor connection seams
-
-#### v0.1.0
-- Initial release
-- Procedural wall generation with window/door cutouts
-- Storefront mode for ground floor
-- Configurable damage system
-- Material slot creation
-- Full operator UI with organized parameter groups
-
----
+The generator is pure Python up to the Blender adapter (`mesh_builder.py`,
+`building_assets.py` and the operators), so buildings, sites and city plans
+can be generated and checked without Blender. The project's test suite isn't
+published in this repository yet.
 
 ## License
 
-GPL-3.0-or-later - Compatible with Blender's licensing.
-
-See [LICENSE](LICENSE) for details.
+GPL-3.0-or-later, compatible with Blender's licensing. See [LICENSE](LICENSE).
 
 ## Contributing
 
-Contributions are welcome! Please feel free to submit issues or pull requests.
+Issues and pull requests are welcome; see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Credits
 
-Originally developed for **Ares**, a first-person boomer shooter game.
+Developed for **Ares**, a first-person boomer shooter.

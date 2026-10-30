@@ -1,7 +1,7 @@
-# Architecture (v0.10)
+# Architecture
 
-v0.10 replaces the geometry pipeline. This note records why, how the new one
-works, the rules it keeps, and what is still open.
+Version 0.10 replaced the geometry pipeline. This note records why, how the
+current one works, the rules it keeps, and what is still open.
 
 ## Why: audit of v0.9.9
 
@@ -19,8 +19,7 @@ that face the same way and overlap (they z-fight even with backface culling):
 `_repair_wall_shell` looked for an inner wall face within 8 cm of each outer
 face's centre, but `_dissolve_wall_seams` had already merged outer cells into
 large n-gons, so it rarely found one and pasted an unwelded copy over the real
-inner face (the z-fighting stripes in `qa_skyA_top0.png`). That happened on
-intact buildings too. The other passes only capped boundary shapes they
+inner face, which z-fought in stripes. That happened on intact buildings too. The other passes only capped boundary shapes they
 recognised. Chunks were rectangular because the cutter was an axis-aligned box.
 
 Other findings:
@@ -179,23 +178,21 @@ Sized for the Ares player (`Player.prefab`: capsule 2.0 m x 0.8 m, 0.08 m skin,
 
 ## Tests
 
-- `python3 -m unittest discover -s tests` (no Blender): solids are watertight
-  under random profiles and openings; every style x condition building is
-  watertight with no z-fighting; layouts are complete, reachable, door-sized,
-  window-clear and walkable; plan and style tests.
-  - `test_walkability.py` walks the player capsule along every stair at
-    three heights (0.45, 1.1, 1.95 m) and finds no damaged slab left in
-    loose or tiny pieces.
-  - `test_shell.py` checks, on the mesh, that windows near the break or a
-    blast hole are still open where their wall stands.
-  - `test_sites.py` checks that props hung on a wall (signs, canopies) keep
-    wall behind most of their span.
-- `blender -b --factory-startup --python tests/blender_watertight.py`: every
-  operator's meshes have each edge on exactly two faces after conversion and
-  the coplanar merge.
-- `tests/blender_interiors.py`: stairs reach the top floor, doors, tower cores,
-  all lobby types.
-- `tests/draw_plans.py OUT`: PNG floor plans (rooms, doors, stairs) for review.
+The project's test suite is not yet published in this repository. It checks:
+
+- **Without Blender:** solids are watertight under random profiles and
+  openings; every style x condition building is watertight with no
+  z-fighting; layouts are complete, reachable, door-sized, window-clear and
+  walkable.
+  - The player capsule walks every stair at three heights (0.45, 1.1 and
+    1.95 m), and no damaged slab is left in loose or tiny pieces.
+  - Windows near the break or a blast hole are still open on the mesh where
+    their wall stands.
+  - Props hung on a wall (signs, canopies) keep wall behind most of their
+    span.
+- **In Blender:** every operator's meshes have each edge on exactly two faces
+  after conversion and the coplanar merge; stairs reach the top floor; doors,
+  tower cores and all lobby types build.
 
 ## Sites (v0.11)
 
@@ -217,14 +214,14 @@ in site coordinates: centred on the origin, with the street along the front
 - **Damage.** Props fixed to a building are recorded with
   `Composer.attached()`. They are dropped if the building collapses, and
   wherever its break field stands lower than the prop.
-- **Tests.** `tests/test_sites.py` checks every kind, layout and pad size:
+- **Tests.** Every kind, layout and pad size is checked for:
   - closed grounds with no same-facing overlaps, also against the buildings;
   - buildings inside the pad;
   - reachable plans;
-  - no prop over an opening;
+  - no prop over a window or door;
   - no window facing a neighbour flush against it.
 
-  `tests/blender_sites.py` runs the operator for each one in Blender.
+  The operator also runs for each one in Blender.
 
 City placement (`city_plan._place_pois`):
 

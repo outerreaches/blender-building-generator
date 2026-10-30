@@ -241,12 +241,17 @@ def _unique(values, tolerance=1e-6):
     return result
 
 
+MIN_FRAGMENT = 1.5    # m²: smaller slab pieces left by damage are dropped.
+
+
 def slab_solid(mesh, xs, ys, z_bottom, z_top, field, material, holes=()):
     """Floor plate over a rectilinear grid where ``field(x, y) >= 0``.
 
     ``holes`` are (x0, y0, x1, y1) rectangles aligned to grid lines. Broken
     edges follow the contour of the field, so damaged slabs end in polygonal
-    (diagonal) edges rather than grid steps.
+    (diagonal) edges rather than grid steps. Pieces the contour cuts loose
+    are dropped when they are smaller than ``MIN_FRAGMENT`` or touch neither
+    the plate's edge (the walls) nor a hole (a stair or shaft enclosure).
     """
     if z_top - z_bottom < 1e-4 or len(xs) < 2 or len(ys) < 2:
         return
@@ -257,6 +262,7 @@ def slab_solid(mesh, xs, ys, z_bottom, z_top, field, material, holes=()):
         return any(x0 < cx < x1 and y0 < cy < y1 for x0, y0, x1, y1 in holes)
 
     points, polygons = geom2d.marching_squares(xs, ys, values, masked)
+    polygons = _supported(points, polygons, xs, ys, holes)
     top, bottom = {}, {}
 
     def vertex(key, upper):
@@ -282,6 +288,52 @@ def slab_solid(mesh, xs, ys, z_bottom, z_top, field, material, holes=()):
             if used[edge] == 1:
                 mesh.face((vertex(following, True), vertex(key, True),
                            vertex(key, False), vertex(following, False)), material)
+
+
+def _supported(points, polygons, xs, ys, holes):
+    """Polygons of the slab pieces that stay (see ``slab_solid``)."""
+    parent = {}
+
+    def find(key):
+        parent.setdefault(key, key)
+        while parent[key] != key:
+            parent[key] = parent[parent[key]]
+            key = parent[key]
+        return key
+    for polygon in polygons:
+        root = find(polygon[0])
+        for key in polygon[1:]:
+            other = find(key)
+            if other != root:
+                parent[other] = root
+    pieces = {}
+    for polygon in polygons:
+        pieces.setdefault(find(polygon[0]), []).append(polygon)
+    if len(pieces) == 1:
+        (only,) = pieces.values()
+        area = sum(_area([points[k] for k in polygon]) for polygon in only)
+        return only if area >= MIN_FRAGMENT else []
+    x0, x1, y0, y1 = xs[0], xs[-1], ys[0], ys[-1]
+
+    def anchored(x, y):
+        if min(abs(x - x0), abs(x - x1), abs(y - y0), abs(y - y1)) < 1e-6:
+            return True
+        return any((abs(x - hx0) < 1e-6 or abs(x - hx1) < 1e-6) and hy0 - 1e-6 <= y <= hy1 + 1e-6 or
+                   (abs(y - hy0) < 1e-6 or abs(y - hy1) < 1e-6) and hx0 - 1e-6 <= x <= hx1 + 1e-6
+                   for hx0, hy0, hx1, hy1 in holes)
+    kept = []
+    for piece in pieces.values():
+        area = sum(_area([points[k] for k in polygon]) for polygon in piece)
+        if area < MIN_FRAGMENT:
+            continue
+        if not any(anchored(*points[k]) for polygon in piece for k in polygon):
+            continue
+        kept.extend(piece)
+    return kept
+
+
+def _area(points):
+    return abs(sum(a[0] * b[1] - b[0] * a[1] for a, b in zip(points, points[1:] + points[:1]))) / 2
 
 
 def box(mesh, x0, y0, z0, x1, y1, z1, material):

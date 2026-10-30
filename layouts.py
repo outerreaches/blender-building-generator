@@ -1250,7 +1250,9 @@ def stair_steps(stair, rise):
 
     Flight one climbs from the entry landing to the turning landing along one
     side; flight two climbs back along the other side and arrives at the
-    entry landing of the storey above. Everything is solid to the floor.
+    entry landing of the storey above. Each step is a block with a stepped
+    soffit ``STAIR_WAIST`` below the tread under it, and the turning landing
+    is a slab, so the flights of the storey above leave headroom over these.
     """
     zx0, zy0, zx1, zy1 = stair.zone
     risers = max(2, math.ceil(rise / stair.riser - 1e-9))
@@ -1266,7 +1268,7 @@ def stair_steps(stair, rise):
     flight = stair.flight
     boxes = []
 
-    def place(a0, a1, b0, b1, z1):
+    def place(a0, a1, b0, b1, z1, z0=0.0):
         # a: along the flights (0 = entry end); b: across (0 = flight-one side).
         if stair.axis == 'y':
             ys = (zy0 + a0, zy0 + a1) if stair.entry < 0 else (zy1 - a1, zy1 - a0)
@@ -1274,16 +1276,21 @@ def stair_steps(stair, rise):
         else:
             xs = (zx0 + a0, zx0 + a1) if stair.entry < 0 else (zx1 - a1, zx1 - a0)
             ys = (zy1 - b1, zy1 - b0)
-        boxes.append((xs[0], ys[0], 0.0, xs[1], ys[1], z1))
+        boxes.append((xs[0], ys[0], z0, xs[1], ys[1], z1))
+
+    def underside(top):
+        return max(0.0, top - riser - dims.STAIR_WAIST)
 
     for index in range(first):
-        place(landing + index * tread_a, landing + (index + 1) * tread_a, 0, flight,
-              (index + 1) * riser)
+        top = (index + 1) * riser
+        place(landing + index * tread_a, landing + (index + 1) * tread_a, 0, flight, top,
+              underside(top))
     mid = first * riser
-    place(length - landing, length, 0, across, mid)
+    place(length - landing, length, 0, across, mid, max(0.0, mid - dims.STAIR_LANDING_SLAB))
     for index in range(second):
         a1 = length - landing - index * tread_b
-        place(a1 - tread_b, a1, across - flight, across, mid + (index + 1) * riser)
+        top = mid + (index + 1) * riser
+        place(a1 - tread_b, a1, across - flight, across, top, underside(top))
     return boxes, riser, min(tread_a, tread_b), landing
 
 

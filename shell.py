@@ -120,34 +120,119 @@ def _clear_of_party_walls(spec, x, y, rx, ry):
 
 # -- damage on facades -------------------------------------------------------
 
-def _trim_broken_windows(spec, field):
-    """Fill windows the break line passes through above the sill.
+# Windows the break passes through (or leaves less wall than this over) are notched.
+LINTEL_SLIVER = .2
+PIER_RUN_GAP = 3.0    # Piers narrower than this between notched windows break too.
+PIER_GONE = .25       # Odds a pier between notched windows is gone to the sill.
+PIER_WHOLE = .35      # Odds a broken pier still peaks at the break line.
+SILL_BREAK = .35      # Deepest a notched window's sill breaks below its line.
 
-    A window whose wall is broken off just above its head would survive as a
-    hole in a thin spike of wall; ruins read better as solid broken masonry
-    there. Windows below an intact wall, or below a break that already took
-    the sill, are kept.
+
+def _trim_broken_windows(spec, field):
+    """Windows the break passes through become notches open to the top.
+
+    The wall breaks along its openings: a window whose wall breaks off
+    between its sill and just above its head keeps its jambs and a broken
+    sill and loses everything above, instead of being filled in. Neighbouring
+    notches share one opening; the piers between them are gone or broken to
+    a peak with sides falling off to the jambs, and the piers at the ends of
+    a run slope down into it, so the ruin does not read as battlements.
+    Windows below the break stay whole and windows above it go with the wall,
+    so the window grid stays regular all the way to the broken top.
     """
     if not field.damaged:
         return
+    sky = wall_top(spec) + 2.0
+    rng = random.Random((spec.seed * 1103515245) ^ 0x7E57)
+    floors = sorted(level.z for level in spec.levels)
     for tier in spec.tiers:
         for facade in tier.facades:
             profile = field.wall_profile(facade.origin, facade.direction, facade.ua, facade.ub,
                                          side=facade.side)
-            keep = []
+            spans = sorted((o.u0, o.u1) for o in facade.openings)
+            kept, notched = [], []
             for opening in facade.openings:
                 if opening.kind != 'window':
-                    keep.append(opening)
+                    kept.append(opening)
                     continue
                 sill = min(z for _, z in opening.bottom)
                 head = max(z for _, z in opening.top)
-                a, b = opening.u0 - .3, opening.u1 + .3
-                lowest = min([geom2d.interp(profile, a + (b - a) * k / 8) for k in range(9)] +
-                             [z for u, z in profile if a <= u <= b])
-                if sill + .3 < lowest < head + .6:
+                a, b = opening.u0, opening.u1
+                heights = ([geom2d.interp(profile, a + (b - a) * k / 8) for k in range(9)] +
+                           [z for u, z in profile if a <= u <= b])
+                if max(heights) <= sill + 1e-6 or min(heights) >= head + LINTEL_SLIVER:
+                    kept.append(opening)          # Wholly above the break, or intact.
                     continue
-                keep.append(opening)
-            facade.openings = keep
+                floor = max([z for z in floors if z <= sill + 1e-6] or [sill])
+                notched.append((a, b, sill, max(0.0, min(SILL_BREAK, sill - floor - .3)),
+                                opening.frame))
+            for run in _notch_runs(sorted(notched)):
+                lo = max([u1 for u0, u1 in spans if u1 <= run[0][0] + 1e-6] + [facade.ua])
+                hi = min([u0 for u0, u1 in spans if u0 >= run[-1][1] - 1e-6] + [facade.ub])
+                kept.append(_notch_opening(run, profile, sky, rng, lo, hi))
+            facade.openings = kept
+
+
+def _notch_runs(notched):
+    """Group notched windows (a, b, sill, sill_room, frame) separated by narrow
+    piers on the same storey."""
+    runs = []
+    for window in notched:
+        if runs:
+            last = runs[-1][-1]
+            if window[0] - last[1] < PIER_RUN_GAP and abs(window[2] - last[2]) < .5:
+                runs[-1].append(window)
+                continue
+        runs.append([window])
+    return runs
+
+
+def _notch_opening(run, profile, sky, rng, lo, hi, step=.01):
+    """One opening for a run of notched windows between the solid wall at lo
+    and hi: broken sills under the windows, broken piers between them and
+    slopes down into the run from the piers at either end."""
+    def sill_at(sill, room):
+        return sill - (rng.uniform(0, room) if rng.random() < .5 else 0.0)
+
+    def side(sill, top):
+        return sill + (top - sill) * rng.uniform(.35, .85)
+
+    bottom = []
+    a0, sill0 = run[0][0], run[0][2]
+    reach = min(1.2, .6 * (a0 - lo))
+    if reach > .15:
+        start = a0 - reach * rng.uniform(.5, 1.0)
+        bottom += [(start, geom2d.interp(profile, start) + .05),
+                   (a0 - step, side(sill0, geom2d.interp(profile, a0)))]
+    for k, (a, b, sill, room, frame) in enumerate(run):
+        if b - a > .6:
+            bottom += [(a, sill_at(sill, room)),
+                       (a + (b - a) * rng.uniform(.3, .7), sill_at(sill, room))]
+        else:
+            bottom.append((a, sill_at(sill, room)))
+        bottom.append((b, sill_at(sill, room)))
+        if k + 1 == len(run):
+            break
+        na = run[k + 1][0]
+        if na - b < 4 * step or rng.random() < PIER_GONE:
+            continue                              # Pier gone to the sill.
+        standing = geom2d.interp(profile, (b + na) / 2)
+        if standing <= sill + .4:
+            continue
+        peak = standing if rng.random() < PIER_WHOLE else (
+            sill + .3 + (standing - sill - .3) * rng.uniform(.15, .9))
+        width = (na - b) * rng.uniform(.1, .3)     # A broken top, not a spike.
+        at = b + 2 * step + (na - b - 4 * step - width) * rng.random()
+        bottom += [(b + step, side(sill, peak)), (at, peak), (at + width, peak),
+                   (na - step, side(sill, peak))]
+    b1, sill1 = run[-1][1], run[-1][2]
+    reach = min(1.2, .6 * (hi - b1))
+    if reach > .15:
+        end = b1 + reach * rng.uniform(.5, 1.0)
+        bottom += [(b1 + step, side(sill1, geom2d.interp(profile, b1))),
+                   (end, geom2d.interp(profile, end) + .05)]
+    u0, u1 = bottom[0][0], bottom[-1][0]
+    return solids.Opening(u0, u1, bottom, [(u0, sky), (u1, sky)], run[0][4], 'notch')
 
 
 def _damage_openings(spec, field, params, rng):
@@ -219,14 +304,19 @@ def _replace_with_hole(facade, u0, u1, z0, z1, rng, grounded, keep=None, outline
     if z1 - z0 < 1.0:
         return
     if outline is not None:
-        # Blast holes keep their ragged outline: windows it touches are filled
-        # in (broken masonry) instead of stretching the hole around them.
+        # Blast holes keep their ragged outline; windows it reaches merge into
+        # the hole (it takes their exact shape where they overlap) rather than
+        # being filled in, so the window grid carries on up to the hole.
         bottom, top = outline(rng, u0, u1, z0, z1)
         bottom = [(u, max(facade.base + .05, z)) for u, z in bottom]
-        for opening in [o for o in near if o.kind != 'door']:
-            if _touches_outline(opening, bottom, top):
-                facade.openings.remove(opening)
-        facade.openings.append(solids.Opening(u0, u1, bottom, top, MAT_WALLS, 'breach'))
+        # Openings beside the hole (no overlap along the wall) stay as they are.
+        merged = [o for o in near if o.kind != 'door' and _touches_outline(o, bottom, top) and
+                  min(o.u1, u1) - max(o.u0, u0) > .05]
+        for opening in merged:
+            facade.openings.remove(opening)
+        bottom, top = _merge_openings(bottom, top, merged)
+        facade.openings.append(solids.Opening(bottom[0][0], bottom[-1][0], bottom, top, MAT_WALLS,
+                                              'breach'))
         return
     victims = [o for o in near if o.kind != 'door' and
                min(z for _, z in o.bottom) < z1 + .5 and max(z for _, z in o.top) > z0 - .5]
@@ -242,6 +332,43 @@ def _replace_with_hole(facade, u0, u1, z0, z1, rng, grounded, keep=None, outline
                for u, z in top]
     bottom = [(u, max(facade.base, z)) for u, z in bottom]
     facade.openings.append(solids.Opening(u0, u1, bottom, top, MAT_WALLS, 'breach'))
+
+
+def _merge_openings(bottom, top, openings, step=.01):
+    """Union of a ragged hole outline and rectangular openings it reaches, as
+    one x-monotone outline (near-vertical steps at the opening sides)."""
+    if not openings:
+        return bottom, top
+    shapes = [(bottom, top)]
+    for o in openings:
+        ob, ot = min(z for _, z in o.bottom), max(z for _, z in o.top)
+        shapes.append(([(o.u0, ob), (o.u1, ob)], [(o.u0, ot), (o.u1, ot)]))
+    us = set()
+    for b, t in shapes:
+        a, c = b[0][0], b[-1][0]
+        us.update(u for u, _ in b)
+        us.update(u for u, _ in t)
+        us.update((a, c, a + step, c - step))
+    lo = min(b[0][0] for b, _ in shapes)
+    hi = max(b[-1][0] for b, _ in shapes)
+    for b, _ in shapes:
+        for edge, inward in ((b[0][0], -step), (b[-1][0], step)):
+            if lo < edge + inward < hi:
+                us.add(edge + inward)
+    new_bottom, new_top = [], []
+    for u in sorted(v for v in us if lo - 1e-9 <= v <= hi + 1e-9):
+        lows, highs = [], []
+        for b, t in shapes:
+            if b[0][0] - 1e-9 <= u <= b[-1][0] + 1e-9:
+                lows.append(geom2d.interp(b, u))
+                highs.append(geom2d.interp(t, u))
+        if not lows:
+            # A gap between shapes cannot happen for touching openings; keep
+            # the outline closed there just in case.
+            lows, highs = [new_bottom[-1][1]], [new_bottom[-1][1] + .01]
+        new_bottom.append((u, min(lows)))
+        new_top.append((u, max(highs)))
+    return new_bottom, new_top
 
 
 def _touches_outline(opening, bottom, top, margin=.15):

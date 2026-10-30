@@ -26,6 +26,8 @@ STAIR_WELL = .15          # Gap between switchback flights.
 STAIR_RISER = .19         # Maximum riser (the player's step offset is 0.4).
 STAIR_TREAD = .27         # Tread depth.
 STAIR_LANDING = 1.3       # Landing depth at each end of a switchback.
+STAIR_WAIST = .3         # Stair flight soffit, measured down from the tread below.
+STAIR_LANDING_SLAB = .25  # Turning landing thickness.
 ELEVATOR_SHAFT = (2.4, 2.4)
 
 # Structure

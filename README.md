@@ -1,5 +1,28 @@
 # Procedural Building Shell Generator
 
+## v0.13.1: Walkable stairs, no floating floors, windows through damage
+
+- **Fixed: blocked stairs.** Each step of a stair flight was a solid block
+  down to the floor, so the flights of the storey above filled the headroom
+  over the flights below. Stacked stairs, as in towers, could not be climbed.
+  Flights now have a 0.3 m waist under the treads and the turning landing is
+  a 0.25 m slab. A new test walks the player capsule up every stair of 100
+  buildings: 90 had a blocked stair before, none do now.
+- **Fixed: floating pieces of floor.** Where damage cuts a slab, the
+  broken edge could leave small pieces or islands with nothing under them. A
+  piece is now dropped when it is smaller than 1.5 m² or touches neither a
+  wall nor a stair or shaft enclosure.
+- **Windows stay windows near damage.** Windows that the broken top passed
+  through, or that touched a blast hole, used to be filled in, which broke up
+  the window grid.
+  - **Broken tops:** a window the break crosses now loses everything above
+    its broken sill. The piers between neighbouring broken windows are
+    either gone or broken off at different heights, and the wall slopes down
+    into the gap at each end, so the top storey reads as ruined masonry
+    rather than battlements.
+  - **Blast holes:** a hole now takes in the windows it touches.
+  - **Below the damage:** the windows keep their full grid.
+
 ## v0.13.0: Small-props switch, city metadata for Unity
 
 - **Small Props switch.** A new switch on Generate City and Generate Site

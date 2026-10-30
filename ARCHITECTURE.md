@@ -127,10 +127,19 @@ party-walled downtown towers in every condition.
 - One-storey buildings have no storey above the break line: their ragged
   walls span the height above the protected ground floor, and the roof
   stands only while every wall still reaches its underside.
-- Windows the break passes through above the sill are filled, so broken walls
-  read as masonry rather than holes in thin spikes.
+- **Windows through the break.** A window the break crosses (or leaves less
+  than 0.2 m of wall over) becomes a notch: its sill breaks unevenly and
+  everything above goes. Neighbouring notches on a storey share one opening.
+  The piers between them are gone or broken to a short flat top with sides
+  falling to the jambs, and the piers at the run ends slope down into it, so
+  the broken storey reads as masonry, not battlements. Windows below the
+  break stay whole (`shell._trim_broken_windows`).
 - **Breaches** (exposed fills) and **blast holes** are jagged openings that
-  replace whole windows.
+  take in the windows they touch (their outline is the union of the hole and
+  the window rectangles), so no window next to damage is filled in.
+- **Loose slab pieces go.** A piece of a damaged slab that is smaller than
+  1.5 m² (`solids.MIN_FRAGMENT`), or that touches neither the plate's edge
+  nor a stair/shaft hole, is dropped rather than left floating.
 
 The ground storey never breaks (`min_height`), so entrances stay usable.
 
@@ -163,7 +172,7 @@ Sized for the Ares player (`Player.prefab`: capsule 2.0 m x 0.8 m, 0.08 m skin,
 | Interior door | 1.2 m wide, 2.3 m clear above the finished floor |
 | Street door | >= 1.4 m; main entrances of lobbies 2.6-3.2 m |
 | Corridor | >= 1.8 m |
-| Stair | 1.3 m flights, riser <= 0.19 m, tread 0.27 m, 1.3 m landings (compact/steep variants for small plates, riser <= 0.25 m) |
+| Stair | 1.3 m flights, riser <= 0.19 m, tread 0.27 m, 1.3 m landings (compact/steep variants for small plates, riser <= 0.25 m); 0.3 m waist under the treads and a 0.25 m turning landing slab, so stacked flights keep headroom |
 | Slab / roof | 0.25 m / 0.3 m |
 | Partition / core wall | 0.15 m / 0.25 m |
 | Storeys | residential 3.2 (ground 3.4), old town 3.6 (shops 4.2), offices 3.9 (lobby 4.8-7.8), houses 3.1, sheds 5.5 |
@@ -174,6 +183,13 @@ Sized for the Ares player (`Player.prefab`: capsule 2.0 m x 0.8 m, 0.08 m skin,
   under random profiles and openings; every style x condition building is
   watertight with no z-fighting; layouts are complete, reachable, door-sized,
   window-clear and walkable; plan and style tests.
+  - `test_walkability.py` walks the player capsule along every stair at
+    three heights (0.45, 1.1, 1.95 m) and finds no damaged slab left in
+    loose or tiny pieces.
+  - `test_shell.py` checks, on the mesh, that windows near the break or a
+    blast hole are still open where their wall stands.
+  - `test_sites.py` checks that props hung on a wall (signs, canopies) keep
+    wall behind most of their span.
 - `blender -b --factory-startup --python tests/blender_watertight.py`: every
   operator's meshes have each edge on exactly two faces after conversion and
   the coplanar merge.

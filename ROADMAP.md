@@ -11,6 +11,7 @@
 | v0.12 | Dense downtown: party-walled towers built out to the footway, superblocks |
 | v0.13 | Small-props switch and city metadata for Unity; walkable stairs, no loose floor pieces, windows kept through damage |
 | v0.14 | Interiors for the game: rooms to furnish, lifts, railings and fixtures in the metadata (game assets, not modelled) |
+| v0.15 | The rest of the retail set: auto repair and an enclosed mall, with the other retail gathered round it; a water switch |
 
 See [CHANGELOG.md](CHANGELOG.md) for the details.
 
@@ -25,9 +26,6 @@ See [CHANGELOG.md](CHANGELOG.md) for the details.
 
 **City**
 
-- The rest of the retail set: auto repair and an enclosed mall (proposed one
-  for radius 6-11, two from radius 12), clustered with the big boxes and strip
-  malls at the suburban edge.
 - Street patterns: suburban cul-de-sacs, plazas and strip malls repeating near
   their district anchors.
 - Irregular block subdivision and curved frontages; parcels are still

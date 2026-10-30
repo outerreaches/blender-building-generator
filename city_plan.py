@@ -38,10 +38,17 @@ STYLES = tuple(STYLE_PROFILE)
 # block qualifies; ``front`` limits the road tiers a site may face (None: any
 # but a highway); ``spacing`` is the least distance in blocks between two of a
 # kind; ``districts`` weights district styles (styles left out only take a
-# site when the minimum cannot be met otherwise).
+# site when the minimum cannot be met otherwise). ``per_radius`` replaces the
+# count with a number by map radius ((radius, count), ...). ``near`` pulls a
+# kind toward sites placed before it: (kind, blocks, weight factor). Kinds are
+# placed in this order, so the mall comes first and the retail around it.
 POI_RULES = {
+    'MALL': dict(blocks=((2, 2),), count=0, minimum=0, per_radius=((6, 1), (12, 2)),
+                 front=('ARTERIAL', 'COLLECTOR'), spacing=10,
+                 districts={'SUBURBAN': 3, 'INDUSTRIAL': 1, 'RESIDENTIAL': .5}),
     'SHOPPING_PLAZA': dict(blocks=((2, 2),), count=.5, minimum=1, front=('ARTERIAL', 'COLLECTOR'),
-                           spacing=8, districts={'SUBURBAN': 3, 'INDUSTRIAL': 1.5, 'RESIDENTIAL': 1}),
+                           spacing=8, districts={'SUBURBAN': 3, 'INDUSTRIAL': 1.5, 'RESIDENTIAL': 1},
+                           near=('MALL', 5, 4.0)),
     'HOSPITAL': dict(blocks=((2, 1), (2, 2)), count=.5, minimum=1, front=('ARTERIAL', 'COLLECTOR'),
                      spacing=6, districts={'BRUTALIST': 3, 'DOWNTOWN': 2, 'RESIDENTIAL': 1.5,
                                            'OLD_TOWN': 1}),
@@ -49,7 +56,7 @@ POI_RULES = {
                    districts={'RESIDENTIAL': 3, 'SUBURBAN': 2, 'BRUTALIST': 2, 'OLD_TOWN': 1}),
     'STRIP_MALL': dict(blocks=((1, 1), (2, 1)), count=1, minimum=1, front=('ARTERIAL', 'COLLECTOR'),
                        spacing=3, districts={'SUBURBAN': 3, 'RESIDENTIAL': 1.5, 'INDUSTRIAL': 1,
-                                             'BRUTALIST': 1}),
+                                             'BRUTALIST': 1}, near=('MALL', 4, 3.0)),
     'PARK': dict(blocks=((1, 1), (2, 1)), count=2, minimum=1, front=None, spacing=2,
                  districts={'RESIDENTIAL': 3, 'OLD_TOWN': 2, 'BRUTALIST': 2, 'DOWNTOWN': 1.5,
                             'SUBURBAN': 1.5}),
@@ -71,13 +78,17 @@ POI_RULES = {
                                               'BRUTALIST': 1, 'OLD_TOWN': .5}),
     'FAST_FOOD': dict(blocks=((1, 1),), count=2, minimum=1, front=('ARTERIAL', 'COLLECTOR'),
                       spacing=2, districts={'SUBURBAN': 3, 'RESIDENTIAL': 2, 'BRUTALIST': 1.5,
-                                            'INDUSTRIAL': 1, 'OLD_TOWN': 1}),
+                                            'INDUSTRIAL': 1, 'OLD_TOWN': 1}, near=('MALL', 3, 2.0)),
+    'AUTO_REPAIR': dict(blocks=((1, 1),), count=1, minimum=1, front=None, spacing=3,
+                        districts={'INDUSTRIAL': 3, 'SUBURBAN': 1.5, 'RESIDENTIAL': 1,
+                                   'BRUTALIST': .5}),
 }
 # Smallest pad each kind is laid out for (mirrors sites.MIN_PAD).
 POI_MIN_PAD = {'GAS_STATION': (24, 22), 'FAST_FOOD': (26, 24), 'SCHOOL': (40, 32),
                'HOSPITAL': (44, 32), 'POLICE': (28, 26), 'FIRE_STATION': (28, 26),
                'TRANSIT_STATION': (28, 24), 'PARK': (16, 16), 'PARKING_LOT': (20, 20),
-               'PARKING_GARAGE': (30, 26), 'STRIP_MALL': (30, 26), 'SHOPPING_PLAZA': (80, 70)}
+               'PARKING_GARAGE': (30, 26), 'STRIP_MALL': (30, 26), 'SHOPPING_PLAZA': (80, 70),
+               'AUTO_REPAIR': (30, 28), 'MALL': (90, 80)}
 POI_VERGE = 1.0          # Unpaved strip between a site pad and the footway.
 POI_MIN_DENSITY = .2     # Sites stay inside the built-up area.
 MIDTOWN_STYLES = ('OLD_TOWN', 'RESIDENTIAL', 'BRUTALIST')
@@ -819,6 +830,13 @@ def _place_pois(settings, locations, roads, paths):
         expected = rule['count'] * urban / 100
         quota = int(expected) + (1 if rng.random() < expected - int(expected) else 0)
         quota = max(quota, rule['minimum'])
+        if 'per_radius' in rule:
+            quota = max([n for r, n in rule['per_radius'] if radius >= r] or [0])
+        minimum = min(quota, rule['minimum']) if 'per_radius' not in rule else quota
+        near = []
+        if 'near' in rule:
+            anchor, reach, factor = rule['near']
+            near = [p.center for p in pois if p.kind == anchor]
         candidates = []
         for along, away in rule['blocks']:
             for wx, wy, fronts in ((along, away, "SN"), (away, along, "WE")):
@@ -843,13 +861,17 @@ def _place_pois(settings, locations, roads, paths):
                         weight = rule['districts'].get(district.style, 0.0) * (1.25 - occupancy)
                         # Bigger shapes first in the rule's list are preferred.
                         weight *= 1.0 if (along, away) == rule['blocks'][0] else .5
+                        # Retail gathers round the mall.
+                        if near and weight > 0 and any(math.dist((cx, cy), centre) <= reach * size
+                                                       for centre in near):
+                            weight *= factor
                         key = stream(settings.seed, "poi", kind, x, y, wx, wy).random()
                         candidates.append((weight > 0, key ** (1 / max(weight, .02)),
                                            (x, y, wx, wy), group, front, district))
         candidates.sort(key=lambda c: (c[0], c[1]), reverse=True)
         placed = []
         for preferred, _, (x, y, wx, wy), group, (side, frontage), district in candidates:
-            if len(placed) >= quota or (not preferred and len(placed) >= rule['minimum']):
+            if len(placed) >= quota or (not preferred and len(placed) >= minimum):
                 break
             if any(b in taken for b in group):
                 continue

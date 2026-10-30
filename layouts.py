@@ -66,7 +66,7 @@ class LevelPlan:
     rect: tuple
     rooms: list = field(default_factory=list)
     walls: list = field(default_factory=list)
-    fixtures: list = field(default_factory=list)   # (x0, y0, x1, y1, height, kind): game assets
+    fixtures: list = field(default_factory=list)   # (x0, y0, x1, y1, height, kind[, facing]): game assets
     holes: list = field(default_factory=list)      # Openings in this storey's floor slab.
     stair: Stair = None                            # Flights from this storey up.
     doors: list = field(default_factory=list)      # (room, parent, axis, line, centre, width)
@@ -947,6 +947,85 @@ def plan_bigbox(spec, rng):
     return Plan([tiling.level()])
 
 
+MALL_CONCOURSE = 9.0       # Width of a mall's concourse.
+
+
+def plan_mall(spec, rng):
+    """Enclosed mall: an anchor store at each end, a concourse between them
+    lined with shop units, an entrance hall from the front door, a food court
+    and restrooms on the back row.
+
+    ``params['anchors']`` gives the anchors' widths (left, right); the widest
+    front door is the main entrance. Anchor walls stand
+    on piers shared by the front and back facades; the concourse only meets
+    internal walls, so it needs no pier.
+    """
+    rect = spec.interior_rect(0)
+    x0, y0, x1, y1 = rect
+    piers = spec.piers(0)
+    left_w, right_w = spec.params.get('anchors', (24.0, 24.0))
+    common = [p for p in piers['front'] if any(abs(p - q) < 1e-6 for q in piers['back'])]
+    if not common:
+        return plan_bigbox(spec, rng)
+    xa = min(common, key=lambda p: abs(p - (x0 + left_w)))
+    xb = min(common, key=lambda p: abs(p - (x1 - right_w)))
+    if xb - xa < 18 or xa - x0 < 10 or x1 - xb < 10:
+        return plan_bigbox(spec, rng)
+    tiling = Tiling(rect, 0)
+    front_depth = min(13.0, (y1 - y0 - MALL_CONCOURSE) * .4)
+    cy0 = y0 + front_depth
+    cy1 = cy0 + MALL_CONCOURSE
+    fronts = spec.door_bays('front')
+    entrance = (spec.door_centre('front', max(fronts, key=lambda d: d[2])) if fronts
+                else (x0 + x1) / 2)
+    # The concourse is one open space with the entrance hall, the food court and
+    # the anchors' mall fronts (one group: no walls between them).
+    common = 'common'
+    tiling.add('concourse', 'corridor', (xa, cy0, xb, cy1), group=common)
+    # Front row: shop units, the entrance hall at the main door. Counters
+    # face the concourse the customers come from.
+    cuts = _split_bays(xa, xb, piers['front'], 6.0, 11.0)
+    for number, (a, b) in enumerate(zip(cuts, cuts[1:])):
+        if a <= entrance <= b:
+            tiling.add('entrance', 'lobby', (a, y0, b, cy0), group=common)
+            continue
+        tiling.add(f'shopF{number}', 'shop', (a, y0, b, cy0), 'concourse', unit=f'f{number}')
+        if b - a > 3.5:
+            tiling.fixtures.append((a + 1.0, y0 + 1.2, b - 1.0, y0 + 1.8, 1.0, 'shop_counter',
+                                    (0.0, 1.0)))
+    # Back row: shop units, a food court opposite the entrance, restrooms beside it.
+    cuts = _split_bays(xa, xb, piers['back'], 6.0, 11.0)
+    units = list(zip(cuts, cuts[1:]))
+    middle = min(range(len(units)), key=lambda k: abs((units[k][0] + units[k][1]) / 2 - entrance))
+    food = [middle]
+    if units[middle][1] - units[middle][0] < 10 and middle + 1 < len(units):
+        food.append(middle + 1)
+    restrooms = max(food) + 1 if max(food) + 1 < len(units) else min(food) - 1
+    for number, (a, b) in enumerate(units):
+        if number in food[1:]:
+            continue
+        if number == food[0]:
+            b = units[food[-1]][1]
+            tiling.add('food_court', 'bar', (a, cy1, b, y1), group=common)
+            tiling.fixtures.append((a + 1.0, y1 - 2.2, b - 1.0, y1 - 1.4, 1.05, 'service_counter'))
+        elif number == restrooms:
+            tiling.add('restrooms', 'bath', (a, cy1, b, y1), 'concourse')
+        else:
+            tiling.add(f'shopB{number}', 'shop', (a, cy1, b, y1), 'concourse', unit=f'b{number}')
+            if b - a > 3.5:
+                tiling.fixtures.append((a + 1.0, y1 - 1.8, b - 1.0, y1 - 1.2, 1.0, 'shop_counter'))
+    # Anchors: a sales floor open to the concourse and the street, stock behind.
+    for name, (a, b), side in (('L', (x0, xa), 'left'), ('R', (xb, x1), 'right')):
+        options = [p for p in piers[side] if y0 + 20.0 <= p <= y1 - 6.0]
+        cut = min(options, key=lambda p: abs(y1 - p - 10.0)) if options else None
+        tiling.add(f'anchor{name}', 'shop', (a, y0, b, cut if cut is not None else y1), group=common)
+        tiling.fixtures.append((a + 2.0, y0 + 4.0, a + 2.0 + min(8.0, b - a - 4.0), y0 + 4.8, 1.0,
+                                'shop_counter'))
+        if cut is not None:
+            tiling.add(f'stock{name}', 'storage', (a, cut, b, y1), f'anchor{name}')
+    return Plan([tiling.level()])
+
+
 def plan_bay(spec, rng):
     """One open hall (vehicle bays, depots)."""
     rect = spec.interior_rect(0)
@@ -961,6 +1040,7 @@ PLANNERS = {
     'STRIP': plan_strip,
     'BIGBOX': plan_bigbox,
     'BAY': plan_bay,
+    'MALL': plan_mall,
     'SCHOOL': plan_school,
     'CIVIC': plan_civic,
     'STOREFRONT': plan_storefront,
@@ -1046,8 +1126,15 @@ def resolve(level, roots):
     lookup = {room.name: room for room in rooms}
     level.roots = [name for name in roots if name in lookup]
     reached = set(level.roots)
+    # A room with its own street door still opens into the building (a back
+    # room into its shop, a stock room into the sales floor): once everything
+    # is reached, the door it asked for is added back, or one to its best
+    # neighbour when it asked for none or that room is not beside it.
+    kept = {}
     for room in rooms:
         if room.name in reached:
+            if room.parent is not None:
+                kept[room.name] = room.parent
             room.parent = None
     pending = [room for room in rooms if room.name not in reached]
     while pending:
@@ -1091,6 +1178,24 @@ def resolve(level, roots):
         room.parent = other.name
         reached.add(room.name)
         pending.remove(room)
+    for name in level.roots:
+        room = lookup[name]
+        if (room.parent is not None or any(o.parent == name for o in rooms) or
+                any(_same_group(room, o) for o in rooms if o is not room)):
+            continue                      # Already opens into the building.
+        other = lookup.get(kept.get(name))
+        if other is not None and not _same_group(room, other) and door_window(room, other):
+            room.parent = other.name
+            continue
+        # Nothing requested beside it: the best neighbour instead, inside its
+        # own unit or onto shared circulation (never into another tenancy).
+        options = [o for o in rooms if o is not room and door_window(room, o) is not None and
+                   (room.unit is None or o.unit == room.unit or
+                    (o.unit is None and o.kind in PREFERENCE))]
+        if options:
+            room.parent = min(options, key=lambda o: (
+                0 if room.unit is not None and o.unit == room.unit else 1,
+                PREFERENCE.get(o.kind, 4), -(door_window(room, o)[3] - door_window(room, o)[2]))).name
 
 
 def finish_level(level):

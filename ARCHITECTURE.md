@@ -155,11 +155,16 @@ Programs tile each storey with rectangles and name each room's parent:
 | Office | Central core (stair, 0-4 lifts, WC); lobby or retail podium on the ground floor; open plan or perimeter offices above; plant floors |
 | Warehouse | Open hall, office and WC at a front corner, back stair |
 | Bar | Bar room with counter, kitchen behind, private rooms upstairs |
+| Mall | Anchor stores at both ends (sales floor, stock behind), a concourse between them lined with shop units, an entrance hall and a food court; concourse, hall, food court and anchors are one open space |
 
 The resolver keeps each requested parent when a door fits on the shared wall
 (stair doors only at the entry landing), otherwise re-parents the room to the
 best reachable neighbour (same flat first, then circulation). Rooms of one
-group (open plans) need no wall. Plans that cannot fit a stair keep only the
+group (open plans) need no wall. A room with its own street door (a back room,
+a stock room) still gets a door into the building: the one it asked for, or
+one to its best neighbour in the same unit or onto circulation; a unit that
+is a single room may stand alone. Designed street doors never share a facade
+bay; a door with no free span left is dropped. Plans that cannot fit a stair keep only the
 ground floor and say so in `plan.notes` and the object's `plan_notes`.
 
 Furniture, railings, lift doors and cars, and fixtures (counters, reception

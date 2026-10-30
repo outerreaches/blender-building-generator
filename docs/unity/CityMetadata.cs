@@ -66,6 +66,7 @@ namespace Ares.CityGen
         public float sidewalk_width;
         public bool small_props_modelled;
         public bool interiors_listed;   // False: rooms, lifts and railings left out.
+        public bool water_modelled;     // False: basins are dry; fill them from "water" markers.
     }
 
     [Serializable]
@@ -297,9 +298,10 @@ namespace Ares.CityGen
     public class Marker : Pose
     {
         // bench, lamp, bollard, gas_pump, dumpster, table, booth, play_structure,
-        // swings, goal, trash_bin, air_pump, hydrant, cart_corral (small props),
+        // swings, goal, trash_bin, air_pump, hydrant, cart_corral, tyre_stack (small props),
         // tree, flagpole, fence, parking_stall; bar_counter, reception_desk,
-        // service_counter, shop_counter (fixtures inside buildings).
+        // service_counter, shop_counter (fixtures inside buildings); water
+        // (position = centre of the surface, size = width, depth, water depth).
         public string type;
         public string site;
         public string building;   // Fixtures: the building's GameObject name.
@@ -311,6 +313,7 @@ namespace Ares.CityGen
         public bool umbrella;     // Tables.
         public float[] barrier;   // Booths: direction of the barrier arm.
         public float[] points;    // Fences: post line (flat x, y, z).
+        public string shape;      // Water: "circle" or "rect".
     }
 
     [Serializable]

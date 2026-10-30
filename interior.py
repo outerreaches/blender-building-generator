@@ -39,14 +39,14 @@ def interior_facts(building):
             entry = _room(spec, field, lp, level, room)
             if entry is not None:
                 facts['rooms'].append(entry)
-        for x0, y0, x1, y1, height, kind in lp.fixtures:
+        for x0, y0, x1, y1, height, kind, *facing in lp.fixtures:
             mx, my = (x0 + x1) / 2, (y0 + y1) / 2
             if field.damaged and (field.height(mx, my) < level.z + height + .2 or
                                   field.in_blast(mx, my, level.z + height / 2) or
                                   not _has_floor(field, level, mx, my)):
                 continue
             facts['fixtures'].append({'kind': kind, 'floor': lp.index, 'x': mx, 'y': my,
-                                      'z': level.z, 'facing': (0.0, -1.0),
+                                      'z': level.z, 'facing': facing[0] if facing else (0.0, -1.0),
                                       'size': (x1 - x0, y1 - y0, height)})
     facts['lifts'] = _lifts(spec, field, plan)
     facts['railings'] = _railings(spec, field, plan, built)

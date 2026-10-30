@@ -391,3 +391,15 @@ def circle(cx, cy, radius, segments=8, phase=0.0):
 
 def cylinder(mesh, cx, cy, radius, z0, z1, material, segments=8):
     prism(mesh, circle(cx, cy, radius, segments), z0, z1, material)
+
+
+def ring(mesh, cx, cy, inner, outer, z0, z1, material, segments=8):
+    """Annulus between two radii, one closed segment per side of the circle;
+    its faces line up with a ``cylinder`` of the same segment count."""
+    if z1 - z0 < 1e-5 or outer - inner < 1e-5:
+        return
+    a, b = circle(cx, cy, inner, segments), circle(cx, cy, outer, segments)
+    for k in range(segments):
+        n = (k + 1) % segments
+        bottom = [a[k], b[k], b[n], a[n]]
+        hexahedron(mesh, [(x, y, z0) for x, y in bottom] + [(x, y, z1) for x, y in bottom], material)

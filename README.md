@@ -29,10 +29,11 @@ sized for the game's 2 m player capsule.
   and connected driving circuits, footways and curbs, a dense downtown of
   party-walled towers and superblocks, and highways that run out into the
   wasteland.
-- **Points of interest.** Twelve kinds of site, each with two to four layouts:
-  gas stations, fast food, schools, hospitals, police and fire stations,
-  transit stations, parks, parking lots and garages, strip malls and
-  shopping plazas. Transit stops stand along the footways.
+- **Points of interest.** Fourteen kinds of site, each with two to four
+  layouts: gas stations, fast food, auto repair, schools, hospitals, police
+  and fire stations, transit stations, parks, parking lots and garages, strip
+  malls, shopping plazas and enclosed malls, with the other retail gathered
+  round the mall. Transit stops stand along the footways.
 - **Unity export.** A city-only FBX (metre scale, Y-up, triangulated) and a
   `.city.json` with roads, junctions, buildings and their entrances, sites,
   and markers for game assets (props, trees, fences, flagpoles, parking
@@ -136,12 +137,13 @@ The conditions are described in
 
 | Parameter | Default | Description |
 | --- | --- | --- |
-| **Site** | Gas Station | One of the twelve kinds |
+| **Site** | Gas Station | One of the fourteen kinds |
 | **Layout** | (per kind) | The kind's layouts, for example Back or Side for a gas station |
 | **Width (along street) / Depth** | 40 / 40 m | Pad size, 16-160 m; each kind has a minimum |
 | **Condition / Damage** | Intact / 0.35 | As for buildings; props fixed to a building go with it |
 | **Front Approach** | 2 m | Paved apron between the pad and the street |
 | **Small Props** | On | Model benches, pumps, lamps, bollards and similar props. Off: they are only recorded as markers |
+| **Water** | Off | Model water in fountains and other basins. Off: they are dry, and each water surface is recorded as a marker |
 | **Output** | Detailed Shells | Or Layout Preview |
 | **Seed** | 42 | Varies the layout |
 

@@ -139,7 +139,7 @@ class CityMetadata:
     """Collects metadata while a city is generated; ``as_dict`` builds the JSON."""
 
     def __init__(self, plan, origin=(0.0, 0.0, 0.0), space='UNITY', props_modelled=True,
-                 addon_version='', collection='', interiors=True):
+                 addon_version='', collection='', interiors=True, water=False):
         self.plan = plan
         self.origin = tuple(origin)
         self.space = Space(space)
@@ -147,6 +147,7 @@ class CityMetadata:
         self.addon_version = addon_version
         self.collection = collection
         self.interiors = interiors      # Rooms, lifts and railings (fixtures are always listed).
+        self.water = water              # Water surfaces modelled (always listed as markers).
         self.curb = plan.settings.curb_height
         self.buildings = []
         self.sites = []
@@ -274,10 +275,11 @@ class CityMetadata:
 
     def _marker(self, marker, transform, site_id):
         kind = marker['type']
-        # Small props have a mesh only when the city was made with them;
-        # trees, fences, flagpoles and parked cars never do.
+        # Small props and water have a mesh only when the city was made with
+        # them; trees, fences, flagpoles and parked cars never do.
         entry = {'type': kind, 'site': site_id,
-                 'modelled': kind in SMALL_PROPS and self.props_modelled}
+                 'modelled': (kind in SMALL_PROPS and self.props_modelled or
+                              kind == 'water' and self.water)}
         if kind == 'fence':
             entry['points'] = _flat(self.space.point(apply(transform, x, y, marker['z']))
                                     for x, y in marker['points'])
@@ -331,7 +333,7 @@ class CityMetadata:
                      'wasteland': settings.wasteland, 'curb_height': settings.curb_height,
                      'sidewalk_width': settings.sidewalk_width,
                      'small_props_modelled': self.props_modelled,
-                     'interiors_listed': self.interiors},
+                     'interiors_listed': self.interiors, 'water_modelled': self.water},
             'districts': [{'id': loc.id, 'role': loc.role, 'style': loc.style,
                            'position': node_point(loc.node)} for loc in plan.locations],
             'roads': roads,

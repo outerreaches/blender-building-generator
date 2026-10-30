@@ -1,5 +1,35 @@
 # Changelog
 
+## v0.15.0: Auto repair, enclosed malls, water switch
+
+- **Auto repair.** A new site: a workshop with roll-up bay doors and a
+  reception counter beside it, a concrete apron, customer stalls, tyre stacks
+  and an air pump. *Bays* puts the bay doors on the street; *Yard* turns them
+  to a side forecourt with a fenced yard of cars at the back. Placed mostly
+  in industrial districts.
+- **Enclosed mall.** A new site on a 2 x 2 superblock: one long building with
+  an anchor store at each end (*Dumbbell*: two equal anchors, *Junior*: a big
+  and a junior one), a concourse lined with shop units, an entrance hall and
+  a food court, all open to each other, with restrooms, stock rooms and
+  loading doors. Parking wraps the front, with cart corrals and a tall pylon.
+  One per city from radius 6, two from radius 12.
+- **Retail gathers round the mall.** The shopping plaza, strip malls and fast
+  food are drawn toward it, so the suburban edge reads as one retail district.
+- **Water switch** on Generate City and Generate Site, off by default: the
+  park fountain's basin is dry, and its water is listed as a `water` marker
+  (surface height, size, depth) for the game to fill. On: the water is
+  modelled.
+- **Fixed: rooms with their own street door had no way into the building.**
+  Back rooms of shops, stock rooms and some kitchens could only be entered
+  from outside. Such a room now keeps its door into the building; a
+  single-room shop unit stays on its own. In a sweep of district buildings
+  and site layouts, 109 rooms had no way into the rest of their building;
+  none do now.
+- **Fixed: overlapping doors.** Designed doors could snap to overlapping bays
+  (the hospital's ambulance doors on a small pad); doors now never share a
+  bay. Tests check that no facade has overlapping openings.
+- New small prop: `tyre_stack`.
+
 ## v0.14.0: Interiors for the game
 
 - **Furniture, railings and lifts are game assets.** None of them is

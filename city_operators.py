@@ -260,14 +260,14 @@ def _object_facts(obj):
             obj.get('enterable_floors'))
 
 
-def build_sites(plan, root, origin, detail, props=True, meta=None):
+def build_sites(plan, root, origin, detail, props=True, meta=None, water=False):
     """Points of interest (one object tree per site) and transit stops."""
     collection = bpy.data.collections.new('Sites')
     root.children.link(collection)
     h = plan.settings.curb_height
     for poi in plan.pois:
         site = compose_site(poi.kind, poi.width, poi.depth, poi.seed, None, poi.condition,
-                            poi.damage, poi.approach, props)
+                            poi.damage, poi.approach, props, water)
         interiors = {}
         if detail == 'SHELLS':
             obj = create_site(poi.id, site, collection, interiors)
@@ -350,6 +350,9 @@ class MESH_OT_generate_city(bpy.types.Operator):
                               description='Model benches, gas pumps, lamps, bollards, bins, dumpsters, tables, '
                                           'play equipment, goals, booths, hydrants and cart corrals. Off: the game '
                                           'places them from the city metadata')
+    water: BoolProperty(name='Water', default=False,
+                        description='Model water in fountains and other basins. Off: they are '
+                                    'dry and the game fills them from the water markers')
     metadata_space: EnumProperty(name='Metadata Space',
                                  items=[('UNITY', 'Unity', 'Unity world space as the exported FBX imports'),
                                         ('BLENDER', 'Blender', 'Blender world space, Z up')],
@@ -376,7 +379,7 @@ class MESH_OT_generate_city(bpy.types.Operator):
             ('City Growth', ('seed', 'radius', 'block_size', 'primary_count', 'secondary_count', 'driving_loop_count')),
             ('Density and Access', ('curve_radius', 'core_radius', 'core_density', 'outskirts_density', 'road_density', 'setback', 'sidewalk_width', 'curb_height', 'wasteland', 'highway_reach')),
             ('Buildings', ('style', 'damage', 'max_buildings', 'downtown_superblocks',
-                           'points_of_interest', 'small_props', 'detail')),
+                           'points_of_interest', 'small_props', 'water', 'detail')),
             ('Game Data', ('metadata_space', 'interior_metadata')),
         ):
             group = layout.box()
@@ -434,7 +437,7 @@ class MESH_OT_generate_city(bpy.types.Operator):
             ground.location = origin
             context.window_manager.progress_begin(0, max(1, len(plan.lots)))
             meta = CityMetadata(plan, tuple(origin), self.metadata_space, self.small_props,
-                                addon_version(), root.name, self.interior_metadata)
+                                addon_version(), root.name, self.interior_metadata, self.water)
             for index, lot in enumerate(plan.lots):
                 col = districts[lot.district]
                 params = building_recipe(lot.style, lot.width, lot.depth, lot.floors,
@@ -473,9 +476,10 @@ class MESH_OT_generate_city(bpy.types.Operator):
                 meta.add_lot(lot, obj.name, entrances, height, floors, facts.get('interior'))
                 context.window_manager.progress_update(index + 1)
             if plan.pois or plan.shelters:
-                build_sites(plan, root, origin, self.detail, self.small_props, meta)
+                build_sites(plan, root, origin, self.detail, self.small_props, meta, self.water)
             store_city_metadata(root, meta.as_dict())
             root['small_props'] = self.small_props
+            root['water'] = self.water
             root['interior_metadata'] = self.interior_metadata
             plan_text = bpy.data.texts.new(f'{root.name}_plan.json')
             plan_text.write(plan.to_json())
@@ -584,6 +588,9 @@ class MESH_OT_generate_site(bpy.types.Operator):
     small_props: BoolProperty(name='Small Props', default=True,
                               description='Model benches, pumps, lamps and other small props '
                                           '(off: only their markers, in the site metadata)')
+    water: BoolProperty(name='Water', default=False,
+                        description='Model water in fountains and other basins. Off: they are '
+                                    'dry and the game fills them from the water markers')
     detail: EnumProperty(name='Output', items=[('SHELLS', 'Detailed Shells', ''),
                                                ('PREVIEW', 'Layout Preview', '')])
 
@@ -603,7 +610,7 @@ class MESH_OT_generate_site(bpy.types.Operator):
                 variant = None
             site = compose_site(self.kind, self.width, self.depth, self.seed, variant,
                                 self.condition, self.damage if self.condition != 'INTACT' else 0.0,
-                                self.approach, self.small_props)
+                                self.approach, self.small_props, self.water)
             builder = create_site if self.detail == 'SHELLS' else create_site_preview
             obj = builder(f'{self.kind.title()}_{self.seed}', site, collection)
             obj.location = context.scene.cursor.location

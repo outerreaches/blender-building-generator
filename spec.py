@@ -470,14 +470,18 @@ class BuildingSpec:
         if level.index == 0 and self.door_overrides is not None:
             height = float(p.get('door_height', 2.4))
             axis = 0 if facade.side in ('front', 'back') else 1
+            taken = set()       # Bays already holding a door: doors never overlap.
             for item in self.door_overrides:
                 side, centre, width = item[:3]
                 if side != facade.side:
                     continue
                 offset = facade.point(0)[axis]
                 u = abs(centre - offset)
-                result.append(self._door_bays(facade, u / facade.length, width,
-                                              item[3] if len(item) > 3 else height, 'door'))
+                door = self._door_bays(facade, u / facade.length, width,
+                                       item[3] if len(item) > 3 else height, 'door', taken)
+                if door is not None:
+                    taken.update(range(door[0], door[1] + 1))
+                result.append(door)
         elif level.index == 0:
             width = float(p.get('door_width', 1.2))
             height = float(p.get('door_height', 2.4))
@@ -500,7 +504,9 @@ class BuildingSpec:
                 result.append(self._door_bays(facade, .5, width, dims.DOOR_HEIGHT + .1, 'door'))
         return [door for door in result if door is not None]
 
-    def _door_bays(self, facade, offset, width, height, kind):
+    def _door_bays(self, facade, offset, width, height, kind, taken=()):
+        """Bays (first, last) for a door near ``offset`` (0-1 along the facade),
+        avoiding ``taken`` bays; None when no free span is wide enough."""
         bays = facade.bays
         count = len(bays) - 1
         if count < 1:
@@ -512,12 +518,16 @@ class BuildingSpec:
             for first in range(0, count - span + 1):
                 if bays[first + span] - bays[first] + 1e-6 < needed:
                     continue
+                if any(bay in taken for bay in range(first, first + span)):
+                    continue
                 centre = (bays[first] + bays[first + span]) / 2
                 score = abs(centre - target)
                 if best is None or score < best[0] - 1e-6:
                     best = (score, first, first + span - 1)
             if best is not None:
                 break
+        if best is None and taken:
+            return None             # No free span left on this facade.
         if best is None:
             first, last = 0, count - 1
             width = min(width, bays[-1] - bays[0] - dims.MIN_PIER)

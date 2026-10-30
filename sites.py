@@ -37,7 +37,7 @@ LAYER = {'paint': .010, 'paint_cross': .012, 'paint_mark': .014, 'paint_mark2': 
 PAD_THICKNESS = .35
 KINDS = ('GAS_STATION', 'FAST_FOOD', 'SCHOOL', 'HOSPITAL', 'POLICE', 'FIRE_STATION',
          'TRANSIT_STATION', 'PARK', 'PARKING_LOT', 'PARKING_GARAGE', 'STRIP_MALL',
-         'SHOPPING_PLAZA')
+         'SHOPPING_PLAZA', 'AUTO_REPAIR', 'MALL')
 VARIANTS = {
     'GAS_STATION': ('BACK', 'SIDE'),
     'FAST_FOOD': ('MANSARD', 'BOX', 'DINER'),
@@ -51,18 +51,22 @@ VARIANTS = {
     'PARKING_GARAGE': ('DECKS', 'TALL'),
     'STRIP_MALL': ('ROW', 'L'),
     'SHOPPING_PLAZA': ('PAIR', 'ANCHOR'),
+    'AUTO_REPAIR': ('BAYS', 'YARD'),
+    'MALL': ('DUMBBELL', 'JUNIOR'),
 }
 # Smallest pad (width, depth) each kind is laid out for.
 MIN_PAD = {'GAS_STATION': (24, 22), 'FAST_FOOD': (26, 24), 'SCHOOL': (40, 32),
            'HOSPITAL': (44, 32), 'POLICE': (28, 26), 'FIRE_STATION': (28, 26),
            'TRANSIT_STATION': (28, 24), 'PARK': (16, 16), 'PARKING_LOT': (20, 20),
-           'PARKING_GARAGE': (30, 26), 'STRIP_MALL': (30, 26), 'SHOPPING_PLAZA': (80, 70)}
+           'PARKING_GARAGE': (30, 26), 'STRIP_MALL': (30, 26), 'SHOPPING_PLAZA': (80, 70),
+           'AUTO_REPAIR': (30, 28), 'MALL': (90, 80)}
 WALL_COLORS = {'GAS_STATION': (.86, .86, .83, 1), 'FAST_FOOD': (.74, .30, .20, 1),
                'SCHOOL': (.60, .35, .26, 1), 'HOSPITAL': (.85, .86, .87, 1),
                'POLICE': (.44, .47, .54, 1), 'FIRE_STATION': (.64, .23, .19, 1),
                'TRANSIT_STATION': (.68, .70, .68, 1), 'PARKING_GARAGE': (.58, .58, .56, 1),
                'STRIP_MALL': (.80, .74, .64, 1), 'SHOPPING_PLAZA': (.72, .73, .75, 1),
-               'PARK': (.66, .64, .60, 1), 'PARKING_LOT': (.62, .62, .60, 1)}
+               'PARK': (.66, .64, .60, 1), 'PARKING_LOT': (.62, .62, .60, 1),
+               'AUTO_REPAIR': (.70, .67, .58, 1), 'MALL': (.78, .75, .70, 1)}
 
 
 @dataclass
@@ -120,7 +124,7 @@ def designed(width, depth, floors, floor_height, seed, profile='NONE', **extra):
 # they are only recorded as markers.
 SMALL_PROPS = ('bench', 'lamp', 'bollard', 'gas_pump', 'dumpster', 'table', 'booth',
                'play_structure', 'swings', 'goal', 'trash_bin', 'air_pump', 'hydrant',
-               'cart_corral')
+               'cart_corral', 'tyre_stack')
 
 
 def _turn(quarter, fx, fy):
@@ -131,11 +135,13 @@ def _turn(quarter, fx, fy):
 
 class Ground:
     """Closed-solid site props in site coordinates, plus markers: where the game
-    places its own assets (small props, trees, fences, flagpoles, parked cars)."""
+    places its own assets (small props, trees, fences, flagpoles, parked cars,
+    water). With ``water`` off, basins are modelled dry."""
 
-    def __init__(self, props=True):
+    def __init__(self, props=True, water=False):
         self.mesh = MeshData()
         self.props = props
+        self.water = water
         self.markers = []
 
     def mark(self, kind, x, y, z=0.0, facing=(0.0, -1.0), **extra):
@@ -178,6 +184,24 @@ class Ground:
     def cylinder(self, cx, cy, radius, z0, z1, material, segments=8):
         solids.cylinder(self.mesh, cx, cy, radius, z0, z1, material, segments)
 
+    def fountain_basin(self, cx, cy, radius, base, column=0.0, rim=.65, bed=.3, level=.62,
+                       segments=14):
+        """Round basin: a rim wall ``rim`` high around a bed at ``bed``, filled
+        to ``level`` when water is on (dry otherwise), with an optional central
+        column of radius ``column`` standing on the bed. The water is always a
+        marker: surface height, size (diameter twice, depth)."""
+        wall = .3
+        self.mark('water', cx, cy, level, shape='circle',
+                  size=(2 * (radius - wall), 2 * (radius - wall), level - bed))
+        solids.ring(self.mesh, cx, cy, radius - wall, radius, base, rim, S_CONCRETE, segments)
+        solids.cylinder(self.mesh, cx, cy, radius - wall, base, bed, S_CONCRETE, segments)
+        if self.water:
+            if column > 0:
+                solids.ring(self.mesh, cx, cy, column, radius - wall, bed, level, S_WATER, segments)
+            else:
+                solids.cylinder(self.mesh, cx, cy, radius - wall, bed, level, S_WATER, segments)
+        return bed
+
     # -- props -----------------------------------------------------------
     def bench(self, x, y, quarter=0, base=0.0):
         if not self.mark('bench', x, y, base, _turn(quarter, 0.0, -1.0), size=(1.6, .5, .95)):
@@ -204,6 +228,11 @@ class Ground:
         if not self.mark('trash_bin', x, y, base, size=(.6, .6, .9)):
             return
         self.cylinder(x, y, .3, base, base + .9, S_METAL)
+
+    def tyre_stack(self, x, y, base=0.0):
+        if not self.mark('tyre_stack', x, y, base, size=(.7, .7, .9)):
+            return
+        self.cylinder(x, y, .35, base, base + .9, S_RUBBER, 10)
 
     def air_pump(self, x, y, quarter=0):
         if not self.mark('air_pump', x, y, 0.0, _turn(quarter, 0.0, -1.0), size=(.5, .5, 1.4)):
@@ -400,7 +429,8 @@ class Ground:
 class Composer:
     """Shared state while one site is laid out."""
 
-    def __init__(self, kind, width, depth, seed, variant, condition, damage, approach, props=True):
+    def __init__(self, kind, width, depth, seed, variant, condition, damage, approach, props=True,
+                 water=False):
         self.kind = kind
         self.W, self.D = width, depth
         self.seed = seed
@@ -409,7 +439,7 @@ class Composer:
         self.condition = condition
         self.damage = damage
         self.approach = approach
-        self.g = Ground(props)
+        self.g = Ground(props, water)
         self.buildings = []
         self.notes = []
         self.pad_material = S_ASPHALT
@@ -510,13 +540,15 @@ class Composer:
 
 
 def compose(kind, width, depth, seed=0, variant=None, condition='INTACT', damage=0.0,
-            approach=0.0, props=True):
+            approach=0.0, props=True, water=False):
     """Lay out one site; see the module docstring for coordinates. With
     ``props`` off, small props (``SMALL_PROPS``) are left to the game: they
-    appear only in ``Site.markers``."""
+    appear only in ``Site.markers``. With ``water`` off, fountains and other
+    basins are dry; their water is always a ``water`` marker."""
     if kind not in KINDS:
         raise ValueError(f'Unknown site kind: {kind}')
-    composer = Composer(kind, width, depth, seed, variant, condition, damage, approach, props)
+    composer = Composer(kind, width, depth, seed, variant, condition, damage, approach, props,
+                        water)
     if composer.variant not in VARIANTS[kind]:
         raise ValueError(f'Unknown {kind} variant: {composer.variant}')
     min_w, min_d = MIN_PAD[kind]
@@ -1528,9 +1560,8 @@ def _park(c):
         end = (cx - ux * .1, cy - uy * .1)
         g.strip(start, end, 2.4, S_CONCRETE, 'path')
         paths.append((start, end))
-    g.cylinder(0, 0, 2.4, LAYER['plaza'], .65, S_CONCRETE, 14)
-    g.cylinder(0, 0, 2.1, .65, .68, S_WATER, 14)
-    g.cylinder(0, 0, .3, .68, 1.9, S_CONCRETE, 8)
+    bed = g.fountain_basin(0, 0, 2.4, LAYER['plaza'], column=.3)
+    g.cylinder(0, 0, .3, bed, 1.9, S_CONCRETE, 14)
     solids.frustum(g.mesh, solids.circle(0, 0, .35, 8), solids.circle(0, 0, .9, 8), 1.9, 2.3,
                    S_CONCRETE)
     for k in range(4):
@@ -1765,26 +1796,35 @@ def _bigbox_portal(c, building):
     spec = c.spec(building)
     bw = building.params['width']
     front = building.y - building.params['depth'] / 2
-    left = building.x - bw / 2
     door = _main_door(c, building)
     if door is not None:
-        u, width = door
-        half = width / 2 + .9
-        spans = spec.solid_spans('front')
-        solid = all(any(a <= post - .35 and post + .35 <= b for a, b in spans)
-                    for post in (u - half, u + half))
-        embed = .05 if solid else -.1
-        low, high = _band(c, building, 'front', u - half - .3, u + half + .3)
-        top = min(high - .1, max(low + 1.6, 5.6))
-        for post in (u - half, u + half):
-            g.box(left + post - .3, front - 3.0, 0.0, left + post + .3, front + embed, top, S_METAL)
-        if top + 1.0 <= high - .05 or not solid:
-            g.box(left + u - half - .3, front - 3.0, top, left + u + half + .3, front + embed, top + 1.0,
-                  S_SIGN)
+        _portal(c, building, *door)
     sign_z = spec.top + .2
     if spec.parapet > 1.0:
         g.box(building.x - bw * .3, front - .3, sign_z, building.x + bw * .3, front + .04,
               spec.top + spec.parapet - .2, S_SIGN)
+
+
+def _portal(c, building, u, width):
+    """Entrance portal round a front door at ``u``: two posts out of the wall
+    and a sign lintel on them where the band above the door allows."""
+    g = c.g
+    spec = c.spec(building)
+    bw = building.params['width']
+    front = building.y - building.params['depth'] / 2
+    left = building.x - bw / 2
+    half = width / 2 + .9
+    spans = spec.solid_spans('front')
+    solid = all(any(a <= post - .35 and post + .35 <= b for a, b in spans)
+                for post in (u - half, u + half))
+    embed = .05 if solid else -.1
+    low, high = _band(c, building, 'front', u - half - .3, u + half + .3)
+    top = min(high - .1, max(low + 1.6, 5.6))
+    for post in (u - half, u + half):
+        g.box(left + post - .3, front - 3.0, 0.0, left + post + .3, front + embed, top, S_METAL)
+    if top + 1.0 <= high - .05 or not solid:
+        g.box(left + u - half - .3, front - 3.0, top, left + u + half + .3, front + embed, top + 1.0,
+              S_SIGN)
 
 
 def _bigbox_params(width, depth, seed):
@@ -1794,6 +1834,144 @@ def _bigbox_params(width, depth, seed):
                     window_width=4.0, window_spacing=1.0, parapet_height=1.6,
                     doors=[('front', width / 2, 3.2, 3.0), ('back', width * .25, 3.6, 4.2),
                            ('back', width * .75, 3.6, 4.2)])
+
+
+AUTO_BAY = 4.6          # Workshop bay pitch.
+
+
+def _auto_repair(c):
+    """Workshop with roll-up bay doors and a reception counter beside it, a
+    concrete apron in front of the bays, customer stalls, tyres and an air
+    pump. BAYS: the bays face the street. YARD: they face a side forecourt,
+    with a fenced yard of cars waiting for parts at the back."""
+    g, rng = c.g, c.rng
+    x0, y0, x1, y1 = c.rect
+    c.ground(S_ASPHALT)
+    _lawn_edges(c, ('left', 'right'), front_gap=c.D * .6)
+    ow, od = 7.0, 7.0
+    reception = designed(ow, od, 1, 3.6, c.seed, 'SHOP', window_sides=('front', 'right'),
+                         ground_floor_windows='STOREFRONT', storefront_window_width=2.2,
+                         doors=[('front', ow / 2, 1.6)])
+
+    def workshop(bays, hw, hd, windows):
+        centres = [.5 + AUTO_BAY * (k + .5) for k in range(bays)]
+        # Window width plus spacing is the bay pitch, so each door fills one bay.
+        return designed(hw, hd, 1, 5.6, c.seed, 'BAY', wall_thickness=.3, window_sides=windows,
+                        sill_height=3.0, window_height=1.2, window_width=AUTO_BAY - 1.2,
+                        window_spacing=1.2, parapet_height=.9,
+                        doors=[('front', u, 3.8, 4.2) for u in centres] +
+                              [('back', hw / 2, 1.2)])
+    if c.variant == 'YARD' and c.D - 2 * STRIP - 10 >= 3 * AUTO_BAY + 1 and c.W >= 34:
+        bays = 3
+        while bays < 4 and (bays + 1) * AUTO_BAY + 1 <= c.D - 2 * STRIP - 12:
+            bays += 1
+        hw, hd = bays * AUTO_BAY + 1.0, 14.0
+        hx, hy = x0 + STRIP + 1 + hd / 2, y0 + 10.0 + hw / 2
+        hall = c.building('workshop', workshop(bays, hw, hd, ('back',)), hx, hy, quarter=1,
+                          role='workshop')
+        c.building('reception', reception, x0 + STRIP + 1 + ow / 2, y0 + 2.5 + od / 2,
+                   role='reception')
+        face = hx + hd / 2
+        apron_x1 = min(x1 - STRIP - 1, face + 10.0)
+        g.layer((face, hy - hw / 2, apron_x1, hy + hw / 2), S_CONCRETE, 'apron')
+        with c.attached(hall):
+            g.box(face - .04, hy - hw / 2 + .8, 4.5, face + .3, hy + hw / 2 - .8, 5.3, S_SIGN)
+        # Fenced yard behind the forecourt, open toward it through a gate.
+        gx0, gx1 = apron_x1 + 2.0, x1 - STRIP - 1.0
+        gy0, gy1 = y0 + c.D * .45, y1 - STRIP - 1.0
+        if gx1 - gx0 > 8 and gy1 - gy0 > 8:
+            g.fence_bases([(gx0, gy0 + 4.5), (gx0, gy1), (gx1, gy1), (gx1, gy0), (gx0, gy0)])
+            g.stalls(gx0 + 1, gx1 - 1, gy1 - .5, 5.0, -1)
+            if gy1 - gy0 > 16:
+                g.stalls(gx0 + 1, gx1 - 1, gy0 + .5, 5.0, 1)
+        g.stalls(x0 + STRIP + ow + 3, x1 - STRIP - 1, y0 + 1.5, 5.0, 1)
+        g.air_pump(face + 1.0, hy - hw / 2 - 1.0)
+        for k in range(3):
+            g.tyre_stack(x0 + STRIP + .8 + k * .8, hy + hw / 2 + 1.5)
+        g.dumpster(x0 + STRIP + 2.0, y1 - STRIP - 1.2)
+        g.sign(x1 - 3.0, y0 + 1.5, 2.6, 2.2, 6.0)
+        return
+    c.variant = 'BAYS'
+    bays = 4
+    while bays > 2 and bays * AUTO_BAY + 1.0 + ow + 2 * STRIP + 4 > c.W:
+        bays -= 1
+    hw = bays * AUTO_BAY + 1.0
+    hd = max(10.0, min(16.0, c.D - 2 * STRIP - 9.0 - 6.0))
+    hx, hy = x0 + STRIP + 2 + hw / 2, y0 + 9.0 + hd / 2
+    hall = c.building('workshop', workshop(bays, hw, hd, ('left',)), hx, hy, role='workshop')
+    # Reception abuts the workshop's right side (no windows on the shared wall).
+    rx, ry = hx + hw / 2 + ow / 2, y0 + 9.0 + od / 2
+    c.building('reception', reception, rx, ry, role='reception')
+    front = hy - hd / 2
+    g.layer((hx - hw / 2, y0 - c.approach, hx + hw / 2, front), S_CONCRETE, 'apron')
+    for k in range(bays + 1):
+        u = .5 + AUTO_BAY * k - .25
+        g.strip((hx - hw / 2 + u, y0 + .5), (hx - hw / 2 + u, front - .3), .12, S_YELLOW,
+                LAYER['apron'] + .01, z0=LAYER['apron'])
+    with c.attached(hall):
+        g.box(hx - hw / 2 + .8, front - .3, 4.5, hx + hw / 2 - .8, front + .04, 5.3, S_SIGN)
+    if x1 - STRIP - 1 - (rx + ow / 2 + 1) >= 2.6:
+        g.stalls(rx + ow / 2 + 1, x1 - STRIP - 1, y0 + 1.5, 5.0, 1)
+    back = hy + hd / 2 + 1.0
+    if y1 - STRIP - back > 6:
+        g.stalls(x0 + STRIP + 1, x1 - STRIP - 1, y1 - STRIP, 5.0, -1)
+    g.air_pump(hx + hw / 2 + .8, y0 + 3.0)
+    for k in range(3):
+        g.tyre_stack(rx + ow / 2 - .6 - k * .8, ry + od / 2 + 1.2)
+    g.dumpster(hx, min(y1 - STRIP - 1.2, back + 1.0))
+    g.sign(x0 + 2.5, y0 + 1.5, 2.6, 2.2, 6.0)
+
+
+def _mall(c):
+    """Enclosed mall: anchors at the ends, a concourse of shops between them,
+    parking in front (and along the sides on wide pads), loading and a
+    service road behind. DUMBBELL: two equal anchors; JUNIOR: a big anchor
+    and a junior one."""
+    g = c.g
+    x0, y0, x1, y1 = c.rect
+    c.ground(S_ASPHALT)
+    _lawn_edges(c, ('left', 'right'), front_gap=c.D * .5)
+    side = 18.0 if c.W - 2 * STRIP - 2 * 18.0 >= 84 else 0.0
+    bw = min(130.0, c.W - 2 * STRIP - 2 * side - 4)
+    service = 9.0
+    bd = max(30.0, min(40.0, c.D - 2 * STRIP - service - 30.0))
+    back = y1 - STRIP - service
+    bx, by = (x0 + x1) / 2, back - bd / 2
+    if c.variant == 'DUMBBELL':
+        anchors = (min(30.0, bw * .24),) * 2
+    else:
+        anchors = (min(36.0, bw * .3), min(22.0, bw * .18))
+    left, right = anchors
+    entrance = bw / 2
+    mall = c.building('mall', designed(
+        bw, bd, 1, 7.0, c.seed, 'MALL', wall_thickness=.35, window_sides='NONE',
+        ground_floor_windows='NONE', parapet_height=2.0, anchors=anchors,
+        doors=[('front', entrance, 6.0, 3.6), ('front', left / 2, 3.6, 3.2),
+               ('front', bw - right / 2, 3.6, 3.2), ('back', left / 2, 3.6, 4.2),
+               ('back', bw - right / 2, 3.6, 4.2), ('back', entrance, 1.4)]),
+        bx, by, role='mall')
+    spec = c.spec(mall)
+    front = by - bd / 2
+    with c.attached(mall):
+        for door in spec.door_bays('front'):
+            _portal(c, mall, spec.door_centre('front', door), door[2])
+        # Name bands on the parapet over the anchors and the entrance.
+        for centre, half in ((left / 2, left * .3), (bw - right / 2, right * .3), (entrance, 7.0)):
+            g.box(bx - bw / 2 + centre - half, front - .3, spec.top + .2,
+                  bx - bw / 2 + centre + half, front + .04, spec.top + spec.parapet - .2, S_SIGN)
+    _entrance_canopy(c, mall, width=12.0, depth=4.0)
+    g.layer((bx - bw / 2, front - 4.0, bx + bw / 2, front), S_CONCRETE, 'walk')
+    front_line = front - 10.0
+    _parking_field(c, (x0 + STRIP, y0 + 3.0, x1 - STRIP, front_line), trees=True)
+    for x in _spaced(x0 + STRIP + 14, x1 - STRIP - 12, 24.0):
+        g.cart_corral(x, front_line - 1.15)
+    if side:
+        for sx0 in (x0 + STRIP, x1 - STRIP - side):
+            _parking_field(c, (sx0, front_line + 1.0, sx0 + side, back - 1.0), trees=False)
+    g.layer((bx - bw / 2, back, bx + bw / 2, y1 - STRIP), S_CONCRETE, 'apron')
+    for centre in (left / 2, bw - right / 2):
+        g.dumpster(bx - bw / 2 + centre + 4.5, back + 2.0)
+    g.sign(x1 - 5.0, y0 + 1.8, 5.0, 7.0, 14.0)
 
 
 LAYOUTS = {
@@ -1809,6 +1987,8 @@ LAYOUTS = {
     'PARKING_GARAGE': _parking_garage,
     'STRIP_MALL': _strip_mall,
     'SHOPPING_PLAZA': _shopping_plaza,
+    'AUTO_REPAIR': _auto_repair,
+    'MALL': _mall,
 }
 
 

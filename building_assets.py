@@ -6,7 +6,7 @@ import random
 
 import bpy
 
-from . import metadata, rubble, sites
+from . import interior, metadata, rubble, sites
 from .mesh_builder import (BuildingShellBuilder, generate_uvs, mark_seams_for_uvs,
                            merge_coplanar, to_bmesh)
 from .meshdata import MAT_RUBBLE, MeshData
@@ -59,8 +59,12 @@ def add_material_slots(obj):
         obj.data.materials.append(material(name, color))
 
 
-def create_shell(name, params, collection):
-    """Building object centred on its footprint, linked into ``collection``."""
+def create_shell(name, params, collection, facts=None):
+    """Building object centred on its footprint, linked into ``collection``.
+
+    ``facts``, a dict, receives the building's interior facts (rooms, lifts,
+    railings, fixtures; see interior.py) under 'interior'.
+    """
     builder = BuildingShellBuilder(dict(params), center=True)
     mesh = None
     try:
@@ -71,6 +75,8 @@ def create_shell(name, params, collection):
         collection.objects.link(obj)
         add_material_slots(obj)
         _annotate(obj, builder.building)
+        if facts is not None:
+            facts['interior'] = interior.interior_facts(builder.building)
         return obj
     except Exception:
         if mesh is not None and mesh.users == 0:
@@ -151,11 +157,12 @@ def add_site_material_slots(obj):
         obj.data.materials.append(material(name, color))
 
 
-def create_site(name, site, collection):
+def create_site(name, site, collection, facts=None):
     """Site grounds object with its buildings parented to it.
 
     The grounds origin is the pad centre at pad level; the front (street)
-    faces -Y, like a building's.
+    faces -Y, like a building's. ``facts``, a dict, receives each building's
+    interior facts under its object name.
     """
     grounds = mesh_object_from_data(f'{name}_Grounds', site.ground, collection)
     add_site_material_slots(grounds)
@@ -167,7 +174,10 @@ def create_site(name, site, collection):
     walls = material(f'Site_{site.kind.title()}_Walls', sites.WALL_COLORS[site.kind])
     names = []
     for building in site.buildings:
-        obj = create_shell(f'{name}_{building.name}', building.params, collection)
+        made = {} if facts is not None else None
+        obj = create_shell(f'{name}_{building.name}', building.params, collection, made)
+        if made is not None:
+            facts[obj.name] = made.get('interior')
         obj.parent = grounds
         obj.location = (building.x, building.y, 0.0)
         obj.rotation_euler.z = building.quarter * math.pi / 2

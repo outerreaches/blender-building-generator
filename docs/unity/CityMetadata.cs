@@ -1,4 +1,4 @@
-// Ares city metadata ("ares.city.metadata", schema 1): data classes for
+// Ares city metadata ("ares.city.metadata", schema 2): data classes for
 // UnityEngine.JsonUtility. Copy into the Unity project, then:
 //
 //     var city = JsonUtility.FromJson<Ares.CityGen.CityMetadata>(File.ReadAllText(path));
@@ -7,6 +7,15 @@
 // FBX exported beside the JSON; "yaw" turns an asset modelled facing +Z to face
 // "forward". Point lists are flat (x, y, z, x, y, z, ...); lattice nodes are
 // flat (x, y, x, y, ...). Unknown numbers are 0 and unknown strings empty.
+//
+// Interiors (a building's rooms, lifts and railings) are in building space:
+//
+//     Vector3 World(Building b, float[] p) =>
+//         new Vector3(b.position[0], b.position[1], b.position[2]) +
+//         Quaternion.Euler(0, b.yaw, 0) * new Vector3(p[0], p[1], p[2]);
+//
+// Directions ("normal") rotate the same way. Furniture, railings, lift doors
+// and lift cars are game assets: the city mesh has none of them.
 using System;
 
 namespace Ares.CityGen
@@ -42,6 +51,7 @@ namespace Ares.CityGen
         public string up;
         public string from_blender;
         public string yaw;
+        public string interiors;
     }
 
     [Serializable]
@@ -55,6 +65,7 @@ namespace Ares.CityGen
         public float curb_height;
         public float sidewalk_width;
         public bool small_props_modelled;
+        public bool interiors_listed;   // False: rooms, lifts and railings left out.
     }
 
     [Serializable]
@@ -139,6 +150,9 @@ namespace Ares.CityGen
         public float height;
         public int enterable_floors;
         public Entrance[] entrances;
+        public Room[] rooms;
+        public Lift[] lifts;
+        public Railing[] railings;
     }
 
     [Serializable]
@@ -153,7 +167,107 @@ namespace Ares.CityGen
         public float width;
         public float depth;
         public Entrance[] entrances;
+        public Room[] rooms;
+        public Lift[] lifts;
+        public Railing[] railings;
     }
+
+    // -- interiors (building space) -------------------------------------------
+
+    [Serializable]
+    public class Room
+    {
+        public string name;       // Unique within its floor.
+        // bedroom, living, kitchen, bath, hall, corridor, lobby, office, open,
+        // shop, storage, bar, plant, stair, landing, ...
+        public string kind;
+        public int floor;
+        public string unit;       // Flat or shop unit it belongs to ("" if none).
+        public string group;      // Open-plan group: rooms of one group share a space.
+        public float[] position;  // Centre of the clear floor.
+        public float width;       // Clear size along the building's width,
+        public float depth;       // and along its depth.
+        public float height;      // Clear height to the ceiling.
+        public float standing;    // Share of the floor still there (damage), 0-1.
+        public float ceiling;     // Share still roofed by the storey above, 0-1.
+        public RoomDoor[] doors;
+        public RoomWindow[] windows;
+        public WallRun[] wall_runs;
+    }
+
+    [Serializable]
+    public class RoomDoor
+    {
+        public float[] position;  // Centre of the opening at floor level.
+        public float[] normal;    // Into the room.
+        public float width;
+        public float height;
+        public string to;         // Room on the other side, "street", or "".
+    }
+
+    [Serializable]
+    public class RoomWindow
+    {
+        public float[] position;  // Centre of the sill on the inner wall face.
+        public float[] normal;    // Out of the building.
+        public float width;
+        public float sill;        // Above the floor.
+        public float head;        // Above the floor.
+        public bool broken;       // The wall above broke off with it.
+    }
+
+    [Serializable]
+    public class WallRun
+    {
+        public float[] start;     // At floor level, on the clear wall face.
+        public float[] end;
+        public float[] normal;    // Into the room. Blank wall: no door, window or hole,
+                                  // at least 2 m of it standing.
+    }
+
+    [Serializable]
+    public class Lift
+    {
+        public string name;
+        public float[] position;  // Centre of the shaft floor (its lowest stop).
+        public float width;       // Clear shaft size.
+        public float depth;
+        public float height;      // Shaft height above its lowest stop.
+        public int[] floors;      // Floors it still serves.
+        public LiftDoor[] doors;
+        public LiftCar car;
+    }
+
+    [Serializable]
+    public class LiftDoor
+    {
+        public int floor;
+        public float[] position;  // Centre of the opening at floor level.
+        public float[] normal;    // Out of the shaft.
+        public float width;
+        public float height;
+    }
+
+    [Serializable]
+    public class LiftCar
+    {
+        public int floor;         // Where the car waits.
+        public float[] position;  // Centre of its floor.
+        public float width;
+        public float depth;
+        public float height;
+    }
+
+    [Serializable]
+    public class Railing
+    {
+        public string kind;       // stair (handrail), guard (floor edge) or ramp
+        public int floor;
+        public float[] points;    // Base line on the walking surface (flat x, y, z).
+        public float height;      // Rail height above the base line.
+    }
+
+    // -------------------------------------------------------------------------
 
     [Serializable]
     public class Site : Pose
@@ -184,9 +298,12 @@ namespace Ares.CityGen
     {
         // bench, lamp, bollard, gas_pump, dumpster, table, booth, play_structure,
         // swings, goal, trash_bin, air_pump, hydrant, cart_corral (small props),
-        // tree, flagpole, fence, parking_stall.
+        // tree, flagpole, fence, parking_stall; bar_counter, reception_desk,
+        // service_counter, shop_counter (fixtures inside buildings).
         public string type;
         public string site;
+        public string building;   // Fixtures: the building's GameObject name.
+        public int floor;         // Fixtures: the floor they stand on.
         public bool modelled;     // True when the city mesh already has this prop.
         public float[] size;      // Width, depth[, height] where it applies.
         public float height;      // Lamps, flagpoles, fences.

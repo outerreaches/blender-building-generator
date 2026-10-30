@@ -1,5 +1,36 @@
 # Changelog
 
+## v0.14.0: Interiors for the game
+
+- **Furniture, railings and lifts are game assets.** None of them is
+  modelled. The city metadata lists, for every building and site building:
+  - **Rooms to furnish:** kind (bedroom, kitchen, office, shop and so on),
+    floor, flat or shop unit, clear size and height, doors (with the room on
+    the other side), windows (sill and head), and wall runs: blank wall at
+    least 2 m high, with no door, window or hole, for furniture to stand
+    against. Damaged rooms say how much floor and ceiling is left; rooms with
+    almost no floor are left out.
+  - **Lifts:** one per shaft, with the floors it still serves, a door per
+    floor and the car at its lowest stop.
+  - **Railings:** handrails along each stair's well side, a guard rail at the
+    stair opening on the top floor a stair reaches, and rails along parking
+    ramps.
+- **Counters and desks are markers.** Shop, service and bar counters and lobby
+  reception desks are no longer modelled; they are listed with the other
+  markers, with their building and floor.
+- **Building space.** Interiors are given relative to their building, which
+  keeps the file small. In Unity a point is
+  `position + Quaternion.Euler(0, yaw, 0) * local`. The C# classes in
+  `docs/unity/CityMetadata.cs` cover the new fields (schema 2).
+- **Interior Metadata** switch on Generate City (on by default).
+- **Metadata storage.** The metadata is kept compressed on the city collection
+  instead of in a text datablock (Blender writes large text datablocks very
+  slowly), and the exported file has no indentation. With interiors, the base
+  city's `.city.json` is about 12.8 MB.
+- **Same rules as the mesh.** Interiors are worked out with the shell's own
+  damage tests, so a room, rail or lift door is listed only where the mesh
+  keeps what it stands on. New tests check every fact against the mesh.
+
 ## v0.13.1: Walkable stairs, no floating floors, windows through damage
 
 - **Fixed: blocked stairs.** Each step of a stair flight was a solid block

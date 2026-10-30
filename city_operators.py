@@ -12,6 +12,7 @@ from .sites import KINDS as SITE_KINDS, VARIANTS as SITE_VARIANTS, compose as co
 from .streets import (build_ground_mesh, build_outer_road_mesh, build_street_mesh, junctions,
                       outer_road_dashes)
 from .styles import STYLE_ITEMS, STYLE_COLORS, building_recipe
+from .city_export import store_city_metadata
 from .building_assets import (addon_version, create_rubble, create_shell, create_shelter,
                               create_site, create_site_preview, material)
 
@@ -267,8 +268,9 @@ def build_sites(plan, root, origin, detail, props=True, meta=None):
     for poi in plan.pois:
         site = compose_site(poi.kind, poi.width, poi.depth, poi.seed, None, poi.condition,
                             poi.damage, poi.approach, props)
+        interiors = {}
         if detail == 'SHELLS':
-            obj = create_site(poi.id, site, collection)
+            obj = create_site(poi.id, site, collection, interiors)
         else:
             obj = create_site_preview(poi.id, site, collection)
         obj.location = (origin.x + poi.center[0], origin.y + poi.center[1], origin.z + h)
@@ -279,7 +281,8 @@ def build_sites(plan, root, origin, detail, props=True, meta=None):
             names = list(obj.get('building_objects', []))
             made = []
             for building, name in zip(site.buildings, names):
-                made.append((building, name) + _object_facts(bpy.data.objects.get(name)))
+                made.append((building, name) + _object_facts(bpy.data.objects.get(name)) +
+                            (interiors.get(name),))
             meta.add_site(poi, site, obj.name, made)
     meshes = {}
     for shelter in plan.shelters:
@@ -351,6 +354,10 @@ class MESH_OT_generate_city(bpy.types.Operator):
                                  items=[('UNITY', 'Unity', 'Unity world space as the exported FBX imports'),
                                         ('BLENDER', 'Blender', 'Blender world space, Z up')],
                                  description='Coordinate space of the city metadata JSON')
+    interior_metadata: BoolProperty(name='Interior Metadata', default=True,
+                                    description='List every building\'s rooms (to furnish), lifts and '
+                                                'railings in the city metadata; these are game assets and are '
+                                                'not modelled. Off: a much smaller file')
     points_of_interest: BoolProperty(name='Points of Interest', default=True,
                                      description='Gas stations, schools, hospitals, parks, parking, malls '
                                                  'and transit stops on reserved blocks')
@@ -370,7 +377,7 @@ class MESH_OT_generate_city(bpy.types.Operator):
             ('Density and Access', ('curve_radius', 'core_radius', 'core_density', 'outskirts_density', 'road_density', 'setback', 'sidewalk_width', 'curb_height', 'wasteland', 'highway_reach')),
             ('Buildings', ('style', 'damage', 'max_buildings', 'downtown_superblocks',
                            'points_of_interest', 'small_props', 'detail')),
-            ('Game Data', ('metadata_space',)),
+            ('Game Data', ('metadata_space', 'interior_metadata')),
         ):
             group = layout.box()
             group.label(text=title)
@@ -387,7 +394,6 @@ class MESH_OT_generate_city(bpy.types.Operator):
         settings = CitySettings(**{key: getattr(self, key) for key in CitySettings.__dataclass_fields__})
         root = None
         plan_text = None
-        metadata_text = None
         try:
             plan = generate_city(settings)
             root = bpy.data.collections.new(f'City_{self.seed}_{self.detail}')
@@ -428,17 +434,18 @@ class MESH_OT_generate_city(bpy.types.Operator):
             ground.location = origin
             context.window_manager.progress_begin(0, max(1, len(plan.lots)))
             meta = CityMetadata(plan, tuple(origin), self.metadata_space, self.small_props,
-                                addon_version(), root.name)
+                                addon_version(), root.name, self.interior_metadata)
             for index, lot in enumerate(plan.lots):
                 col = districts[lot.district]
                 params = building_recipe(lot.style, lot.width, lot.depth, lot.floors,
                                          lot.seed, lot.damage, lot.interiors,
                                          lot.condition, lot.party_walls)
+                facts = {}
                 if self.detail == 'SHELLS':
                     if lot.condition == 'COLLAPSED':
                         obj = create_rubble(lot.id, params, col)
                     else:
-                        obj = create_shell(lot.id, params, col)
+                        obj = create_shell(lot.id, params, col, facts)
                     obj.data.materials[0] = material(f'City_{lot.style}', STYLE_COLORS[lot.style])
                 else:
                     height = (2.2 if lot.condition == 'COLLAPSED'
@@ -463,14 +470,13 @@ class MESH_OT_generate_city(bpy.types.Operator):
                 if height is None:
                     height = (2.2 if lot.condition == 'COLLAPSED'
                               else lot.floors * params['floor_height'])
-                meta.add_lot(lot, obj.name, entrances, height, floors)
+                meta.add_lot(lot, obj.name, entrances, height, floors, facts.get('interior'))
                 context.window_manager.progress_update(index + 1)
             if plan.pois or plan.shelters:
                 build_sites(plan, root, origin, self.detail, self.small_props, meta)
-            metadata_text = bpy.data.texts.new(f'{root.name}_metadata.json')
-            metadata_text.write(json.dumps(meta.as_dict(), indent=1))
-            root['metadata_text'] = metadata_text.name
+            store_city_metadata(root, meta.as_dict())
             root['small_props'] = self.small_props
+            root['interior_metadata'] = self.interior_metadata
             plan_text = bpy.data.texts.new(f'{root.name}_plan.json')
             plan_text.write(plan.to_json())
             root['plan_text'] = plan_text.name
@@ -489,8 +495,6 @@ class MESH_OT_generate_city(bpy.types.Operator):
                 remove_generated_collection(root)
             if plan_text is not None:
                 bpy.data.texts.remove(plan_text)
-            if metadata_text is not None:
-                bpy.data.texts.remove(metadata_text)
             self.report({'ERROR'}, f'City generation failed: {exc}')
             return {'CANCELLED'}
         finally:

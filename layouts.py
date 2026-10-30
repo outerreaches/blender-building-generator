@@ -66,7 +66,7 @@ class LevelPlan:
     rect: tuple
     rooms: list = field(default_factory=list)
     walls: list = field(default_factory=list)
-    fixtures: list = field(default_factory=list)   # (x0, y0, x1, y1, height)
+    fixtures: list = field(default_factory=list)   # (x0, y0, x1, y1, height, kind): game assets
     holes: list = field(default_factory=list)      # Openings in this storey's floor slab.
     stair: Stair = None                            # Flights from this storey up.
     doors: list = field(default_factory=list)      # (room, parent, axis, line, centre, width)
@@ -423,7 +423,7 @@ def plan_bar(spec, rng):
                 room.kind = 'bar'
                 x0, y0, x1, y1 = room.rect
                 if x1 - x0 > 3.5 and y1 - y0 > 4.0:
-                    level.fixtures.append((x0 + .8, y1 - 1.6, x1 - .8, y1 - 1.0, 1.1))
+                    level.fixtures.append((x0 + .8, y1 - 1.6, x1 - .8, y1 - 1.0, 1.1, 'bar_counter'))
             elif level.index == 0 and room.kind == 'storage':
                 room.kind = 'kitchen'
             elif level.index > 0 and room.kind == 'living':
@@ -673,7 +673,7 @@ def _office_ground(tiling, spec, rect, core_rect, door, fit_out):
         if door and cy0 - y0 > 6:
             mid = (door[0] + door[1]) / 2
             ry = y0 + (cy0 - y0) * .55
-            tiling.fixtures.append((mid - 2.2, ry, mid + 2.2, ry + .9, 1.1))
+            tiling.fixtures.append((mid - 2.2, ry, mid + 2.2, ry + .9, 1.1, 'reception_desk'))
         return None
     # Lobby strip from the entrance to the lifts; shops either side with
     # their own street doors.
@@ -872,7 +872,8 @@ def plan_shop(spec, rng):
             tiling.add('store', 'storage', (split[0], cut, x1, y1), 'shop')
         else:
             tiling.add('store', 'storage', (x0, cut, x1, y1), 'shop')
-        tiling.fixtures.append((x0 + (x1 - x0) * .45, cut - 1.5, x1 - .8, cut - .9, 1.05))
+        tiling.fixtures.append((x0 + (x1 - x0) * .45, cut - 1.5, x1 - .8, cut - .9, 1.05,
+                                'shop_counter'))
     return Plan([tiling.level()])
 
 
@@ -895,7 +896,7 @@ def plan_restaurant(spec, rng):
     else:
         tiling.add('kitchen', 'kitchen', (x0, cut, x1, y1), 'dining')
     left = split[0] if split else x0
-    tiling.fixtures.append((left + 1.0, cut - 1.6, x1 - 1.0, cut - 1.0, 1.05))
+    tiling.fixtures.append((left + 1.0, cut - 1.6, x1 - 1.0, cut - 1.0, 1.05, 'service_counter'))
     return Plan([tiling.level()])
 
 
@@ -916,7 +917,7 @@ def plan_strip(spec, rng):
         doors.append(('front', (a + b) / 2, 1.6))
         doors.append(('back', (a + b) / 2, 1.2))
         tiling.fixtures.append((a + 1.0, y0 + (cut or y1 - y0) * .55, b - 1.0,
-                                y0 + (cut or y1 - y0) * .55 + .6, 1.0))
+                                y0 + (cut or y1 - y0) * .55 + .6, 1.0, 'shop_counter'))
     return Plan([tiling.level()], doors)
 
 
@@ -1245,6 +1246,45 @@ def stair_landing(stair, rise):
     return min(stair.landing, max(.9, (length - first * .22) / 2))
 
 
+class StairFrame:
+    """Measurements of a switchback for one storey's rise, and the map from
+    stair coordinates to plan coordinates: ``a`` runs along the flights
+    (0 = entry end), ``b`` across them (0 = flight-one side)."""
+
+    def __init__(self, stair, rise):
+        self.stair = stair
+        zx0, zy0, zx1, zy1 = stair.zone
+        risers = max(2, math.ceil(rise / stair.riser - 1e-9))
+        self.riser = rise / risers
+        self.first = math.ceil(risers / 2)
+        self.second = risers - self.first
+        self.length = (zy1 - zy0) if stair.axis == 'y' else (zx1 - zx0)
+        self.across = (zx1 - zx0) if stair.axis == 'y' else (zy1 - zy0)
+        self.landing = stair_landing(stair, rise)
+        run = self.length - 2 * self.landing
+        self.tread_a = run / self.first
+        self.tread_b = run / max(1, self.second)
+        self.flight = stair.flight
+        self.mid = self.first * self.riser
+        self.rise = rise
+
+    def xs_ys(self, a0, a1, b0, b1):
+        """Plan extents (x0, x1), (y0, y1) of the stair rectangle a0..a1, b0..b1."""
+        zx0, zy0, zx1, zy1 = self.stair.zone
+        if self.stair.axis == 'y':
+            ys = (zy0 + a0, zy0 + a1) if self.stair.entry < 0 else (zy1 - a1, zy1 - a0)
+            xs = (zx0 + b0, zx0 + b1)
+        else:
+            xs = (zx0 + a0, zx0 + a1) if self.stair.entry < 0 else (zx1 - a1, zx1 - a0)
+            ys = (zy1 - b1, zy1 - b0)
+        return xs, ys
+
+    def point(self, a, b):
+        """Plan point (x, y) of stair coordinates (a, b)."""
+        (x, _), (y, _) = self.xs_ys(a, a, b, b)
+        return x, y
+
+
 def stair_steps(stair, rise):
     """Boxes (x0, y0, z0, x1, y1, z1) of a switchback from 0 to ``rise``.
 
@@ -1254,44 +1294,54 @@ def stair_steps(stair, rise):
     soffit ``STAIR_WAIST`` below the tread under it, and the turning landing
     is a slab, so the flights of the storey above leave headroom over these.
     """
-    zx0, zy0, zx1, zy1 = stair.zone
-    risers = max(2, math.ceil(rise / stair.riser - 1e-9))
-    riser = rise / risers
-    first = math.ceil(risers / 2)
-    second = risers - first
-    length = (zy1 - zy0) if stair.axis == 'y' else (zx1 - zx0)
-    across = (zx1 - zx0) if stair.axis == 'y' else (zy1 - zy0)
-    landing = stair_landing(stair, rise)
-    run = length - 2 * landing
-    tread_a = run / first
-    tread_b = run / max(1, second)
-    flight = stair.flight
+    f = StairFrame(stair, rise)
     boxes = []
 
     def place(a0, a1, b0, b1, z1, z0=0.0):
-        # a: along the flights (0 = entry end); b: across (0 = flight-one side).
-        if stair.axis == 'y':
-            ys = (zy0 + a0, zy0 + a1) if stair.entry < 0 else (zy1 - a1, zy1 - a0)
-            xs = (zx0 + b0, zx0 + b1)
-        else:
-            xs = (zx0 + a0, zx0 + a1) if stair.entry < 0 else (zx1 - a1, zx1 - a0)
-            ys = (zy1 - b1, zy1 - b0)
+        xs, ys = f.xs_ys(a0, a1, b0, b1)
         boxes.append((xs[0], ys[0], z0, xs[1], ys[1], z1))
 
     def underside(top):
-        return max(0.0, top - riser - dims.STAIR_WAIST)
+        return max(0.0, top - f.riser - dims.STAIR_WAIST)
 
-    for index in range(first):
-        top = (index + 1) * riser
-        place(landing + index * tread_a, landing + (index + 1) * tread_a, 0, flight, top,
-              underside(top))
-    mid = first * riser
-    place(length - landing, length, 0, across, mid, max(0.0, mid - dims.STAIR_LANDING_SLAB))
-    for index in range(second):
-        a1 = length - landing - index * tread_b
-        top = mid + (index + 1) * riser
-        place(a1 - tread_b, a1, across - flight, across, top, underside(top))
-    return boxes, riser, min(tread_a, tread_b), landing
+    for index in range(f.first):
+        top = (index + 1) * f.riser
+        place(f.landing + index * f.tread_a, f.landing + (index + 1) * f.tread_a, 0, f.flight,
+              top, underside(top))
+    place(f.length - f.landing, f.length, 0, f.across, f.mid,
+          max(0.0, f.mid - dims.STAIR_LANDING_SLAB))
+    for index in range(f.second):
+        a1 = f.length - f.landing - index * f.tread_b
+        top = f.mid + (index + 1) * f.riser
+        place(a1 - f.tread_b, a1, f.across - f.flight, f.across, top, underside(top))
+    return boxes, f.riser, min(f.tread_a, f.tread_b), f.landing
+
+
+def stair_railing(stair, rise):
+    """Inner handrail line of a switchback, (x, y, z) from its foot to the
+    storey above: along flight one's nosings on the well side, across the
+    end of the well on the turning landing, and back up flight two."""
+    f = StairFrame(stair, rise)
+    inner_one, inner_two = f.flight, f.across - f.flight
+    turn = f.length - f.landing
+    points = [(f.landing + i * f.tread_a, inner_one, (i + 1) * f.riser) for i in range(f.first)]
+    points += [(turn, inner_one, f.mid), (turn, inner_two, f.mid)]
+    points += [(turn - i * f.tread_b, inner_two, f.mid + (i + 1) * f.riser)
+               for i in range(f.second)]
+    result = []
+    for a, b, z in points:
+        x, y = f.point(a, b)
+        if not result or (x, y, z) != result[-1]:
+            result.append((x, y, z))
+    return result
+
+
+def stair_hole_guard(stair, rise):
+    """Guard line (x, y) on the storey a switchback arrives at, where no
+    flight continues up: the edge of the slab opening beside the arriving
+    flight, from the wall to the well."""
+    f = StairFrame(stair, rise)
+    return [f.point(f.landing, 0.0), f.point(f.landing, f.across - f.flight)]
 
 
 def stair_hole(stair, rise):

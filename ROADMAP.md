@@ -10,6 +10,7 @@
 | v0.11 | Points of interest (twelve kinds with two to four layouts each) and transit stops; highways running out into the wasteland |
 | v0.12 | Dense downtown: party-walled towers built out to the footway, superblocks |
 | v0.13 | Small-props switch and city metadata for Unity; walkable stairs, no loose floor pieces, windows kept through damage |
+| v0.14 | Interiors for the game: rooms to furnish, lifts, railings and fixtures in the metadata (game assets, not modelled) |
 
 See [CHANGELOG.md](CHANGELOG.md) for the details.
 
@@ -17,7 +18,6 @@ See [CHANGELOG.md](CHANGELOG.md) for the details.
 
 **Buildings**
 
-- Railings, lift doors and cars, furniture.
 - Non-rectangular footprints (L, T, courtyard); the tiers and room tilings
   extend to them.
 - Balconies and fire escapes on residential facades.

@@ -782,12 +782,7 @@ def _interiors(mesh, spec, field, plan):
                                       field.in_blast(cx, cy, level.z + z1 / 2)):
                     continue
                 solids.box(mesh, x0, y0, level.z + z0, x1, y1, level.z + z1, MAT_STAIRS)
-        for x0, y0, x1, y1, height in level_plan.fixtures:
-            cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
-            if field.damaged and (field.height(cx, cy) < level.z + height + .2 or
-                                  field.in_blast(cx, cy, level.z + height / 2)):
-                continue
-            solids.box(mesh, x0, y0, level.z, x1, y1, level.z + height, MAT_INTERIOR_WALL)
+        # Fixtures (counters, desks) are game assets: listed by interior.py, not built.
 
 
 def _partition(mesh, field, wall, z, ceiling):

@@ -40,6 +40,7 @@ The original single-building and bulk operators remain available. Architecture u
 | Downtown Superblocks | Share of downtown local streets closed so blocks join into 2 x 1 and 2 x 2 superblocks (default 0.35) |
 | Small Props | Model benches, gas pumps, lamps, bollards, bins, dumpsters, tables, play equipment, goals, booths, hydrants and cart corrals (default on). Off: no meshes for them; the metadata still lists every one for the game to place |
 | Metadata Space | Coordinate space of the city metadata: Unity (default) or Blender |
+| Interior Metadata | List every building's rooms, lifts and railings in the metadata (default on). Off: a much smaller file; counters and desks are still listed |
 | Points of Interest | Reserve blocks for gas stations, fast food, schools, hospitals, police and fire stations, transit, parks, parking and malls, and put transit stops on the footways (default on) |
 | Worn Lane Markings | Optional broken paint on highway/arterial/collector roads |
 | Show Driving Route Guides | Colored curves, excluded from FBX export |
@@ -266,9 +267,11 @@ The referenced Ares capsule is 2 m high, radius 0.4 m, with a 0.4 m step offset 
 
 ## Game data: city metadata
 
-Each city run stores `<collection>_metadata.json` as a text datablock, and
-**File → Export → Generated City for Unity** writes it beside the FBX as
-`<name>.city.json` (**Write City Metadata**, on by default). The exporter
+Each city run stores its metadata with the city collection (compressed, in the
+hidden `_metadata_json_zlib` custom property; with interiors it runs to
+megabytes, which Blender's text editor handles badly), and **File → Export →
+Generated City for Unity** writes it beside the FBX as `<name>.city.json`
+(**Write City Metadata**, on by default). The exporter
 checks every object the metadata names still exists, and lists any that
 don't in `missing_objects`.
 
@@ -285,7 +288,14 @@ imported GameObject rotations, which carry the FBX axis correction. With
 The layout suits `JsonUtility`: no dictionaries, nested arrays or nulls.
 Point lists are flat `[x, y, z, x, y, z, …]`. The C# data classes are in
 `docs/unity/CityMetadata.cs` (checked by compiling them and parsing a real
-file).
+file). The file is written without indentation; with interiors listed, a
+radius-8 city's is about 13 MB.
+
+**Building space.** A building's `rooms`, `lifts` and `railings` are given
+relative to the building, which keeps the file small: offsets from its
+`position` in the same axes, rotated by its `yaw` about up. In Unity a point
+is `position + Quaternion.Euler(0, yaw, 0) * local`; `normal` vectors rotate
+the same way.
 
 | Field | Contents |
 | --- | --- |
@@ -296,8 +306,11 @@ file).
 | `driving_loops`, `outer_roads` | The driving circuits; the highways beyond the city edge (start, forward, length, fade) |
 | `buildings` | One per lot: object name, style, district, condition, damage, floors, height, interiors, enterable floors, party walls, block group, footprint (position at the base, forward = front, width, depth), and `entrances` (each street door's position, outward forward and width) |
 | `sites` | Points of interest: grounds object, kind, variant, condition, pad; their buildings with the same fields as above |
+| `rooms` (per building) | Rooms to furnish: name, kind (bedroom, living, kitchen, bath, hall, corridor, lobby, office, open, shop, storage, bar, plant, stair, landing), floor, flat or shop unit, open-plan group, centre of the clear floor, clear width, depth and height, the share of floor still standing and still roofed, `doors` (position, normal into the room, width, height, the room on the other side or `street`), `windows` (sill centre, outward normal, width, sill and head above the floor, broken) and `wall_runs` (blank wall at least 2 m high: start, end, normal into the room) |
+| `lifts` (per building) | One per shaft: centre at its lowest stop, clear size, height, the floors it still serves, a door per floor (position, normal out of the shaft, size) and the `car` at the lowest of them |
+| `railings` (per building) | Base lines on the walking surface (flat points) with a rail height: `stair` handrails along the well side of each switchback, `guard` rails at the stair opening of the top floor, `ramp` rails along parking ramps |
 | `transit_stops` | Shelters and stops: object, variant, road edge |
-| `markers` | Placements for game assets: every small prop (`bench`, `lamp`, `bollard`, `gas_pump`, `dumpster`, `table`, `booth`, `play_structure`, `swings`, `goal`, `trash_bin`, `air_pump`, `hydrant`, `cart_corral`; `modelled` says whether the city mesh has it), `tree` spots, `flagpole` plinths, `fence` lines (post line points and a suggested height) and `parking_stall`s (centre and nose-in direction, for wrecked cars). Each has its site id and, where it applies, `size` (width, depth, height), `height`, `scale` (trees), `umbrella` or `barrier` |
+| `markers` | Placements for game assets: every small prop (`bench`, `lamp`, `bollard`, `gas_pump`, `dumpster`, `table`, `booth`, `play_structure`, `swings`, `goal`, `trash_bin`, `air_pump`, `hydrant`, `cart_corral`; `modelled` says whether the city mesh has it), `tree` spots, `flagpole` plinths, `fence` lines (post line points and a suggested height) and `parking_stall`s (centre and nose-in direction, for wrecked cars), and fixtures inside buildings (`reception_desk`, `shop_counter`, `service_counter`, `bar_counter`, facing the customers, with `building` and `floor`; never modelled). Each has its site id and, where it applies, `size` (width, depth, height), `height`, `scale` (trees), `umbrella` or `barrier` |
 | `counts` | Totals per section and per marker type |
 
 Objects also carry custom properties that the FBX passes to Unity as user

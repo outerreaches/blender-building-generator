@@ -2,6 +2,7 @@
 """Export only a generated city's static meshes, preserving editable source objects."""
 import json
 import os
+import zlib
 
 import bpy
 from bpy.props import BoolProperty, StringProperty
@@ -81,16 +82,35 @@ class EXPORT_SCENE_OT_procedural_city(bpy.types.Operator, ExportHelper):
             context.view_layer.objects.active = active
 
 
+# The metadata lives on the city collection, compressed: with interiors it runs
+# to megabytes, and Blender writes Text datablocks that large very slowly. The
+# leading underscore keeps it out of the Custom Properties panel.
+METADATA_PROPERTY = '_metadata_json_zlib'
+
+
+def store_city_metadata(collection, data):
+    collection[METADATA_PROPERTY] = zlib.compress(
+        json.dumps(data, separators=(',', ':')).encode('utf-8'), 6)
+
+
+def city_metadata(collection):
+    """The metadata stored with a generated city, or None."""
+    packed = collection.get(METADATA_PROPERTY)
+    if packed is not None:
+        return json.loads(zlib.decompress(bytes(packed)).decode('utf-8'))
+    text = bpy.data.texts.get(collection.get('metadata_text', ''))     # Cities before v0.14.
+    return json.loads(text.as_string()) if text is not None else None
+
+
 def write_city_metadata(collection, fbx_path):
     """Write the city's metadata as ``<name>.city.json`` beside the FBX.
 
     Object names in the metadata are checked against the collection, so a
     renamed or deleted object shows up as a missing entry rather than silently.
     """
-    text = bpy.data.texts.get(collection.get('metadata_text', ''))
-    if text is None:
+    data = city_metadata(collection)
+    if data is None:
         return None
-    data = json.loads(text.as_string())
     names = {obj.name for obj in collection.all_objects}
     missing = []
     for group in ('buildings', 'sites', 'transit_stops'):
@@ -103,7 +123,7 @@ def write_city_metadata(collection, fbx_path):
     data['missing_objects'] = missing
     path = os.path.splitext(fbx_path)[0] + '.city.json'
     with open(path, 'w', encoding='utf-8') as handle:
-        json.dump(data, handle, indent=1)
+        json.dump(data, handle, separators=(',', ':'))
     return path
 
 

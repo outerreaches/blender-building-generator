@@ -4,7 +4,7 @@
 bl_info = {
     "name": "Procedural Building Shell Generator",
     "author": "Ares Project",
-    "version": (0, 13, 1),
+    "version": (0, 14, 0),
     "blender": (4, 5, 0),
     "location": "View3D > Add > Mesh > Procedural Building Shell",
     "description": "Generate customizable, game-ready building shells with windows, doors, and optional damage",
@@ -20,8 +20,9 @@ import bpy
 # reloaded; the submodules would keep running the previously installed code.
 # Reload them first, leaves before the modules that import them.
 _SUBMODULES = ('dims', 'meshdata', 'geom2d', 'util', 'solids', 'damage', 'spec', 'layouts',
-               'rubble', 'shell', 'mesh_builder', 'styles', 'sites', 'city_plan', 'metadata',
-               'building_assets', 'streets', 'operators', 'city_operators', 'city_export')
+               'rubble', 'shell', 'interior', 'mesh_builder', 'styles', 'sites', 'city_plan',
+               'metadata', 'building_assets', 'streets', 'operators', 'city_export',
+               'city_operators')
 for _name in _SUBMODULES:
     _module = sys.modules.get(f'{__name__}.{_name}')
     if _module is not None:

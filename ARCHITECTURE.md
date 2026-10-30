@@ -60,6 +60,7 @@ Everything left of `mesh_builder` is pure Python and runs under plain
 | `solids.py` | Closed solids: walls from 2D outlines, contoured slabs, boxes, prisms |
 | `shell.py` | Assembles the building; trims broken windows; facade details |
 | `rubble.py` | Mounds, piles and fills as closed solids |
+| `interior.py` | Game data for interiors: rooms to furnish, lifts, railings, fixtures |
 | `sites.py` | Points of interest: site layouts (buildings + props) on a pad |
 | `meshdata.py` | Plain mesh container and edge checks |
 | `mesh_builder.py` | Blender adapter (BMesh, coplanar merge, UVs, seams) |
@@ -161,6 +162,25 @@ best reachable neighbour (same flat first, then circulation). Rooms of one
 group (open plans) need no wall. Plans that cannot fit a stair keep only the
 ground floor and say so in `plan.notes` and the object's `plan_notes`.
 
+Furniture, railings, lift doors and cars, and fixtures (counters, reception
+desks) are game assets, so none of them is modelled. `interior.py` lists where
+they go for the city metadata, reading the built building rather than the
+plan alone:
+
+- **Rooms:** kind, floor, the clear rect inside the partitions, clear height,
+  doors (taken from the openings in the walls around the room, so open-plan
+  groups get theirs), windows on the outer walls (a window belongs to the
+  storey just above its bottom), and wall runs: stretches of blank wall at
+  least 2 m high, with no door, window or hole.
+- **Lifts:** one per shaft position, with the floors whose door still stands
+  over a floor, and the car at the lowest of them.
+- **Railings:** the inner handrail of each switchback (nosing line, around the
+  well end), a guard along the stair opening on the top floor a stair
+  reaches, and both sides of parking ramps.
+- **Damage:** the same tests as the shell (slab values, the steps it builds,
+  partition top profiles and blown spans, facade wall profiles), so a room,
+  rail or lift door is listed only where the mesh keeps what it stands on.
+
 ## Dimensions
 
 Sized for the Ares player (`Player.prefab`: capsule 2.0 m x 0.8 m, 0.08 m skin,
@@ -190,6 +210,10 @@ The project's test suite is not yet published in this repository. It checks:
     their wall stands.
   - Props hung on a wall (signs, canopies) keep wall behind most of their
     span.
+  - Interior facts match the mesh: rooms are free space with a floor, wall
+    runs have wall behind them, windows and doors are open, lift shafts are
+    empty with open doors, every railing stands on a flight or floor and
+    every guard on a real drop, and fixtures are not modelled.
 - **In Blender:** every operator's meshes have each edge on exactly two faces
   after conversion and the coplanar merge; stairs reach the top floor; doors,
   tower cores and all lobby types build.

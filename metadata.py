@@ -19,6 +19,14 @@ Coordinates are metres in one space, chosen at export:
 Objects are referred to by name (the FBX node and Unity GameObject names), so
 a script can bind entries to the imported meshes.
 
+Interiors (each building's ``rooms``, ``lifts`` and ``railings``) are in
+building space, to keep the file small: offsets from the building's
+``position`` in the same axes, rotated by its ``yaw`` about up. In Unity a
+point is ``position + Quaternion.Euler(0, yaw, 0) * local``. Rooms carry what
+furnishing needs (kind, clear size, doors, windows, blank wall runs); lifts
+their shaft, served floors, doors and car; railings a base line and height.
+Furniture, railings and lift parts are game assets: none is modelled.
+
 The layout suits Unity's ``JsonUtility``: no dictionaries, nested arrays or
 nulls (unknown numbers are 0, unknown strings empty).
 Point lists (road centrelines, fence lines) are flat [x, y, z, x, y, z, ...]
@@ -27,14 +35,15 @@ each with a ``type``.
 """
 import math
 
+from .interior import FIXTURE_KINDS
 from .sites import SMALL_PROPS
 
 FORMAT = 'ares.city.metadata'
-SCHEMA = 1
+SCHEMA = 2
 SPACES = ('UNITY', 'BLENDER')
 
 # Markers the game always supplies (no mesh is generated for them).
-MARKER_ONLY = ('tree', 'fence', 'flagpole', 'parking_stall')
+MARKER_ONLY = ('tree', 'fence', 'flagpole', 'parking_stall') + FIXTURE_KINDS
 
 
 def apply(transform, x, y, z=0.0):
@@ -81,6 +90,13 @@ class Space:
             return _r(math.degrees(math.atan2(ux, uz)) % 360.0, 3)
         return _r(math.degrees(math.atan2(fx, -fy)) % 360.0, 3)
 
+    def local(self, p):
+        """A building-space point (object axes, z up) in this space's axes."""
+        return self.point(p)
+
+    def local_direction(self, fx, fy):
+        return self.direction(fx, fy)
+
     def pose(self, p, fx, fy):
         return {'position': self.point(p), 'forward': self.direction(fx, fy),
                 'yaw': self.yaw(fx, fy)}
@@ -89,9 +105,11 @@ class Space:
         if self.name == 'UNITY':
             return {'name': 'UNITY', 'units': 'metres', 'up': '+Y',
                     'from_blender': '(x, y, z) -> (-x, z, -y)',
-                    'yaw': 'degrees about +Y turning an asset modelled facing +Z to face forward'}
+                    'yaw': 'degrees about +Y turning an asset modelled facing +Z to face forward',
+                    'interiors': 'building space: world = position + Quaternion.Euler(0, yaw, 0) * local'}
         return {'name': 'BLENDER', 'units': 'metres', 'up': '+Z',
-                'yaw': 'degrees about +Z turning an asset modelled facing -Y to face forward'}
+                'yaw': 'degrees about +Z turning an asset modelled facing -Y to face forward',
+                'interiors': 'building space: world = position + rotation(yaw about +Z) * local'}
 
 
 def local_entrances(spec):
@@ -121,13 +139,14 @@ class CityMetadata:
     """Collects metadata while a city is generated; ``as_dict`` builds the JSON."""
 
     def __init__(self, plan, origin=(0.0, 0.0, 0.0), space='UNITY', props_modelled=True,
-                 addon_version='', collection=''):
+                 addon_version='', collection='', interiors=True):
         self.plan = plan
         self.origin = tuple(origin)
         self.space = Space(space)
         self.props_modelled = props_modelled
         self.addon_version = addon_version
         self.collection = collection
+        self.interiors = interiors      # Rooms, lifts and railings (fixtures are always listed).
         self.curb = plan.settings.curb_height
         self.buildings = []
         self.sites = []
@@ -143,9 +162,11 @@ class CityMetadata:
         ox, oy, oz = self.origin
         return (ox + poi.center[0], oy + poi.center[1], oz + self.curb, poi.rotation)
 
-    def _building(self, transform, width, depth, entrances):
-        """Footprint pose and entrances; ``entrances`` are object-local
-        (centred) (x, y, normal_x, normal_y, width) tuples."""
+    def _building(self, transform, width, depth, entrances, interior=None, obj_name='',
+                  site_id=''):
+        """Footprint pose, entrances and interior; ``entrances`` are object-local
+        (centred) (x, y, normal_x, normal_y, width) tuples, ``interior`` the
+        building's ``interior.interior_facts``."""
         fx, fy = turn(transform, 0.0, -1.0)
         doors = []
         for x, y, nx, ny, door in entrances:
@@ -154,35 +175,89 @@ class CityMetadata:
             doors.append(dict(self.space.pose(p, dx, dy), width=_r(door)))
         entry = self.space.pose(apply(transform, 0.0, 0.0, 0.0), fx, fy)
         entry.update(width=_r(width), depth=_r(depth), entrances=doors)
+        entry.update(self._interior(interior or {}))
+        for fixture in (interior or {}).get('fixtures', ()):
+            fx_, fy_ = turn(transform, *fixture['facing'])
+            marker = {'type': fixture['kind'], 'site': site_id, 'building': obj_name,
+                      'floor': fixture['floor'], 'modelled': False}
+            marker.update(self.space.pose(apply(transform, fixture['x'], fixture['y'], fixture['z']),
+                                          fx_, fy_))
+            marker['size'] = [_r(v) for v in fixture['size']]
+            self.markers.append(marker)
         return entry
 
+    def _interior(self, facts):
+        """Rooms, lifts and railings in building space."""
+        if not self.interiors:
+            return {'rooms': [], 'lifts': [], 'railings': []}
+        local, normal = self.space.local, self.space.local_direction
+        rooms = []
+        for room in facts.get('rooms', ()):
+            x0, y0, x1, y1 = room['rect']
+            z = room['z']
+            rooms.append({
+                'name': room['name'], 'kind': room['kind'], 'floor': room['floor'],
+                'unit': room['unit'], 'group': room['group'],
+                'position': local(((x0 + x1) / 2, (y0 + y1) / 2, z)),
+                'width': _r(x1 - x0), 'depth': _r(y1 - y0), 'height': _r(room['height']),
+                'standing': room['standing'], 'ceiling': room['ceiling'],
+                'doors': [{'position': local((d['x'], d['y'], z)), 'normal': normal(*d['normal']),
+                           'width': _r(d['width']), 'height': _r(d['height']), 'to': d['to']}
+                          for d in room['doors']],
+                'windows': [{'position': local((w['x'], w['y'], z + w['sill'])),
+                             'normal': normal(*w['normal']), 'width': _r(w['width']),
+                             'sill': _r(w['sill']), 'head': _r(w['head']), 'broken': w['broken']}
+                            for w in room['windows']],
+                'wall_runs': [{'start': local(run['start'] + (z,)), 'end': local(run['end'] + (z,)),
+                               'normal': normal(*run['normal'])} for run in room['wall_runs']]})
+        lifts = []
+        for lift in facts.get('lifts', ()):
+            x0, y0, x1, y1 = lift['rect']
+            cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
+            car = lift['car']
+            lifts.append({
+                'name': lift['name'], 'position': local((cx, cy, lift['bottom'])),
+                'width': _r(x1 - x0), 'depth': _r(y1 - y0),
+                'height': _r(lift['top'] - lift['bottom']), 'floors': list(lift['floors']),
+                'doors': [{'floor': d['floor'], 'position': local((d['x'], d['y'], d['z'])),
+                           'normal': normal(*d['normal']), 'width': _r(d['width']),
+                           'height': _r(d['height'])} for d in lift['doors']],
+                'car': {'floor': car['floor'], 'position': local((cx, cy, car['z'])),
+                        'width': _r(x1 - x0), 'depth': _r(y1 - y0), 'height': _r(car['height'])}})
+        railings = [{'kind': rail['kind'], 'floor': rail['floor'],
+                     'points': _flat(local(p) for p in rail['points']),
+                     'height': _r(rail['height'])} for rail in facts.get('railings', ())]
+        return {'rooms': rooms, 'lifts': lifts, 'railings': railings}
+
     # -- collection ------------------------------------------------------
-    def add_lot(self, lot, obj_name, entrances=(), height=None, enterable_floors=None):
+    def add_lot(self, lot, obj_name, entrances=(), height=None, enterable_floors=None,
+                interior=None):
         entry = {'id': lot.id, 'object': obj_name, 'kind': 'building', 'style': lot.style,
                  'district': lot.district, 'condition': lot.condition, 'floors': lot.floors,
                  'damage': _r(lot.damage), 'interiors': lot.interiors,
                  'party_walls': list(lot.party_walls), 'group': lot.group or '', 'seed': lot.seed}
-        entry.update(self._building(self.lot_transform(lot), lot.width, lot.depth, entrances))
+        entry.update(self._building(self.lot_transform(lot), lot.width, lot.depth, entrances,
+                                    interior, obj_name))
         entry['height'] = _r(height or 0.0)
         entry['enterable_floors'] = int(enterable_floors or 0)
         self.buildings.append(entry)
 
     def add_site(self, poi, site, grounds_name, buildings=()):
         """``buildings``: (SiteBuilding, object name, entrances, height,
-        enterable floors) for each building made."""
+        enterable floors[, interior facts]) for each building made."""
         site_t = self.poi_transform(poi)
         fx, fy = turn(site_t, 0.0, -1.0)
         entry = {'id': poi.id, 'object': grounds_name, 'kind': site.kind, 'variant': site.variant,
                  'condition': poi.condition, 'district': poi.district, 'seed': poi.seed,
                  'width': _r(poi.width), 'depth': _r(poi.depth), 'buildings': []}
         entry.update(self.space.pose(apply(site_t, 0.0, 0.0, 0.0), fx, fy))
-        for building, name, entrances, height, floors in buildings:
+        for building, name, entrances, height, floors, *rest in buildings:
             t = chain(site_t, (building.x, building.y, 0.0, building.quarter * math.pi / 2))
             item = {'object': name, 'role': building.role, 'name': building.name,
                     'floors': building.params['floors'], 'height': _r(height or 0.0),
                     'enterable_floors': int(floors or 0)}
             item.update(self._building(t, building.params['width'], building.params['depth'],
-                                       entrances))
+                                       entrances, rest[0] if rest else None, name, poi.id))
             entry['buildings'].append(item)
         self.sites.append(entry)
         for marker in site.markers:
@@ -255,7 +330,8 @@ class CityMetadata:
                      'extent': _r(extent), 'block_size': size,
                      'wasteland': settings.wasteland, 'curb_height': settings.curb_height,
                      'sidewalk_width': settings.sidewalk_width,
-                     'small_props_modelled': self.props_modelled},
+                     'small_props_modelled': self.props_modelled,
+                     'interiors_listed': self.interiors},
             'districts': [{'id': loc.id, 'role': loc.role, 'style': loc.style,
                            'position': node_point(loc.node)} for loc in plan.locations],
             'roads': roads,

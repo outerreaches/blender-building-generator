@@ -1,11 +1,12 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Shared Blender material and shell creation services."""
+import json
 import math
 import random
 
 import bpy
 
-from . import rubble, sites
+from . import metadata, rubble, sites
 from .mesh_builder import (BuildingShellBuilder, generate_uvs, mark_seams_for_uvs,
                            merge_coplanar, to_bmesh)
 from .meshdata import MAT_RUBBLE, MeshData
@@ -90,6 +91,8 @@ def _annotate(obj, building):
     """Facts the game side can use without re-deriving them from geometry."""
     spec, plan = building.spec, building.plan
     obj['addon_version'] = addon_version()
+    # Street doors in object space: (x, y, outward normal x, y, width).
+    obj['entrances'] = json.dumps(metadata.local_entrances(spec))
     obj['floors'] = len(spec.levels)
     obj['height'] = round(spec.top, 3)
     obj['enterable_floors'] = len(plan.levels)
@@ -162,6 +165,7 @@ def create_site(name, site, collection):
     if site.notes:
         grounds['site_notes'] = '; '.join(site.notes)
     walls = material(f'Site_{site.kind.title()}_Walls', sites.WALL_COLORS[site.kind])
+    names = []
     for building in site.buildings:
         obj = create_shell(f'{name}_{building.name}', building.params, collection)
         obj.parent = grounds
@@ -169,6 +173,8 @@ def create_site(name, site, collection):
         obj.rotation_euler.z = building.quarter * math.pi / 2
         obj.data.materials[0] = walls
         obj['site_role'] = building.role
+        names.append(obj.name)
+    grounds['building_objects'] = names    # In site.buildings order.
     return grounds
 
 

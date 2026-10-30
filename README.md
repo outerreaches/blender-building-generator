@@ -1,5 +1,27 @@
 # Procedural Building Shell Generator
 
+## v0.13.0: Small-props switch, city metadata for Unity
+
+- **Small Props switch.** A new switch on Generate City and Generate Site
+  covers the props the game will replace with destructible assets: benches,
+  gas pumps, lamps, bollards, trash bins, dumpsters, tables, play equipment,
+  goals, booths, hydrants, air pumps and cart corrals. With it off they are
+  not modelled, but every one is still recorded.
+- **City metadata.** Each city records game data. The FBX export writes it
+  next to the FBX as `<name>.city.json`. It holds:
+  - roads, junctions, driving loops and outer highways;
+  - buildings and site buildings, with their street entrances, condition,
+    floors and party walls;
+  - sites and transit stops;
+  - markers: every small prop, tree spot, flagpole, fence line and parking
+    stall, where the game places its own assets.
+
+  Coordinates are Unity world space, checked against the FBX the exporter
+  writes. Objects are referred to by name, so the Unity side can bind
+  entries to the imported meshes. C# data classes for `JsonUtility` are in
+  `docs/unity/CityMetadata.cs`.
+- **Tree spots** removed in v0.11.1 are back as markers (no mesh).
+
 ## v0.12.3: Downtown plot depth, add-on updates take effect
 
 - **Downtown plots stay at most 40 m deep.** A 2 x 1 superblock could be cut

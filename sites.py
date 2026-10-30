@@ -92,6 +92,7 @@ class Site:
     ground: MeshData
     buildings: list = field(default_factory=list)
     notes: list = field(default_factory=list)
+    markers: list = field(default_factory=list)    # Placements for game assets (Ground.mark).
 
 
 def designed(width, depth, floors, floor_height, seed, profile='NONE', **extra):
@@ -115,11 +116,35 @@ def designed(width, depth, floors, floor_height, seed, profile='NONE', **extra):
     return params
 
 
-class Ground:
-    """Closed-solid site props in site coordinates."""
+# Small props the game replaces with destructible assets: with ``props`` off
+# they are only recorded as markers.
+SMALL_PROPS = ('bench', 'lamp', 'bollard', 'gas_pump', 'dumpster', 'table', 'booth',
+               'play_structure', 'swings', 'goal', 'trash_bin', 'air_pump', 'hydrant',
+               'cart_corral')
 
-    def __init__(self):
+
+def _turn(quarter, fx, fy):
+    for _ in range(quarter % 4):
+        fx, fy = -fy, fx
+    return fx, fy
+
+
+class Ground:
+    """Closed-solid site props in site coordinates, plus markers: where the game
+    places its own assets (small props, trees, fences, flagpoles, parked cars)."""
+
+    def __init__(self, props=True):
         self.mesh = MeshData()
+        self.props = props
+        self.markers = []
+
+    def mark(self, kind, x, y, z=0.0, facing=(0.0, -1.0), **extra):
+        """Record a placement; ``facing`` is the direction its front looks."""
+        marker = dict(type=kind, x=round(x, 3), y=round(y, 3), z=round(z, 3),
+                      facing=(round(facing[0], 6), round(facing[1], 6)))
+        marker.update(extra)
+        self.markers.append(marker)
+        return self.props or kind not in SMALL_PROPS
 
     # -- surfaces --------------------------------------------------------
     def pad(self, rect, material):
@@ -155,6 +180,8 @@ class Ground:
 
     # -- props -----------------------------------------------------------
     def bench(self, x, y, quarter=0, base=0.0):
+        if not self.mark('bench', x, y, base, _turn(quarter, 0.0, -1.0), size=(1.6, .5, .95)):
+            return
         part = Ground()
         part.box(-.8, -.22, base + .42, .8, .22, base + .5, S_WOOD)
         part.box(-.8, .17, base + .5, .8, .25, base + .95, S_WOOD)
@@ -163,11 +190,39 @@ class Ground:
         self.mesh.place(part.mesh, x, y, quarter)
 
     def lamp(self, x, y, height=6.0, base=0.0):
+        if not self.mark('lamp', x, y, base, height=height):
+            return
         self.cylinder(x, y, .08, base, base + height, S_METAL, 6)
         self.box(x - .2, y - .5, base + height, x + .2, y + .5, base + height + .18, S_METAL)
 
     def bollard(self, x, y, base=0.0):
+        if not self.mark('bollard', x, y, base, size=(.24, .24, .9)):
+            return
         self.cylinder(x, y, .12, base, base + .9, S_METAL, 6)
+
+    def trash_bin(self, x, y, base=0.0):
+        if not self.mark('trash_bin', x, y, base, size=(.6, .6, .9)):
+            return
+        self.cylinder(x, y, .3, base, base + .9, S_METAL)
+
+    def air_pump(self, x, y, quarter=0):
+        if not self.mark('air_pump', x, y, 0.0, _turn(quarter, 0.0, -1.0), size=(.5, .5, 1.4)):
+            return
+        self.boxc(x, y, .5, .5, 0.0, 1.4, S_METAL)
+
+    def hydrant(self, x, y):
+        if not self.mark('hydrant', x, y, 0.0, size=(.36, .36, .8)):
+            return
+        self.cylinder(x, y, .18, 0.0, .8, S_SIGN)
+
+    def cart_corral(self, x, y, quarter=0):
+        if not self.mark('cart_corral', x, y, 0.0, _turn(quarter, 0.0, -1.0), size=(3.2, .1, 1.0)):
+            return
+        self.boxc(x, y, 3.2, .1, 0.0, 1.0, S_METAL)
+
+    def tree(self, x, y, size=1.0, base=0.0):
+        """Tree spot (trees are game assets)."""
+        self.mark('tree', x, y, base, scale=round(size, 3))
 
     def sign(self, x, y, width, height, top, quarter=0, two_posts=True, base=0.0):
         """Pylon sign: posts with a sign box on top."""
@@ -181,9 +236,11 @@ class Ground:
         part.boxc(0, 0, width, .4, panel_bottom, base + top, S_SIGN)
         self.mesh.place(part.mesh, x, y, quarter)
 
-    def fence_bases(self, points, base=0.0, closed=False):
+    def fence_bases(self, points, base=0.0, closed=False, height=2.0):
         """Post footings along a fence line (the fence itself is a game asset)."""
         pts = list(points) + ([points[0]] if closed else [])
+        self.markers.append(dict(type='fence', points=[(round(px, 3), round(py, 3)) for px, py in pts],
+                                 z=round(base + .15, 3), height=height))
         placed = set()
         for a, b in zip(pts, pts[1:]):
             length = math.dist(a, b)
@@ -209,18 +266,24 @@ class Ground:
             self.boxc(cx, cy, column_size, column_size, base, z0, S_METAL)
 
     def pump(self, x, y, base, quarter=0):
+        if not self.mark('gas_pump', x, y, base, _turn(quarter, 0.0, -1.0), size=(.55, .9, 1.85)):
+            return
         part = Ground()
         part.boxc(0, 0, .55, .9, base, base + 1.6, S_METAL)
         part.boxc(0, 0, .5, .85, base + 1.6, base + 1.85, S_SIGN)
         self.mesh.place(part.mesh, x, y, quarter)
 
     def dumpster(self, x, y, quarter=0):
+        if not self.mark('dumpster', x, y, 0.0, _turn(quarter, 0.0, -1.0), size=(1.95, 1.15, 1.25)):
+            return
         part = Ground()
         part.boxc(0, 0, 1.9, 1.1, 0.0, 1.15, S_METAL)
         part.boxc(0, 0, 1.95, 1.15, 1.15, 1.25, S_METAL)
         self.mesh.place(part.mesh, x, y, quarter)
 
     def table(self, x, y, umbrella=True):
+        if not self.mark('table', x, y, 0.0, umbrella=umbrella):
+            return
         self.cylinder(x, y, .06, 0.0, .72, S_METAL, 6)
         self.cylinder(x, y, .5, .72, .78, S_WOOD, 10)
         if umbrella:
@@ -228,11 +291,16 @@ class Ground:
             solids.frustum(self.mesh, solids.circle(x, y, 1.3, 8), solids.circle(x, y, .08, 8),
                            2.1, 2.55, S_SIGN)
 
-    def flagpole_base(self, x, y):
+    def flagpole_base(self, x, y, height=9.0):
         """Plinth where a flagpole (a game asset) stands."""
+        self.mark('flagpole', x, y, .3, height=height)
         self.boxc(x, y, .7, .7, 0.0, .3, S_CONCRETE)
 
     def booth(self, x, y, quarter=0):
+        # Barrier arm reaches out along the booth's local +x.
+        if not self.mark('booth', x, y, 0.0, _turn(quarter, 0.0, -1.0), size=(2.2, 2.2, 2.8),
+                         barrier=_turn(quarter, 1.0, 0.0)):
+            return
         part = Ground()
         part.boxc(0, 0, 1.8, 1.8, 0.0, 2.6, S_METAL)
         part.boxc(0, 0, 2.2, 2.2, 2.6, 2.8, S_METAL)
@@ -241,6 +309,9 @@ class Ground:
         self.mesh.place(part.mesh, x, y, quarter)
 
     def play_structure(self, x, y, rng, base=0.0):
+        side = rng.choice((-1, 1))      # Slide side, drawn either way to keep the layout.
+        if not self.mark('play_structure', x, y, base, (float(side), 0.0), size=(8.0, 2.7, 4.1)):
+            return
         h = 1.5
         for dx in (-1.1, 1.1):
             for dy in (-1.1, 1.1):
@@ -254,7 +325,6 @@ class Ground:
             for dy in (-1.1, 1.1):
                 self.boxc(x + dx, y + dy, .1, .1, base + h + .12, base + h + 1.6, S_METAL)
         # Slide: a sloped slab from the deck to the ground.
-        side = rng.choice((-1, 1))
         x0 = x + side * 1.25
         x1 = x + side * 4.0
         lo, hi = (x0, x1) if side > 0 else (x1, x0)
@@ -265,6 +335,8 @@ class Ground:
                           [(cx, cy, z) for (cx, cy), z in zip(corners, zb)], S_SIGN)
 
     def swings(self, x, y, base=0.0):
+        if not self.mark('swings', x, y, base, size=(4.2, .4, 2.5)):
+            return
         for dx in (-2.0, 2.0):
             self.boxc(x + dx, y, .12, .12, base, base + 2.4, S_METAL)
         self.box(x - 2.06, y - .05, base + 2.4, x + 2.06, y + .05, base + 2.5, S_METAL)
@@ -272,6 +344,8 @@ class Ground:
             self.box(x + dx - .3, y - .12, base + .45, x + dx + .3, y + .12, base + .5, S_RUBBER)
 
     def goal(self, x, y, width=5.0, height=2.2, quarter=0):
+        if not self.mark('goal', x, y, 0.0, _turn(quarter, 0.0, 1.0), size=(width, .5, height)):
+            return
         part = Ground()
         for side in (-width / 2, width / 2):
             part.boxc(side, 0, .12, .12, 0.0, height, S_METAL)
@@ -288,6 +362,10 @@ class Ground:
             x = start + index * width
             self.strip((x, y_edge + facing * .2), (x, y_edge + facing * (depth - .2)), .12,
                        S_PAINT, name)
+        for index in range(count):
+            # A car parked nose-in faces away from the aisle line.
+            self.mark('parking_stall', start + (index + .5) * width, y_edge + facing * depth / 2,
+                      0.0, (0.0, float(facing)), size=(width, depth))
 
     def court_lines(self, rect, material=S_PAINT, base=0.0):
         """Court outline, centre line and circle; crossing lines on separate
@@ -322,7 +400,7 @@ class Ground:
 class Composer:
     """Shared state while one site is laid out."""
 
-    def __init__(self, kind, width, depth, seed, variant, condition, damage, approach):
+    def __init__(self, kind, width, depth, seed, variant, condition, damage, approach, props=True):
         self.kind = kind
         self.W, self.D = width, depth
         self.seed = seed
@@ -331,7 +409,7 @@ class Composer:
         self.condition = condition
         self.damage = damage
         self.approach = approach
-        self.g = Ground()
+        self.g = Ground(props)
         self.buildings = []
         self.notes = []
         self.pad_material = S_ASPHALT
@@ -432,11 +510,13 @@ class Composer:
 
 
 def compose(kind, width, depth, seed=0, variant=None, condition='INTACT', damage=0.0,
-            approach=0.0):
-    """Lay out one site; see the module docstring for coordinates."""
+            approach=0.0, props=True):
+    """Lay out one site; see the module docstring for coordinates. With
+    ``props`` off, small props (``SMALL_PROPS``) are left to the game: they
+    appear only in ``Site.markers``."""
     if kind not in KINDS:
         raise ValueError(f'Unknown site kind: {kind}')
-    composer = Composer(kind, width, depth, seed, variant, condition, damage, approach)
+    composer = Composer(kind, width, depth, seed, variant, condition, damage, approach, props)
     if composer.variant not in VARIANTS[kind]:
         raise ValueError(f'Unknown {kind} variant: {composer.variant}')
     min_w, min_d = MIN_PAD[kind]
@@ -451,7 +531,7 @@ def compose(kind, width, depth, seed=0, variant=None, condition='INTACT', damage
     composer.settle_attached()
     composer.emit_pad()
     return Site(composer.kind, composer.variant, width, depth, approach, composer.g.mesh,
-                composer.buildings, composer.notes)
+                composer.buildings, composer.notes, composer.g.markers)
 
 
 def _collapse_buildings(c):
@@ -589,7 +669,9 @@ def _parking_field(c, rect, angled=False, islands=True, trees=True, lights=True)
             near, far = sorted((edge, edge + facing * stall))
             for ix0, ix1 in ((x0, x0 + end - .2), (x1 - end + .2, x1)):
                 g.poly([(ix0, near), (ix1, near), (ix1, far), (ix0, far)], S_GRASS, 0.0, LAYER['island'])
-                if lights and not trees:
+                if trees:
+                    g.tree((ix0 + ix1) / 2, (near + far) / 2, .8, base=LAYER['island'])
+                elif lights:
                     g.lamp((ix0 + ix1) / 2, (near + far) / 2, 7.0, base=LAYER['island'])
 
 
@@ -598,8 +680,15 @@ def _angled_stalls(g, x0, x1, edge, depth, facing, width=2.6):
     run = depth / math.tan(math.radians(60))
     pitch = width / math.sin(math.radians(60))
     x = x0
+    length = math.hypot(run, depth)
+    first = True
     while x + run + pitch <= x1:
         g.strip((x, edge + facing * .2), (x + run, edge + facing * (depth - .2)), .12, S_PAINT, 'paint')
+        if not first:
+            # Between this line and the last: slanted like the lines.
+            g.mark('parking_stall', x - pitch / 2 + run / 2, edge + facing * depth / 2, 0.0,
+                   (run / length, facing * depth / length), size=(width, depth))
+        first = False
         x += pitch
 
 
@@ -610,6 +699,9 @@ def _stalls_y(g, y0, y1, x_edge, depth, facing, width=2.6):
     for index in range(count + 1):
         y = start + index * width
         g.strip((x_edge + facing * .2, y), (x_edge + facing * (depth - .2), y), .12, S_PAINT, 'paint')
+    for index in range(count):
+        g.mark('parking_stall', x_edge + facing * depth / 2, start + (index + .5) * width, 0.0,
+               (float(facing), 0.0), size=(width, depth))
 
 
 def _openings(c, building, side):
@@ -740,7 +832,7 @@ def _gas_station(c):
     walk_y = ky - kd / 2 - 2.4
     g.layer((kx - kw / 2 - .8, walk_y, kx + kw / 2 + .8, ky - kd / 2), S_CONCRETE, 'walk')
     for dx in (-kw / 2 + 1.0, kw / 2 - 1.0):
-        g.cylinder(kx + dx, walk_y + .6, .3, LAYER['walk'], LAYER['walk'] + .9, S_METAL)
+        g.trash_bin(kx + dx, walk_y + .6, base=LAYER['walk'])
     fronts = [walk_y]
     if side:
         cw, cd = 6.5, min(15.0, c.D - 10)
@@ -777,7 +869,9 @@ def _gas_station(c):
         g.stalls(kx + kw / 2 + 1.5, x1 - STRIP - .5, y1 - STRIP, 5.0, -1)
     elif side:
         g.stalls(kx + kw / 2 + 1.5, cx - cw / 2 - 1.0, y1 - STRIP, 5.0, -1)
-    g.boxc(x0 + STRIP + .6, y0 + 5.5, .5, .5, 0.0, 1.4, S_METAL)   # Air and water.
+    g.air_pump(x0 + STRIP + .6, y0 + 5.5, quarter=1)
+    for tx in (x0 + STRIP / 2, x1 - STRIP / 2):
+        g.tree(tx, y0 + 6.5, .8, base=LAYER['lawn'])
 
 
 def _fast_food(c):
@@ -932,6 +1026,9 @@ def _school(c):
         if b - a > .6:
             g.layer((a, y0, b, y0 + lawn_d - .3), S_GRASS, 'lawn')
     g.flagpole_base(door_x - 6.0, y0 + 2.5)
+    for tx in _spaced(lawn_x0 + 4, x1 - 4, 9.0):
+        if abs(tx - door_x) > 7:
+            g.tree(tx, y0 + 2.6, .9, base=LAYER['lawn'])
     _entrance_canopy(c, classroom, width=7.0)
     fence_back = y1 - STRIP - .5
     if side:
@@ -1056,6 +1153,9 @@ def _school_court(c):
     g.layer((gate - 2.5, y0 - c.approach, gate + 2.5, y0 + lawn_d + 2.0), S_CONCRETE, 'apron')
     g.layer((gx - 3.0, y0 - c.approach, gx + 3.0, gy - gym_d / 2), S_CONCRETE, 'apron')
     g.flagpole_base(gate + 4.5, y0 + 2.5)
+    for tx in _spaced(x0 + 4, x1 - 4, 9.0):
+        if abs(tx - gate) > 5.5 and abs(tx - gx) > 5.5:
+            g.tree(tx, y0 + 2.6, .9, base=LAYER['lawn'])
     # Grounds between the gym and the wing; play area behind the gym.
     yard = (gx + gym_w / 2 + 2.0, y0 + lawn_d + 2.0, wx - wd / 2 - 3.5, y1 - STRIP - 1)
     behind = (x0 + STRIP + 1, gy + gym_d / 2 + 2.0, gx + gym_w / 2, y1 - STRIP - 1)
@@ -1125,6 +1225,8 @@ def _hospital(c):
     # Drop-off loop round a planted island in front of the entrance.
     g.poly([(mx - 7, y0 + 3.0), (mx + 7, y0 + 3.0), (mx + 7, y0 + 6.0), (mx - 7, y0 + 6.0)],
            S_GRASS, 0.0, LAYER['island'])
+    for k in range(3):
+        g.tree(mx - 5 + k * 5, y0 + 4.5, .8, base=LAYER['island'])
     g.layer((mx - 9, y0 + 7.0, mx + 9, my - dp / 2), S_CONCRETE, 'walk')
     # Parking beyond the emergency drive.
     if x1 - STRIP - ex1 > 14:
@@ -1205,7 +1307,8 @@ def _police(c):
                                           doors=[('front', gw / 2, 3.4, 3.4)]),
                    lot[2] - gd / 2 - .5, lot[3] - gw / 2 - .5, quarter=3, role='sally port')
         g.stalls(lot[0] + 1.0, lot[2] - gd - 3.0, lot[3], 5.0, -1)
-        g.fence_bases([(lot[0], lot[1]), (lot[0], lot[3]), (lot[2], lot[3]), (lot[2], lot[1] + 6.0)])
+        g.fence_bases([(lot[0], lot[1]), (lot[0], lot[3]), (lot[2], lot[3]), (lot[2], lot[1] + 6.0)],
+                      height=2.4)
     if c.condition == 'INTACT':
         spec = c.spec(station)
         ax, ay = c.to_site(station, bw * .8, bd * .7)
@@ -1252,7 +1355,7 @@ def _fire_station(c):
     with c.attached(hall):
         g.box(hx - hw / 2 + .8, front - .3, 6.1, hx + hw / 2 - .8, front + .04, 6.9, S_SIGN)
     g.flagpole_base(x1 - STRIP - 2.0, y0 + 3.0)
-    g.cylinder(x0 + STRIP + .6, y0 + 7.0, .18, 0.0, .8, S_SIGN)    # Hydrant.
+    g.hydrant(x0 + STRIP + .6, y0 + 7.0)
     back = hy + hd / 2 + 1.0
     if y1 - STRIP - back > 6:
         g.stalls(hx + hw / 2 + 1.0, stalls_x1, y1 - STRIP, 5.0, -1)
@@ -1357,6 +1460,7 @@ def _park(c):
                 if abs(x - cx) < 8 and abs(y - cy) < 8:
                     continue
                 g.box(x - .9, y - .9, 0.0, x + .9, y + .9, .6, S_CONCRETE)    # Planter.
+                g.tree(x, y, .85, base=.6)
         g.boxc(x1 - 4.0, y1 - 4.0, 3.0, 3.0, 0.0, 2.8, S_METAL)
         solids.frustum(g.mesh, [(x1 - 5.8, y1 - 5.8), (x1 - 2.2, y1 - 5.8), (x1 - 2.2, y1 - 2.2),
                                 (x1 - 5.8, y1 - 2.2)],
@@ -1408,6 +1512,10 @@ def _park(c):
             for k, x in enumerate(_spaced(inner[0] + 2.5, inner[2] - 2.5, 7.0)):
                 if pad[3] + 3.0 < inner[3] - 1.5:
                     g.table(x, inner[3] - 2.0, umbrella=k % 2 == 0)
+        for x, y in ((inner[0] + 2.5, inner[1] + 2.5), (inner[2] - 2.5, inner[1] + 2.5),
+                     (x0 + 1.5, y0 + 1.5), (x1 - 1.5, y0 + 1.5), (x0 + 1.5, y1 - 1.5),
+                     (x1 - 1.5, y1 - 1.5)):
+            g.tree(x, y, 1.0)
         return
     # GREEN: diagonal paths to a fountain plaza.
     radius = min(c.W, c.D) * .12 + 2.6
@@ -1429,11 +1537,28 @@ def _park(c):
         angle = math.pi / 4 + k * math.pi / 2 + math.pi / 4
         g.bench(math.cos(angle) * (radius - .9), math.sin(angle) * (radius - .9),
                 quarter=round(angle / (math.pi / 2)) % 4, base=LAYER['plaza'])
+    for x in _spaced(x0 + 3, x1 - 3, 7.5):
+        for y in _spaced(y0 + 3, y1 - 3, 7.5):
+            jx, jy = x + rng.uniform(-1.2, 1.2), y + rng.uniform(-1.2, 1.2)
+            if math.hypot(jx, jy) < radius + 2.5:
+                continue
+            if any(_segment_distance((jx, jy), a, b) < 3.2 for a, b in paths):
+                continue
+            g.tree(jx, jy, rng.uniform(.8, 1.15))
     for a, b in paths:
         mx, my = (a[0] + b[0]) / 2, (a[1] + b[1]) / 2
         length = math.dist(a, b) or 1
         nx, ny = -(b[1] - a[1]) / length, (b[0] - a[0]) / length
         g.lamp(mx + nx * 1.8, my + ny * 1.8, 4.5)
+
+
+def _segment_distance(p, a, b):
+    ax, ay = a
+    bx, by = b
+    dx, dy = bx - ax, by - ay
+    length = dx * dx + dy * dy
+    t = 0.0 if length < 1e-9 else max(0.0, min(1.0, ((p[0] - ax) * dx + (p[1] - ay) * dy) / length))
+    return math.hypot(p[0] - (ax + dx * t), p[1] - (ay + dy * t))
 
 
 def _parking_lot(c):
@@ -1625,7 +1750,7 @@ def _shopping_plaza(c):
     field_x1 = x1 - STRIP if wing is None else wing[0] - wing[3] / 2 - walk - 1.0
     _parking_field(c, (field_x0, y0 + 3.0, field_x1, front_line), trees=True)
     for x in _spaced(field_x0 + 14, field_x1 - 12, 22.0):
-        g.box(x - 1.6, front_line - 1.2, 0.0, x + 1.6, front_line - 1.1, 1.0, S_METAL)  # Cart corral.
+        g.cart_corral(x, front_line - 1.15)
     g.sign(x1 - 4.0, y0 + 1.6, 4.0, 6.0, 12.0)
 
 

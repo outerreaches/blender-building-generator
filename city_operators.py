@@ -1,10 +1,12 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Blender adapter for the pure city plan and architecture recipes."""
+import json
 import math
 import bpy
 from bpy.props import BoolProperty, EnumProperty, FloatProperty, IntProperty
 from .city_plan import CONDITIONS, VERSION, CitySettings, generate_city, stream
 from .dims import GROUND_SLAB
+from .metadata import SPACES as METADATA_SPACES, CityMetadata
 from .spec import BuildingSpec
 from .sites import KINDS as SITE_KINDS, VARIANTS as SITE_VARIANTS, compose as compose_site
 from .streets import (build_ground_mesh, build_outer_road_mesh, build_street_mesh, junctions,
@@ -249,14 +251,22 @@ def build_route_guides(plan, collection, origin):
         curve.materials.append(material('City_Route_' + str(index), colors[index % len(colors)]))
 
 
-def build_sites(plan, root, origin, detail):
+def _object_facts(obj):
+    """Entrances, height and enterable floors recorded on a building object."""
+    if obj is None or 'entrances' not in obj:
+        return (), None, None
+    return ([tuple(e) for e in json.loads(obj['entrances'])], obj.get('height'),
+            obj.get('enterable_floors'))
+
+
+def build_sites(plan, root, origin, detail, props=True, meta=None):
     """Points of interest (one object tree per site) and transit stops."""
     collection = bpy.data.collections.new('Sites')
     root.children.link(collection)
     h = plan.settings.curb_height
     for poi in plan.pois:
         site = compose_site(poi.kind, poi.width, poi.depth, poi.seed, None, poi.condition,
-                            poi.damage, poi.approach)
+                            poi.damage, poi.approach, props)
         if detail == 'SHELLS':
             obj = create_site(poi.id, site, collection)
         else:
@@ -265,11 +275,19 @@ def build_sites(plan, root, origin, detail):
         obj.rotation_euler.z = poi.rotation
         obj['condition'], obj['district'], obj['city_style'] = poi.condition, poi.district, poi.style
         obj['asset_seed'] = poi.seed
+        if meta is not None:
+            names = list(obj.get('building_objects', []))
+            made = []
+            for building, name in zip(site.buildings, names):
+                made.append((building, name) + _object_facts(bpy.data.objects.get(name)))
+            meta.add_site(poi, site, obj.name, made)
     meshes = {}
     for shelter in plan.shelters:
         obj = create_shelter(shelter.id, shelter.variant, collection, meshes)
         obj.location = (origin.x + shelter.position[0], origin.y + shelter.position[1], origin.z + h)
         obj.rotation_euler.z = shelter.rotation
+        if meta is not None:
+            meta.add_shelter(shelter, obj.name)
     return collection
 
 
@@ -325,6 +343,14 @@ class MESH_OT_generate_city(bpy.types.Operator):
     downtown_superblocks: FloatProperty(name='Downtown Superblocks', default=.35, min=0, max=1,
                                         description='Share of downtown local streets closed so '
                                                     'blocks join into towers on 2x1 and 2x2 superblocks')
+    small_props: BoolProperty(name='Small Props', default=True,
+                              description='Model benches, gas pumps, lamps, bollards, bins, dumpsters, tables, '
+                                          'play equipment, goals, booths, hydrants and cart corrals. Off: the game '
+                                          'places them from the city metadata')
+    metadata_space: EnumProperty(name='Metadata Space',
+                                 items=[('UNITY', 'Unity', 'Unity world space as the exported FBX imports'),
+                                        ('BLENDER', 'Blender', 'Blender world space, Z up')],
+                                 description='Coordinate space of the city metadata JSON')
     points_of_interest: BoolProperty(name='Points of Interest', default=True,
                                      description='Gas stations, schools, hospitals, parks, parking, malls '
                                                  'and transit stops on reserved blocks')
@@ -343,7 +369,8 @@ class MESH_OT_generate_city(bpy.types.Operator):
             ('City Growth', ('seed', 'radius', 'block_size', 'primary_count', 'secondary_count', 'driving_loop_count')),
             ('Density and Access', ('curve_radius', 'core_radius', 'core_density', 'outskirts_density', 'road_density', 'setback', 'sidewalk_width', 'curb_height', 'wasteland', 'highway_reach')),
             ('Buildings', ('style', 'damage', 'max_buildings', 'downtown_superblocks',
-                           'points_of_interest', 'detail')),
+                           'points_of_interest', 'small_props', 'detail')),
+            ('Game Data', ('metadata_space',)),
         ):
             group = layout.box()
             group.label(text=title)
@@ -360,6 +387,7 @@ class MESH_OT_generate_city(bpy.types.Operator):
         settings = CitySettings(**{key: getattr(self, key) for key in CitySettings.__dataclass_fields__})
         root = None
         plan_text = None
+        metadata_text = None
         try:
             plan = generate_city(settings)
             root = bpy.data.collections.new(f'City_{self.seed}_{self.detail}')
@@ -399,6 +427,8 @@ class MESH_OT_generate_city(bpy.types.Operator):
             ground['surface_role'] = 'terrain'
             ground.location = origin
             context.window_manager.progress_begin(0, max(1, len(plan.lots)))
+            meta = CityMetadata(plan, tuple(origin), self.metadata_space, self.small_props,
+                                addon_version(), root.name)
             for index, lot in enumerate(plan.lots):
                 col = districts[lot.district]
                 params = building_recipe(lot.style, lot.width, lot.depth, lot.floors,
@@ -429,9 +459,18 @@ class MESH_OT_generate_city(bpy.types.Operator):
                               x1 - lot.width / 2, y1 - lot.depth / 2)
                 foundation = build_frontage(lot, plan, col, sunken)
                 foundation.location = (origin.x + lot.center[0], origin.y + lot.center[1], origin.z)
+                entrances, height, floors = _object_facts(obj)
+                if height is None:
+                    height = (2.2 if lot.condition == 'COLLAPSED'
+                              else lot.floors * params['floor_height'])
+                meta.add_lot(lot, obj.name, entrances, height, floors)
                 context.window_manager.progress_update(index + 1)
             if plan.pois or plan.shelters:
-                build_sites(plan, root, origin, self.detail)
+                build_sites(plan, root, origin, self.detail, self.small_props, meta)
+            metadata_text = bpy.data.texts.new(f'{root.name}_metadata.json')
+            metadata_text.write(json.dumps(meta.as_dict(), indent=1))
+            root['metadata_text'] = metadata_text.name
+            root['small_props'] = self.small_props
             plan_text = bpy.data.texts.new(f'{root.name}_plan.json')
             plan_text.write(plan.to_json())
             root['plan_text'] = plan_text.name
@@ -450,6 +489,8 @@ class MESH_OT_generate_city(bpy.types.Operator):
                 remove_generated_collection(root)
             if plan_text is not None:
                 bpy.data.texts.remove(plan_text)
+            if metadata_text is not None:
+                bpy.data.texts.remove(metadata_text)
             self.report({'ERROR'}, f'City generation failed: {exc}')
             return {'CANCELLED'}
         finally:
@@ -536,6 +577,9 @@ class MESH_OT_generate_site(bpy.types.Operator):
                                    for condition in CONDITIONS])
     damage: FloatProperty(name='Damage', default=.35, min=0, max=1)
     approach: FloatProperty(name='Front Approach (m)', default=2, min=0, max=12)
+    small_props: BoolProperty(name='Small Props', default=True,
+                              description='Model benches, pumps, lamps and other small props '
+                                          '(off: only their markers, in the site metadata)')
     detail: EnumProperty(name='Output', items=[('SHELLS', 'Detailed Shells', ''),
                                                ('PREVIEW', 'Layout Preview', '')])
 
@@ -555,11 +599,13 @@ class MESH_OT_generate_site(bpy.types.Operator):
                 variant = None
             site = compose_site(self.kind, self.width, self.depth, self.seed, variant,
                                 self.condition, self.damage if self.condition != 'INTACT' else 0.0,
-                                self.approach)
+                                self.approach, self.small_props)
             builder = create_site if self.detail == 'SHELLS' else create_site_preview
             obj = builder(f'{self.kind.title()}_{self.seed}', site, collection)
             obj.location = context.scene.cursor.location
             obj['condition'], obj['asset_seed'] = self.condition, self.seed
+            # Placements for game assets, in the site's object space.
+            obj['markers'] = json.dumps(site.markers)
             for note in site.notes:
                 self.report({'WARNING'}, note)
             self.report({'INFO'}, f'{site.kind.title()} ({site.variant.title()}), '

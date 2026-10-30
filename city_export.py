@@ -1,7 +1,10 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Export only a generated city's static meshes, preserving editable source objects."""
+import json
+import os
+
 import bpy
-from bpy.props import StringProperty
+from bpy.props import BoolProperty, StringProperty
 from bpy_extras.io_utils import ExportHelper
 
 
@@ -11,6 +14,9 @@ class EXPORT_SCENE_OT_procedural_city(bpy.types.Operator, ExportHelper):
     filename_ext = '.fbx'
     filter_glob: StringProperty(default='*.fbx', options={'HIDDEN'})
     city_collection: StringProperty(name='City Collection')
+    write_metadata: BoolProperty(name='Write City Metadata (.city.json)', default=True,
+                                 description='Roads, buildings and entrances, sites and markers '
+                                             'for game-side placement, next to the FBX')
 
     def invoke(self, context, event):
         candidates = [c for c in bpy.data.collections if 'generator_version' in c]
@@ -23,6 +29,7 @@ class EXPORT_SCENE_OT_procedural_city(bpy.types.Operator, ExportHelper):
 
     def draw(self, context):
         self.layout.prop_search(self, 'city_collection', bpy.data, 'collections')
+        self.layout.prop(self, 'write_metadata')
         self.layout.label(text='Meshes only; metres; triangulated; materials and UVs.')
 
     def execute(self, context):
@@ -55,7 +62,14 @@ class EXPORT_SCENE_OT_procedural_city(bpy.types.Operator, ExportHelper):
                 use_custom_props=True, path_mode='AUTO')
             if result != {'FINISHED'}:
                 raise RuntimeError('FBX exporter did not finish')
-            self.report({'INFO'}, f'Exported {len(objects)} static mesh objects for Unity')
+            message = f'Exported {len(objects)} static mesh objects for Unity'
+            if self.write_metadata:
+                path = write_city_metadata(collection, bpy.path.ensure_ext(self.filepath, '.fbx'))
+                if path:
+                    message += f' and {os.path.basename(path)}'
+                else:
+                    self.report({'WARNING'}, 'This city has no metadata; regenerate it to get one')
+            self.report({'INFO'}, message)
             return {'FINISHED'}
         except Exception as exc:
             self.report({'ERROR'}, f'City export failed: {exc}')
@@ -65,6 +79,32 @@ class EXPORT_SCENE_OT_procedural_city(bpy.types.Operator, ExportHelper):
             for obj in selected:
                 obj.select_set(True)
             context.view_layer.objects.active = active
+
+
+def write_city_metadata(collection, fbx_path):
+    """Write the city's metadata as ``<name>.city.json`` beside the FBX.
+
+    Object names in the metadata are checked against the collection, so a
+    renamed or deleted object shows up as a missing entry rather than silently.
+    """
+    text = bpy.data.texts.get(collection.get('metadata_text', ''))
+    if text is None:
+        return None
+    data = json.loads(text.as_string())
+    names = {obj.name for obj in collection.all_objects}
+    missing = []
+    for group in ('buildings', 'sites', 'transit_stops'):
+        for entry in data.get(group, ()):
+            if entry.get('object') not in names:
+                missing.append(entry.get('object'))
+            for building in entry.get('buildings', ()):
+                if building.get('object') not in names:
+                    missing.append(building.get('object'))
+    data['missing_objects'] = missing
+    path = os.path.splitext(fbx_path)[0] + '.city.json'
+    with open(path, 'w', encoding='utf-8') as handle:
+        json.dump(data, handle, indent=1)
+    return path
 
 
 def menu_export(self, context):

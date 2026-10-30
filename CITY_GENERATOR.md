@@ -4,7 +4,7 @@ This generator supplies the main static environment for a low-poly first-person 
 
 ## Try it
 
-Install `output/procedural_building_shell_v0.12.3.zip` as a Blender add-on (remove the old version and restart Blender first; each city collection records the `addon_version` that made it). Use **Shift+A → Mesh → Generate City**, **Generate Building by Style** or **Generate Site (Point of Interest)**. Start with **Layout Preview**; select **Detailed Shells** for windows, doors, floors, damage and optional interiors. Both modes use the same plan. Each run creates a new collection at the 3D cursor. Undo removes that run; failure rolls back its own objects.
+Install `output/procedural_building_shell_v0.13.0.zip` as a Blender add-on (remove the old version and restart Blender first; each city collection records the `addon_version` that made it). Use **Shift+A → Mesh → Generate City**, **Generate Building by Style** or **Generate Site (Point of Interest)**. Start with **Layout Preview**; select **Detailed Shells** for windows, doors, floors, damage and optional interiors. Both modes use the same plan. Each run creates a new collection at the 3D cursor. Undo removes that run; failure rolls back its own objects.
 
 The original single-building and bulk operators remain available. Architecture uses six district archetypes built from rectangular shells:
 
@@ -38,6 +38,8 @@ The original single-building and bulk operators remain available. Architecture u
 | Interior Ratio | Fraction of enterable buildings that get full interior layouts (default 0.25) |
 | Building Budget | Stable sampling cap on eligible lots; reports when capped |
 | Downtown Superblocks | Share of downtown local streets closed so blocks join into 2 x 1 and 2 x 2 superblocks (default 0.35) |
+| Small Props | Model benches, gas pumps, lamps, bollards, bins, dumpsters, tables, play equipment, goals, booths, hydrants and cart corrals (default on). Off: no meshes for them; the metadata still lists every one for the game to place |
+| Metadata Space | Coordinate space of the city metadata: Unity (default) or Blender |
 | Points of Interest | Reserve blocks for gas stations, fast food, schools, hospitals, police and fire stations, transit, parks, parking and malls, and put transit stops on the footways (default on) |
 | Worn Lane Markings | Optional broken paint on highway/arterial/collector roads |
 | Show Driving Route Guides | Colored curves, excluded from FBX export |
@@ -252,6 +254,46 @@ grounds origin at the pad centre. Transit stops of one kind share a mesh.
 
 The referenced Ares capsule is 2 m high, radius 0.4 m, with a 0.4 m step offset and 45° slope limit. Its 1.5 m camera-pivot height is used in the street preview. Actual collision/navigation behaviour still needs Unity play tests.
 
+## Game data: city metadata
+
+Each city run stores `<collection>_metadata.json` as a text datablock, and
+**File → Export → Generated City for Unity** writes it beside the FBX as
+`<name>.city.json` (**Write City Metadata**, on by default). The exporter
+checks every object the metadata names still exists, and lists any that
+don't in `missing_objects`.
+
+**Coordinates.** Metres, Unity world space by default, matching the
+GameObjects the FBX import creates. A Blender point (x, y, z) becomes
+(−x, z, −y); the exporter writes Y-up axes in centimetres, and Unity's
+default import converts to metres and mirrors X. Every entry has `position`,
+a unit `forward` vector and `yaw`: the rotation about +Y (degrees) that turns
+an asset modelled facing +Z to face `forward`. Use `yaw` rather than the
+imported GameObject rotations, which carry the FBX axis correction. With
+**Metadata Space** set to Blender, positions are Blender world space and
+`yaw` turns a −Y-facing asset about +Z.
+
+The layout suits `JsonUtility`: no dictionaries, nested arrays or nulls.
+Point lists are flat `[x, y, z, x, y, z, …]`. The C# data classes are in
+`docs/unity/CityMetadata.cs` (checked by compiling them and parsing a real
+file).
+
+| Field | Contents |
+| --- | --- |
+| `city` | Seed, origin, extent, block size, wasteland, curb height, sidewalk width, whether small props were modelled |
+| `districts` | District seeds: id, role, style, position |
+| `roads` | Every route: tier, width, lattice nodes, centreline points at carriageway level (footways run along both sides) |
+| `junctions` | Lattice nodes with roads: position, radius (widest half-width plus footway), number of roads |
+| `driving_loops`, `outer_roads` | The driving circuits; the highways beyond the city edge (start, forward, length, fade) |
+| `buildings` | One per lot: object name, style, district, condition, damage, floors, height, interiors, enterable floors, party walls, block group, footprint (position at the base, forward = front, width, depth), and `entrances` (each street door's position, outward forward and width) |
+| `sites` | Points of interest: grounds object, kind, variant, condition, pad; their buildings with the same fields as above |
+| `transit_stops` | Shelters and stops: object, variant, road edge |
+| `markers` | Placements for game assets: every small prop (`bench`, `lamp`, `bollard`, `gas_pump`, `dumpster`, `table`, `booth`, `play_structure`, `swings`, `goal`, `trash_bin`, `air_pump`, `hydrant`, `cart_corral`; `modelled` says whether the city mesh has it), `tree` spots, `flagpole` plinths, `fence` lines (post line points and a suggested height) and `parking_stall`s (centre and nose-in direction, for wrecked cars). Each has its site id and, where it applies, `size` (width, depth, height), `height`, `scale` (trees), `umbrella` or `barrier` |
+| `counts` | Totals per section and per marker type |
+
+Objects also carry custom properties that the FBX passes to Unity as user
+properties, such as `condition`, `party_walls`, `entrances` (object space)
+and `addon_version`.
+
 ## Unity export and artifacts
 
 Use **File → Export → Generated City for Unity (.fbx)** and choose the root city collection. This exports only its mesh objects, triangulates them, preserves UV/material assignments, and uses metre scale with Y-up axis conversion. It restores selection and active object. Hidden/excluded city objects and non-unit scene scales are rejected instead of silently omitted/rescaled. Editable source objects are not joined or destructively triangulated.
@@ -262,6 +304,7 @@ Workspace `output` examples:
 
 - `ares_city_base.blend`: radius 8 (about 900 m across): 487 detailed buildings across six districts and all nine conditions (about 165 of them party-walled downtown towers), 30 sites and 27 transit stops, sidewalks/foundations, and the highway running 3 km out of each end; street-level camera. Guide curves are hidden after the overview render.
 - `ares_city_base.fbx`: the same base, 1072 static mesh objects, without guide curves.
+- `ares_city_base.city.json`: its metadata (see "Game data" above).
 - `v0.11.0_review/`: every site kind and layout (intact, weathered, collapsed) and the sites in the city.
 - `v0.11.1_review/`: the radius-8 base city, its sites, and the highway leaving the city and fading out (`highway_out_*`).
 - `v0.12.0_review/`: the dense downtown (`downtown_*`), plus the same site and highway views.

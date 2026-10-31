@@ -67,6 +67,7 @@ class LevelPlan:
     rooms: list = field(default_factory=list)
     walls: list = field(default_factory=list)
     fixtures: list = field(default_factory=list)   # (x0, y0, x1, y1, height, kind[, facing]): game assets
+    terraces: list = field(default_factory=list)   # Stepped auditorium floors (Terrace).
     holes: list = field(default_factory=list)      # Openings in this storey's floor slab.
     stair: Stair = None                            # Flights from this storey up.
     doors: list = field(default_factory=list)      # (room, parent, axis, line, centre, width)
@@ -213,6 +214,7 @@ class Tiling:
         self.index = index
         self.rooms = []
         self.fixtures = []
+        self.terraces = []
 
     def add(self, name, kind, rect, parent=None, **extra):
         x0, y0, x1, y1 = rect
@@ -232,7 +234,8 @@ class Tiling:
         return abs(area - (x1 - x0) * (y1 - y0)) < 1e-3
 
     def level(self):
-        return LevelPlan(self.index, self.rect, self.rooms, fixtures=self.fixtures)
+        return LevelPlan(self.index, self.rect, self.rooms, fixtures=self.fixtures,
+                         terraces=self.terraces)
 
 
 def _common_rect(spec):
@@ -1048,22 +1051,129 @@ def plan_motel(spec, rng):
     return Plan([tiling.level()], doors)
 
 
+# Cinema auditoriums have stadium seating: the floor rises in tiers from a
+# flat strip in front of the screen. Risers stay under the player's 0.4 m step
+# offset, so the tiers are walked straight up.
+TERRACE_TREAD = 1.0
+TERRACE_RISER = .3
+TERRACE_FLAT = 4.0        # Least depth of the flat strip before the first tier.
+TERRACE_HEADROOM = 2.6    # Clear height kept over the top tier.
+TERRACE_PIECE = 2.4       # Tiers are built in pieces this wide (damage takes pieces).
+SEAT_PITCH = .6
+SEAT_SIZE = (.55, .55, .9)
+SEAT_BACK = .6            # Seat centre behind its tier's front edge.
+SEAT_AISLE = 1.0          # Side aisles; rows wider than SEAT_SPLIT get a centre aisle.
+SEAT_CENTRE_AISLE = 1.2
+SEAT_SPLIT = 14.0
+
+
+@dataclass
+class Terrace:
+    """Stadium seating in an auditorium: the floor rises in ``rows`` tiers from
+    a flat strip ``flat`` deep along the rect's low-y edge (the screen wall,
+    which the room is entered by) to its far wall. Seats face -y."""
+    room: str
+    rect: tuple
+    rows: int
+    flat: float
+
+    def tiers(self):
+        """[(y0, y1, top)] per tier, ``top`` above the floor; the last tier
+        runs to the far wall."""
+        x0, y0, x1, y1 = self.rect
+        result = []
+        for row in range(1, self.rows + 1):
+            a = y0 + self.flat + (row - 1) * TERRACE_TREAD
+            result.append((a, y1 if row == self.rows else a + TERRACE_TREAD,
+                           row * TERRACE_RISER))
+        return result
+
+    def pieces(self):
+        """(x0, y0, x1, y1, top, row) solids, 2 cm into the walls round them so
+        none of their faces lies on a wall face."""
+        x0, y0, x1, y1 = self.rect
+        count = max(1, math.ceil((x1 - x0) / TERRACE_PIECE))
+        cuts = [x0 + (x1 - x0) * i / count for i in range(count + 1)]
+        cuts[0], cuts[-1] = x0 - .02, x1 + .02
+        result = []
+        for row, (a, b, top) in enumerate(self.tiers(), 1):
+            b += .02 if row == self.rows else 0.0
+            result.extend((u, a, v, b, top, row) for u, v in zip(cuts, cuts[1:]))
+        return result
+
+    def seats(self):
+        """(x, y, top) seat centres in rows on every tier, with side aisles and,
+        in a wide room, a centre aisle."""
+        x0, y0, x1, y1 = self.rect
+        lo, hi = x0 + SEAT_AISLE, x1 - SEAT_AISLE
+        blocks = [(lo, hi)]
+        if hi - lo > SEAT_SPLIT:
+            mid = (lo + hi) / 2
+            blocks = [(lo, mid - SEAT_CENTRE_AISLE / 2), (mid + SEAT_CENTRE_AISLE / 2, hi)]
+        result = []
+        for a, _, top in self.tiers():
+            for u, v in blocks:
+                count = int((v - u + 1e-9) // SEAT_PITCH)
+                start = (u + v) / 2 - (count - 1) * SEAT_PITCH / 2
+                result.extend((start + i * SEAT_PITCH, a + SEAT_BACK, top) for i in range(count))
+        return result
+
+
+def terrace(name, rect, clear, flat):
+    """A Terrace for an auditorium with ``clear`` height, or None if it is too
+    small for two tiers."""
+    x0, y0, x1, y1 = rect
+    rows = min(int((y1 - y0 - flat) // TERRACE_TREAD),
+               int((clear - TERRACE_HEADROOM) // TERRACE_RISER))
+    if rows < 2 or x1 - x0 < 2 * SEAT_AISLE + 2 * SEAT_PITCH:
+        return None
+    return Terrace(name, rect, rows, flat)
+
+
+def terrace_lost(field, z, piece):
+    """Whether damage has taken a terrace piece (the shell leaves it out and
+    its seats go with it)."""
+    x0, y0, x1, y1, top, _ = piece
+    cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
+    return field.damaged and (field.height(cx, cy) < z + top + .2 or
+                              field.in_blast(cx, cy, z + top / 2))
+
+
 def plan_cinema(spec, rng):
     """Cinema: a lobby across the front (ticket desk, concession counter) and
-    either one big auditorium behind it (``params['cinema'] == 'PALACE'``) or
-    a corridor to several auditoriums with exits at the back (multiplex),
-    restrooms at the lobby ends."""
+    behind it one big auditorium (``params['cinema'] == 'PALACE'``), two side
+    by side ('TWIN') or a corridor to several ('MULTIPLEX'), restrooms at the
+    lobby ends. Each auditorium's screen is on the wall it is entered by; its
+    floor rises in tiers (stadium seating) from the flat strip in front of the
+    screen, where its exits are too."""
     rect = spec.interior_rect(0)
     x0, y0, x1, y1 = rect
     tiling = Tiling(rect, 0)
     piers = spec.piers(0)
-    palace = spec.params.get('cinema') == 'PALACE'
-    side = sorted(set(piers['left']) & set(piers['right'])) or piers['left']
-    target = y0 + (7.0 if palace else 10.0)
+    variant = spec.params.get('cinema', 'MULTIPLEX')
+    palace = variant == 'PALACE'
+    side = [p for p in piers['left'] if any(abs(p - q) < 1e-6 for q in piers['right'])]
+    side = side or piers['left']
+    target = y0 + (10.0 if variant == 'MULTIPLEX' else 7.0)
     options = [p for p in side if y0 + 5.0 <= p <= y1 - 12.0]
     if not options:
         return plan_open(spec, rng)
     lobby_y = min(options, key=lambda p: abs(p - target))
+    level = spec.levels[0]
+    clear = level.height - (spec.roof_slab if len(spec.levels) == 1 else spec.slab)
+    # Side exits open from the first bay behind the lobby wall; the flat strip
+    # in front of the screen covers it.
+    beyond = [p for p in side if p >= lobby_y + 1.6 + dims.MIN_PIER - 1e-6]
+    bay_end = beyond[0] if beyond else lobby_y + TERRACE_FLAT
+    exit_y = (lobby_y + bay_end) / 2
+    flat = max(TERRACE_FLAT, bay_end - lobby_y + .6)
+
+    def auditorium(name, room_rect, parent):
+        tiling.add(name, 'auditorium', room_rect, parent)
+        seating = terrace(f'{name}_0', room_rect, clear, flat)
+        if seating is not None:
+            tiling.terraces.append(seating)
+
     doors = [('front', (x0 + x1) / 2, 2.4 if palace else 3.6)]
     ends = [p for p in piers['front'] if x0 + 3.0 <= p <= x0 + 5.5]
     ends_r = [p for p in piers['front'] if x1 - 5.5 <= p <= x1 - 3.0]
@@ -1078,22 +1188,26 @@ def plan_cinema(spec, rng):
     tiling.fixtures.append((la + 1.0, lobby_y - 2.2, mid - 1.6, lobby_y - 1.5, 1.05,
                             'service_counter'))
     tiling.fixtures.append((lb - 3.4, y0 + 1.6, lb - 1.0, y0 + 2.3, 1.1, 'reception_desk'))
-    if palace:
-        tiling.add('auditorium', 'auditorium', (x0, lobby_y, x1, y1), 'lobby')
-        exit_y = (lobby_y + y1) / 2 + (y1 - lobby_y) * .25
+    middle = [p for p in piers['back'] if x0 + (x1 - x0) * .35 <= p <= x1 - (x1 - x0) * .35]
+    if variant == 'TWIN' and middle:
+        split = min(middle, key=lambda p: abs(p - (x0 + x1) / 2))
+        auditorium('screen0', (x0, lobby_y, split, y1), 'lobby')
+        auditorium('screen1', (split, lobby_y, x1, y1), 'lobby')
         doors += [('left', exit_y, 1.6), ('right', exit_y, 1.6)]
         return Plan([tiling.level()], doors)
-    hall = [p for p in side if lobby_y + 2.4 <= p <= lobby_y + 3.6]
+    hall = [p for p in side if lobby_y + 2.4 <= p <= lobby_y + 4.8]
     hall_y = min(hall, key=lambda p: abs(p - lobby_y - 3.0)) if hall else None
-    if hall_y is None or y1 - hall_y < 10:
-        tiling.add('auditorium', 'auditorium', (x0, lobby_y, x1, y1), 'lobby')
-        doors.append(('back', (x0 + x1) / 2, 1.6))
+    if palace or variant == 'TWIN' or hall_y is None or y1 - hall_y < 10:
+        auditorium('auditorium', (x0, lobby_y, x1, y1), 'lobby')
+        doors += [('left', exit_y, 1.6), ('right', exit_y, 1.6)]
         return Plan([tiling.level()], doors)
+    # Multiplex: the corridor runs the width, with an exit at each end.
     tiling.add('corridor', 'corridor', (x0, lobby_y, x1, hall_y), 'lobby')
     cuts = _split_bays(x0, x1, piers['back'], 10.0, 16.0)
+    flat = TERRACE_FLAT
     for number, (a, b) in enumerate(zip(cuts, cuts[1:])):
-        tiling.add(f'screen{number}', 'auditorium', (a, hall_y, b, y1), 'corridor')
-        doors.append(('back', (a + b) / 2, 1.6))
+        auditorium(f'screen{number}', (a, hall_y, b, y1), 'corridor')
+    doors += [('left', (lobby_y + hall_y) / 2, 1.6), ('right', (lobby_y + hall_y) / 2, 1.6)]
     return Plan([tiling.level()], doors)
 
 
@@ -1367,6 +1481,8 @@ def finish_level(level):
         width = dims.DOOR_WIDTH
         if room.kind in ('bath', 'bedroom', 'office', 'storage', 'kitchen') and hi - lo > 3.2:
             centre = lo + .45 + width / 2      # Doors near a corner, like real rooms.
+        elif room.kind == 'auditorium' and hi - lo > 3.2:
+            centre = lo + 1.2 + width / 2      # Beside the screen, not under it.
         else:
             centre = (lo + hi) / 2
         doors.append((room.name, parent.name, axis, line, centre, width))

@@ -1,5 +1,24 @@
 # Changelog
 
+## v0.20.0: Cinemas with stadium seating; cul-de-sacs among houses only
+
+- **Stadium seating.** Every cinema auditorium has a stepped floor: flat for
+  4 m in front of the screen, where its doors and exits are, then 1 m tiers
+  of 0.3 m (walked straight up; the player's step offset is 0.4 m) to the
+  back wall, with 2.6 m of headroom over the top. Seats are `seat` markers on
+  the tiers, facing the screen, with side and centre aisles; damage takes
+  pieces of the tiers and their seats with them.
+- **Three cinemas, filling their pads.** *Palace* (one tall hall), the new
+  *Twin* (two screens behind a shared lobby) and *Multiplex* (a row of
+  screens off a corridor, with exits at its ends) now fill their pads;
+  a multiplex no longer needs a deep pad (it stands behind its parking only
+  on one). Districts pick between two layouts where both suit them. Fixed:
+  the planner matched side-wall piers by exact float equality, so
+  multiplexes always fell back to one auditorium.
+- **Cul-de-sacs only among houses.** A turning circle needs suburban blocks
+  on all four sides, and sites keep out of those blocks.
+- **One drive-in per city** at most.
+
 ## v0.19.0: Organic city shape
 
 - **City Shape: Organic** in Generate City gives the city a seeded,

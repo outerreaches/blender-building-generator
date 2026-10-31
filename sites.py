@@ -55,11 +55,13 @@ VARIANTS = {
     'MALL': ('DUMBBELL', 'JUNIOR'),
     'HOTEL': ('GRAND', 'BUDGET'),
     'MOTEL': ('STRIP', 'COURT'),
-    'CINEMA': ('PALACE', 'MULTIPLEX'),
+    'CINEMA': ('PALACE', 'TWIN', 'MULTIPLEX'),
     'DRIVE_IN': ('SINGLE', 'TWIN'),
 }
-# Layouts that suit a district style better (when no variant is asked for).
-STYLE_VARIANTS = {'CINEMA': {'OLD_TOWN': 'PALACE', 'DOWNTOWN': 'PALACE', 'BRUTALIST': 'PALACE',
+# Layouts that suit a district style better (when no variant is asked for; a
+# tuple is picked from by the site's seed).
+STYLE_VARIANTS = {'CINEMA': {'OLD_TOWN': ('PALACE', 'TWIN'), 'DOWNTOWN': ('PALACE', 'MULTIPLEX'),
+                             'BRUTALIST': ('TWIN', 'MULTIPLEX'), 'RESIDENTIAL': ('TWIN', 'PALACE'),
                              'SUBURBAN': 'MULTIPLEX', 'INDUSTRIAL': 'MULTIPLEX'},
                   'HOTEL': {'OLD_TOWN': 'GRAND', 'DOWNTOWN': 'GRAND', 'SUBURBAN': 'BUDGET',
                             'INDUSTRIAL': 'BUDGET'},
@@ -473,7 +475,10 @@ class Composer:
         self.seed = seed
         self.rng = random.Random((seed * 1000003) ^ zlib.crc32(kind.encode()))
         choice = self.rng.choice(VARIANTS[kind])
-        self.variant = variant or STYLE_VARIANTS.get(kind, {}).get(style) or choice
+        suited = STYLE_VARIANTS.get(kind, {}).get(style)
+        if isinstance(suited, tuple):
+            suited = self.rng.choice(suited)
+        self.variant = variant or suited or choice
         self.condition = condition
         self.damage = damage
         self.approach = approach
@@ -2123,39 +2128,57 @@ def _motel(c):
 
 
 def _cinema(c):
-    """Cinema. PALACE: a tall single-screen hall on the street, a marquee over
-    the doors and a blade sign above it. MULTIPLEX: a box of screens behind a
-    glazed lobby, an entrance canopy and parking in front."""
+    """Cinema, built out over its pad. PALACE: one tall hall on the street, a
+    marquee over the doors and a blade sign. TWIN: two screens behind a shared
+    lobby, a marquee and a sign on the parapet. MULTIPLEX: a box of screens off
+    a corridor behind a glazed lobby, with an entrance canopy; on a deep pad
+    it stands back behind its parking. Auditoriums have stadium seating."""
     g = c.g
     x0, y0, x1, y1 = c.rect
-    if c.variant == 'PALACE':
-        c.ground(S_CONCRETE)
-        bw = min(26.0, c.W - 2 * STRIP - 4)
-        bd = min(36.0, c.D - 2 * STRIP - 5)
-        bx, by = (x0 + x1) / 2, y0 + 3.0 + bd / 2
-        hall = c.building('cinema', designed(
-            bw, bd, 1, 10.0, c.seed, 'CINEMA', cinema='PALACE', wall_thickness=.4,
-            window_sides='FRONT_ONLY', ground_floor_windows='STOREFRONT',
-            storefront_window_height=2.4, window_width=2.0, window_spacing=1.2, cornice=True,
-            parapet_height=1.4, facade_pilasters=True, pilaster_style='CORNERS',
-            pilaster_sides='FRONT'), bx, by, role='cinema')
-        front = by - bd / 2
-        marquee = min(7.0, bw / 2 - 1.5)
-        with c.attached(hall):
-            g.box(bx - marquee, front - 3.2, 4.0, bx + marquee, front + .05, 5.3, S_SIGN)
+    if c.variant == 'MULTIPLEX' and c.W < 40:
+        c.variant = 'TWIN'                 # Too narrow for a row of screens.
+    if c.variant == 'TWIN' and c.W < 34:
+        c.variant = 'PALACE'
+    if c.variant == 'MULTIPLEX':
+        _multiplex(c)
+        return
+    palace = c.variant == 'PALACE'
+    c.ground(S_CONCRETE)
+    fore = 3.5                             # Forecourt under the marquee.
+    bw = min(44.0 if palace else 50.0, c.W - 2 * STRIP - 3)
+    bd = min(46.0, c.D - fore - 2 * STRIP - 1.5)
+    bx, by = (x0 + x1) / 2, y0 + fore + bd / 2
+    hall = c.building('cinema', designed(
+        bw, bd, 1, 10.0 if palace else 9.0, c.seed, 'CINEMA', cinema=c.variant,
+        wall_thickness=.4 if palace else .35, window_sides='FRONT_ONLY',
+        ground_floor_windows='STOREFRONT', storefront_window_height=2.4, window_width=2.0,
+        window_spacing=1.2, cornice=palace, parapet_height=1.4 if palace else 1.6,
+        facade_pilasters=palace, pilaster_style='CORNERS', pilaster_sides='FRONT'),
+        bx, by, role='cinema')
+    front = by - bd / 2
+    marquee = min(7.0, bw / 2 - 1.5)
+    with c.attached(hall):
+        g.box(bx - marquee, front - 3.2, 4.0, bx + marquee, front + .05, 5.3, S_SIGN)
+        if palace:
             g.box(bx + marquee - .9, front - 1.4, 5.8, bx + marquee - .4, front + .05, 10.6, S_SIGN)
-        g.layer((x0 + STRIP, y0, x1 - STRIP, front), S_CONCRETE, 'plaza')
-        if y1 - STRIP - (by + bd / 2) > 12:
-            _parking_field(c, (x0 + STRIP, by + bd / 2 + 1.5, x1 - STRIP, y1 - STRIP), trees=False)
-        return
-    if c.D - 2 * STRIP < 42 or c.W < 40:
-        c.variant = 'PALACE'               # No room for a box of screens and its parking.
-        _cinema(c)
-        return
+    if not palace:
+        _parapet_sign(c, hall, .3)
+    g.layer((x0 + STRIP, y0, x1 - STRIP, front), S_CONCRETE, 'plaza')
+    if y1 - STRIP - (by + bd / 2) > 12:
+        _parking_field(c, (x0 + STRIP, by + bd / 2 + 1.5, x1 - STRIP, y1 - STRIP), trees=False)
+
+
+def _multiplex(c):
+    g = c.g
+    x0, y0, x1, y1 = c.rect
     c.ground(S_ASPHALT)
-    _lawn_edges(c, ('left', 'right'), front_gap=c.D * .5)
+    deep = c.D - 2 * STRIP >= 58           # Room for a parking field in front.
+    _lawn_edges(c, ('left', 'right'), front_gap=c.D * .5 if deep else 0.0)
     bw = min(64.0, c.W - 2 * STRIP - 4)
-    bd = max(26.0, min(40.0, c.D - 2 * STRIP - 16))
+    if deep:
+        bd = max(26.0, min(40.0, c.D - 2 * STRIP - 16))
+    else:
+        bd = min(40.0, c.D - 2 * STRIP - 6.5)
     back = y1 - STRIP - 2.0
     bx, by = (x0 + x1) / 2, back - bd / 2
     box = c.building('cinema', designed(
@@ -2166,8 +2189,11 @@ def _cinema(c):
     front = by - bd / 2
     _entrance_canopy(c, box, width=10.0, depth=4.0)
     _parapet_sign(c, box, .25)
-    g.layer((bx - bw / 2, front - 4.0, bx + bw / 2, front), S_CONCRETE, 'walk')
-    _parking_field(c, (x0 + STRIP, y0 + 3.0, x1 - STRIP, front - 5.0), trees=True)
+    if deep:
+        g.layer((bx - bw / 2, front - 4.0, bx + bw / 2, front), S_CONCRETE, 'walk')
+        _parking_field(c, (x0 + STRIP, y0 + 3.0, x1 - STRIP, front - 5.0), trees=True)
+    else:
+        g.layer((x0 + STRIP, y0, x1 - STRIP, front), S_CONCRETE, 'plaza')
     g.sign(x1 - 4.0, y0 + 1.6, 4.0, 5.0, 11.0)
 
 

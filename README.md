@@ -41,7 +41,7 @@ sized for the game's 2 m player capsule.
 - **Unity export.** A city-only FBX (metre scale, Y-up, triangulated) and a
   `.city.json` with roads, junctions, buildings and their entrances, sites,
   and markers for game assets (props, trees, fences, flagpoles, parking
-  stalls, counters and desks). Every building also lists its rooms to furnish
+  stalls, counters, desks and cinema seats). Every building also lists its rooms to furnish
   (doors, windows, blank wall runs), its lifts (shaft, doors, car) and its
   railings, since furniture, railings and lift parts are game assets. C#
   classes for `JsonUtility` are included.

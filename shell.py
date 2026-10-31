@@ -75,6 +75,7 @@ def build_building(params):
     _roof(mesh, spec, field, roof_intact, params)
     _facade_details(mesh, spec, field, params)
     _interiors(mesh, spec, field, plan)
+    _terraces(mesh, spec, field, plan)
     _ramps(mesh, spec, field)
     rubble.interior_fill(mesh, rng, spec, field, params)
     rubble.exterior_piles(mesh, rng, spec, params)
@@ -729,6 +730,21 @@ def _ccw(points):
         x1, y1 = points[(index + 1) % len(points)]
         area += x0 * y1 - x1 * y0
     return points if area > 0 else list(reversed(points))
+
+
+# -- terraces ----------------------------------------------------------------
+
+def _terraces(mesh, spec, field, plan):
+    """Stepped auditorium floors: each tier piece is a solid from the floor to
+    its tread (damage takes whole pieces; the rest still stand on the floor)."""
+    for level_plan in plan.levels:
+        z = spec.levels[level_plan.index].z
+        for seating in level_plan.terraces:
+            for piece in seating.pieces():
+                if layouts.terrace_lost(field, z, piece):
+                    continue
+                x0, y0, x1, y1, top, _ = piece
+                solids.box(mesh, x0, y0, z, x1, y1, z + top, MAT_FLOOR)
 
 
 # -- ramps -------------------------------------------------------------------

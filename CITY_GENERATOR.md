@@ -44,7 +44,7 @@ The original single-building and bulk operators remain available. Architecture u
 | Small Props | Model benches, gas pumps, lamps, bollards, bins, dumpsters, tables, play equipment, goals, booths, hydrants, cart corrals, tyre stacks and drive-in speaker posts (default on). Off: no meshes for them; the metadata still lists every one for the game to place |
 | Water | Model water in fountains and other basins (default off: they are dry, and the metadata's `water` markers say where the game adds its own) |
 | Metadata Space | Coordinate space of the city metadata: Unity (default) or Blender |
-| Interior Metadata | List every building's rooms, lifts and railings in the metadata (default on). Off: a much smaller file; counters and desks are still listed |
+| Interior Metadata | List every building's rooms, lifts and railings in the metadata (default on). Off: a much smaller file; counters, desks and cinema seats are still listed |
 | Points of Interest | Reserve blocks for gas stations, fast food, schools, hospitals, police and fire stations, transit, parks, parking and malls, and put transit stops on the footways (default on) |
 | Worn Lane Markings | Optional broken paint on highway/arterial/collector roads |
 | Show Driving Route Guides | Colored curves, excluded from FBX export |
@@ -91,8 +91,8 @@ operator override the preset's.
   sheds one storey. With a single **Architecture** style, downtown is 2–4
   floors and brutalist 2–3.
 - **Sites.** Gas stations, fast food, auto repair, a motel, a school, police
-  and fire stations, parks, a parking lot, strip malls, a palace cinema on
-  the main street, and a drive-in where one fits. Schools and cinemas take a
+  and fire stations, parks, a parking lot, strip malls, a palace or twin
+  cinema on the main street, and a drive-in where one fits. Schools and cinemas take a
   single block. A town has no mall, shopping plaza, hospital, parking garage,
   transit station or hotel, so the retail is not pulled round a mall.
 - **Streets.** The suburbs get cul-de-sacs, as in a city.
@@ -238,13 +238,13 @@ Condition weights per district (percent; `CONDITION_WEIGHTS` in `city_plan.py`):
 ## Street patterns
 
 - **Cul-de-sacs.** In the suburbs, a lattice node that no street reaches,
-  with suburban blocks on at least three sides and none downtown, may get a
-  short local street from a neighbouring road node. Its end is a turning
-  circle with a 10 m carriageway radius, ringed by the footway. The houses
-  either side face the new street, and a ring of up to seven houses faces
-  the circle across a 4 m front yard, each with a path to the footway (fewer
-  where a site or another district takes a corner). Other lots and site pads
-  keep clear of the circle. Each one is listed in the plan's `culdesacs` and, in the metadata,
+  with suburban blocks on all four sides, may get a short local street from
+  a neighbouring road node. Its end is a turning circle with a 10 m
+  carriageway radius, ringed by the footway. Only houses stand round it:
+  sites keep out of those four blocks. The houses either side face the new
+  street, and a ring of up to seven houses faces the circle across a 4 m
+  front yard, each with a path to the footway. Other lots keep clear of the
+  circle. Each one is listed in the plan's `culdesacs` and, in the metadata,
   as a junction with `cul_de_sac` set.
 - **Plazas and strip malls repeat round their district centres.** Parks in
   old town and downtown are laid out as plazas and are drawn toward those
@@ -280,13 +280,13 @@ between the blocks.
 
 - **Quotas.** Each kind has a quota per 100 built-up blocks, with at least one
   per city, and district weights. The enclosed mall goes by map size instead:
-  one from radius 6, two from radius 12.
+  one from radius 6, two from radius 12. A city has one drive-in at most.
   - suburbs favour the mall, gas stations, fast food, strip malls and the
     shopping plaza;
   - industrial districts favour auto repair, and with the suburbs motels and
     the drive-in;
-  - old town and downtown favour hotels and cinemas (palace cinemas and grand
-    hotels there, multiplexes and budget hotels in the suburbs);
+  - old town and downtown favour hotels and cinemas (grand hotels there,
+    budget hotels in the suburbs; cinemas below);
   - downtown favours garages and the transit station;
   - brutalist districts favour the hospital;
   - residential districts favour schools and parks.
@@ -327,8 +327,21 @@ at least once.
 | Enclosed mall | Dumbbell (two anchors), Junior (a big and a junior anchor) | 90 x 80 m |
 | Hotel | Grand (7 floors, corniced), Budget (4 floors, plainer) | 30 x 28 m |
 | Motel | Strip (one row of rooms), Court (a side wing and a pool) | 36 x 28 m |
-| Cinema | Palace (one tall screen, marquee and blade sign), Multiplex (a box of screens; needs about 40 x 45 m) | 32 x 30 m |
+| Cinema | Palace (one tall hall, marquee and blade sign), Twin (two screens behind a shared lobby, marquee and parapet sign; needs 34 m of width), Multiplex (a row of screens off a corridor; needs 40 m, and stands behind its parking on a pad 61 m deep). All fill their pad, and every auditorium has stadium seating | 32 x 30 m |
 | Drive-in cinema | Single, Twin (two screens) | 80 x 40 m |
+
+**Cinemas** pick the layout that suits their district: palace or twin in old
+town, palace or multiplex downtown, twin or palace in residential districts,
+twin or multiplex in brutalist ones, multiplex in the suburbs and industrial
+districts. A layout too wide for its pad steps down (multiplex to twin to
+palace). **Stadium seating:** each auditorium's screen is on the wall it is
+entered by. Its floor is flat for 4 m in front of the screen, where the doors
+and the side exits are, then rises in 1 m tiers of 0.3 m (under the player's
+0.4 m step offset, so the aisles are walked straight up) to the back wall,
+keeping 2.6 m of headroom over the top tier. The tiers are modelled; the
+seats are `seat` markers, 0.6 m apart in rows on every tier with 1 m side
+aisles and a centre aisle in wide rooms. A palace seats about 500–1,500; a
+terraced auditorium lists no wall runs.
 
 Each site is a `<id>_Grounds` mesh (pad, paint, lawns, walks, canopies,
 pumps, signs, benches, play equipment, using 13 `Site_*` material slots).
@@ -399,7 +412,7 @@ the same way.
 | `lifts` (per building) | One per shaft: centre at its lowest stop, clear size, height, the floors it still serves, a door per floor (position, normal out of the shaft, size) and the `car` at the lowest of them |
 | `railings` (per building) | Base lines on the walking surface (flat points) with a rail height: `stair` handrails along the well side of each switchback, `guard` rails at the stair opening of the top floor, `ramp` rails along parking ramps |
 | `transit_stops` | Shelters and stops: object, variant, road edge |
-| `markers` | Placements for game assets: every small prop (`bench`, `lamp`, `bollard`, `gas_pump`, `dumpster`, `table`, `booth`, `play_structure`, `swings`, `goal`, `trash_bin`, `air_pump`, `hydrant`, `cart_corral`, `tyre_stack`, `speaker_post`; `modelled` says whether the city mesh has it), `tree` spots, `flagpole` plinths, `fence` lines (post line points and a suggested height) and `parking_stall`s (centre and nose-in direction, for wrecked cars), fixtures inside buildings (`reception_desk`, `shop_counter`, `service_counter`, `bar_counter`, facing the customers, with `building` and `floor`; never modelled), and `water` surfaces (centre at the surface, `shape`, `size` = width, depth and water depth; modelled only with **Water** on). Each has its site id and, where it applies, `size` (width, depth, height), `height`, `scale` (trees), `umbrella` or `barrier` |
+| `markers` | Placements for game assets: every small prop (`bench`, `lamp`, `bollard`, `gas_pump`, `dumpster`, `table`, `booth`, `play_structure`, `swings`, `goal`, `trash_bin`, `air_pump`, `hydrant`, `cart_corral`, `tyre_stack`, `speaker_post`; `modelled` says whether the city mesh has it), `tree` spots, `flagpole` plinths, `fence` lines (post line points and a suggested height) and `parking_stall`s (centre and nose-in direction, for wrecked cars), fixtures inside buildings (`reception_desk`, `shop_counter`, `service_counter`, `bar_counter`, facing the customers, and cinema `seat`s on their tier, facing the screen; with `building` and `floor`; never modelled), and `water` surfaces (centre at the surface, `shape`, `size` = width, depth and water depth; modelled only with **Water** on). Each has its site id and, where it applies, `size` (width, depth, height), `height`, `scale` (trees), `umbrella` or `barrier` |
 | `counts` | Totals per section and per marker type |
 
 Objects also carry custom properties that the FBX passes to Unity as user

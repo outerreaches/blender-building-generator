@@ -96,8 +96,8 @@ POI_RULES = {
     'CINEMA': dict(blocks=((1, 1), (2, 1)), count=.5, minimum=1, front=('ARTERIAL', 'COLLECTOR'),
                    spacing=6, districts={'OLD_TOWN': 2, 'DOWNTOWN': 1.5, 'SUBURBAN': 1.5,
                                          'RESIDENTIAL': 1}, near=('MALL', 4, 2.0)),
-    'DRIVE_IN': dict(blocks=((2, 1), (2, 2)), count=.3, minimum=1, front=None, spacing=12,
-                     districts={'SUBURBAN': 2, 'INDUSTRIAL': 1.5}),
+    'DRIVE_IN': dict(blocks=((2, 1), (2, 2)), count=.3, minimum=1, most=1, front=None,
+                     spacing=12, districts={'SUBURBAN': 2, 'INDUSTRIAL': 1.5}),
 }
 # Smallest pad each kind is laid out for (mirrors sites.MIN_PAD).
 POI_MIN_PAD = {'GAS_STATION': (24, 22), 'FAST_FOOD': (26, 24), 'SCHOOL': (40, 32),
@@ -859,9 +859,9 @@ TRACT_DEPTH = 11.0
 
 def _add_culdesacs(settings, locations, roads):
     """Dead-end stubs into suburban blocks. A node no street reaches, with
-    suburban blocks on at least three sides, gets one local street from a
+    suburban blocks on all four sides, gets one local street from a
     neighbouring road node; the houses either side face it and its end is a
-    turning circle (``culdesacs``)."""
+    turning circle (``culdesacs``). Sites keep out of those four blocks."""
     size = settings.block_size
     degree = {}
     for a, b in roads:
@@ -875,10 +875,11 @@ def _add_culdesacs(settings, locations, roads):
             if degree.get(node) or any(math.dist(node, end) < 1.5 for end in added):
                 continue
             cells = [(x - 1, y - 1), (x, y - 1), (x - 1, y), (x, y)]
-            styles = [district_at(settings, (cx + .5) * size, (cy + .5) * size, locations).style
-                      for cx, cy in cells]
-            # Downtown blocks are built out to the footway: no turning circle beside them.
-            if styles.count('SUBURBAN') < 3 or 'DOWNTOWN' in styles:
+            centres = [((cx + .5) * size, (cy + .5) * size) for cx, cy in cells]
+            # Only houses stand round a turning circle: all four blocks are
+            # suburban (and inside an organic city's edge).
+            if any(district_at(settings, *c, locations).style != 'SUBURBAN' or
+                   not in_city(settings, *c) for c in centres):
                 continue
             if density_at(settings, x * size, y * size) < .2:
                 continue
@@ -1284,13 +1285,17 @@ def _place_pois(settings, locations, roads, paths, culdesacs=()):
                 if density_at(settings, (x + .5) * size, (y + .5) * size) >= POI_MIN_DENSITY and
                 any(e in roads for e in _side_edges(x, y, 1, 1)["S"] + _side_edges(x, y, 1, 1)["N"] +
                     _side_edges(x, y, 1, 1)["W"] + _side_edges(x, y, 1, 1)["E"]))
-    taken = set()
+    # The blocks round a turning circle are left to the houses facing it.
+    taken = {(c['node'][0] + dx, c['node'][1] + dy) for c in culdesacs
+             for dx in (-1, 0) for dy in (-1, 0)}
     pois = []
     for kind, rule in poi_rules(settings).items():
         rng = stream(settings.seed, "poi", kind)
         expected = rule['count'] * urban / 100
         quota = int(expected) + (1 if rng.random() < expected - int(expected) else 0)
         quota = max(quota, rule['minimum'])
+        if 'most' in rule:
+            quota = min(quota, rule['most'])
         if 'per_radius' in rule:
             quota = max([n for r, n in rule['per_radius'] if radius >= r] or [0])
         minimum = min(quota, rule['minimum']) if 'per_radius' not in rule else quota

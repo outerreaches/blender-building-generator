@@ -304,7 +304,8 @@ namespace Ares.CityGen
         // swings, goal, trash_bin, air_pump, hydrant, cart_corral, tyre_stack, speaker_post
         // (small props),
         // tree, flagpole, fence, parking_stall; bar_counter, reception_desk,
-        // service_counter, shop_counter (fixtures inside buildings); water
+        // service_counter, shop_counter, seat (fixtures inside buildings; a seat
+        // stands on its cinema tier and faces the screen); water
         // (position = centre of the surface, size = width, depth, water depth).
         public string type;
         public string site;

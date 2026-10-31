@@ -22,7 +22,7 @@ MIN_STANDING = .1       # Rooms with less floor left are left out.
 MIN_RUN = .6            # Shortest wall run worth listing.
 WALL_STANDS = 2.0       # A wall run needs this much wall above the floor.
 DOOR_MARGIN = .1        # Wall kept clear either side of a door.
-FIXTURE_KINDS = ('bar_counter', 'reception_desk', 'service_counter', 'shop_counter')
+FIXTURE_KINDS = ('bar_counter', 'reception_desk', 'service_counter', 'shop_counter', 'seat')
 
 
 def interior_facts(building):
@@ -48,9 +48,28 @@ def interior_facts(building):
             facts['fixtures'].append({'kind': kind, 'floor': lp.index, 'x': mx, 'y': my,
                                       'z': level.z, 'facing': facing[0] if facing else (0.0, -1.0),
                                       'size': (x1 - x0, y1 - y0, height)})
+        facts['fixtures'].extend(_seats(field, lp, level))
     facts['lifts'] = _lifts(spec, field, plan)
     facts['railings'] = _railings(spec, field, plan, built)
     return _centred(facts, cx, cy)
+
+
+def _seats(field, lp, level):
+    """Cinema seats on the tiers that still stand, facing the screen."""
+    seats = []
+    width, depth, height = layouts.SEAT_SIZE
+    for seating in lp.terraces:
+        pieces = [p for p in seating.pieces() if not layouts.terrace_lost(field, level.z, p)]
+        for x, y, top in seating.seats():
+            if not any(p[0] <= x <= p[2] and p[1] <= y <= p[3] and abs(p[4] - top) < 1e-6
+                       for p in pieces):
+                continue
+            if field.damaged and field.height(x, y) < level.z + top + height + .2:
+                continue
+            seats.append({'kind': 'seat', 'floor': lp.index, 'x': x, 'y': y,
+                          'z': level.z + top, 'facing': (0.0, -1.0),
+                          'size': (width, depth, height)})
+    return seats
 
 
 # -- rooms -------------------------------------------------------------------
@@ -113,12 +132,14 @@ def _room(spec, field, lp, level, room):
         return None
     doors, door_spans = _room_doors(spec, lp, level, room, clear)
     windows, gaps = _room_windows(spec, lp, level, clear)
+    # A terraced auditorium is seating to the walls: no wall to furnish.
+    terraced = any(seating.room == room.name for seating in lp.terraces)
     return {'name': room.name, 'kind': room.kind, 'floor': lp.index, 'unit': room.unit or '',
             'group': room.group or '', 'rect': clear, 'z': level.z, 'height': ceiling,
             'standing': round(standing, 3), 'ceiling': round(above / total if total else 1.0, 3),
             'doors': doors, 'windows': windows,
-            'wall_runs': _wall_runs(spec, field, lp, level, room.rect, clear, outer,
-                                    door_spans, gaps)}
+            'wall_runs': [] if terraced else _wall_runs(spec, field, lp, level, room.rect, clear,
+                                                        outer, door_spans, gaps)}
 
 
 def _clear_rect(rect, outer, walls, eps=1e-6):

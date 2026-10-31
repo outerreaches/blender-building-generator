@@ -158,7 +158,7 @@ Programs tile each storey with rectangles and name each room's parent:
 | Mall | Anchor stores at both ends (sales floor, stock behind), a concourse between them lined with shop units, an entrance hall and a food court; concourse, hall, food court and anchors are one open space |
 | Hotel | Guest rooms (entry, en-suite bath, bedroom) off a corridor upstairs; lobby with reception desk, dining room, kitchen and offices below |
 | Motel | A row of rooms, each with its own street door and a bath at the back; office with reception desk at one end |
-| Cinema | Lobby with ticket desk and concession counter across the front; one auditorium (palace) or a corridor to several with exits at the back (multiplex) |
+| Cinema | Lobby with ticket desk and concession counter across the front; one auditorium (palace), two side by side (twin) or a corridor to several (multiplex). Each auditorium is a `Terrace`: tiers rising from a flat strip in front of the screen, where its doors are; the shell builds the tiers in pieces (damage takes pieces) and `interior.py` lists a `seat` per place on the tiers that stand |
 
 The resolver keeps each requested parent when a door fits on the shared wall
 (stair doors only at the entry landing), otherwise re-parents the room to the

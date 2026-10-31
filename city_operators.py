@@ -267,7 +267,7 @@ def build_sites(plan, root, origin, detail, props=True, meta=None, water=False):
     h = plan.settings.curb_height
     for poi in plan.pois:
         site = compose_site(poi.kind, poi.width, poi.depth, poi.seed, None, poi.condition,
-                            poi.damage, poi.approach, props, water)
+                            poi.damage, poi.approach, props, water, poi.style)
         interiors = {}
         if detail == 'SHELLS':
             obj = create_site(poi.id, site, collection, interiors)

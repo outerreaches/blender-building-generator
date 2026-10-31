@@ -947,6 +947,156 @@ def plan_bigbox(spec, rng):
     return Plan([tiling.level()])
 
 
+def plan_hotel(spec, rng):
+    """Hotel: guest rooms either side of a corridor on the upper floors; on the
+    ground floor a lobby with the reception desk, a dining room on the street
+    side and the kitchen and offices behind."""
+    if len(spec.levels) < 2:
+        return plan_motel(spec, rng)
+    plan = plan_corridor(spec, rng, _hotel_unit, (3.6, 4.9), wc=True, exits=True,
+                         fallback=plan_walkup)
+    if plan.levels:
+        lobby = next((r for r in plan.levels[0].rooms if r.kind == 'lobby'), None)
+        if lobby is not None and lobby.width >= 3.6 and lobby.depth >= 4.5:
+            x0, y0, x1, y1 = lobby.rect
+            # Along a side wall, clear of the street door and the corridor door.
+            plan.levels[0].fixtures.append((x0 + .5, y0 + 1.6, x0 + 1.2, y1 - 1.6, 1.1,
+                                            'reception_desk', (1.0, 0.0)))
+    return plan
+
+
+def _hotel_unit(tiling, spec, level, rect, tag, corridor_low, rng):
+    if level.index == 0:
+        if not corridor_low:
+            tiling.add(f'dining{tag}', 'bar', rect, 'corridor', group='dining')
+        elif tiling.get('kitchen') is None:
+            tiling.add('kitchen', 'kitchen', rect, 'corridor')
+        else:
+            tiling.add(f'office{tag}', 'office' if rng.random() < .6 else 'storage', rect,
+                       'corridor')
+        return
+    _guest_room(tiling, spec, level, rect, tag, corridor_low, rng)
+
+
+def _guest_room(tiling, spec, level, rect, tag, corridor_low, rng):
+    """A guest room: entry passage and bathroom on the corridor side, the
+    bedroom beyond."""
+    x0, y0, x1, y1 = rect
+    width, depth = x1 - x0, y1 - y0
+    side_piers = spec.piers(level.index)['left']
+    if corridor_low:
+        options = [p for p in side_piers if y0 + dims.MIN_BATH <= p <= y1 - 3.0]
+        split = min(options, key=lambda p: abs(p - (y0 + 2.4))) if options else None
+    else:
+        options = [p for p in side_piers if y0 + 3.0 <= p <= y1 - dims.MIN_BATH]
+        split = min(options, key=lambda p: abs(p - (y1 - 2.4))) if options else None
+    if split is None or width < dims.CORRIDOR + dims.MIN_BATH or depth < 5.4:
+        tiling.add(f'room{tag}', 'bedroom', rect, 'corridor', unit=tag)
+        return
+    inner = (x0, y0, x1, split) if corridor_low else (x0, split, x1, y1)
+    outer = (x0, split, x1, y1) if corridor_low else (x0, y0, x1, split)
+    ix0, iy0, ix1, iy1 = inner
+    pieces = [('entry', dims.CORRIDOR, 'corridor'), ('bath', width - dims.CORRIDOR, f'entry{tag}')]
+    if rng.random() < .5:
+        pieces.reverse()
+    cursor = ix0
+    for name, size, parent in pieces:
+        kind = 'hall' if name == 'entry' else 'bath'
+        tiling.add(f'{name}{tag}', kind, (cursor, iy0, cursor + size, iy1), parent, unit=tag)
+        cursor += size
+    tiling.add(f'room{tag}', 'bedroom', outer, f'entry{tag}', unit=tag)
+
+
+def plan_motel(spec, rng):
+    """Motel: a row of rooms, each with its own door on the front and a bath
+    at the back; the office (reception desk) and a store at one end."""
+    rect = spec.interior_rect(0)
+    x0, y0, x1, y1 = rect
+    tiling = Tiling(rect, 0)
+    piers = spec.piers(0)['front']
+    cut = _back_zone(spec, spec.levels[0], rect, 2.4, dims.MIN_BATH)
+    office_right = spec.params.get('office_side', 'left') == 'right'
+    span = 5.5
+    if office_right:
+        options = [p for p in piers if x1 - 8.0 <= p <= x1 - 4.4]
+        ox = min(options, key=lambda p: abs(x1 - p - span)) if options else None
+    else:
+        options = [p for p in piers if x0 + 4.4 <= p <= x0 + 8.0]
+        ox = min(options, key=lambda p: abs(p - x0 - span)) if options else None
+    doors = []
+    rooms_lo, rooms_hi = x0, x1
+    if not spec.params.get('motel_office', True):
+        ox = None                        # A wing of rooms only.
+    if ox is not None:
+        oa, ob = (ox, x1) if office_right else (x0, ox)
+        rooms_lo, rooms_hi = (x0, ox) if office_right else (ox, x1)
+        tiling.add('office', 'lobby', (oa, y0, ob, cut if cut is not None else y1))
+        if cut is not None:
+            tiling.add('store', 'storage', (oa, cut, ob, y1), 'office')
+        tiling.fixtures.append((oa + .8, y0 + 2.4, ob - .8, y0 + 3.0, 1.1, 'reception_desk'))
+        doors.append(('front', (oa + ob) / 2, 1.4))
+    cuts = _split_bays(rooms_lo, rooms_hi, piers, 3.6, 4.8)
+    for number, (a, b) in enumerate(zip(cuts, cuts[1:])):
+        unit = f'r{number}'
+        tiling.add(f'room{number}', 'bedroom', (a, y0, b, cut if cut is not None else y1), unit=unit)
+        if cut is not None:
+            tiling.add(f'bath{number}', 'bath', (a, cut, b, y1), f'room{number}', unit=unit)
+        # The door takes the first bay of the room, the window the next.
+        inner = [p for p in piers if a + 1e-6 < p < b - 1e-6]
+        bay_end = inner[0] if inner else b
+        doors.append(('front', (a + bay_end) / 2, 1.0))
+    return Plan([tiling.level()], doors)
+
+
+def plan_cinema(spec, rng):
+    """Cinema: a lobby across the front (ticket desk, concession counter) and
+    either one big auditorium behind it (``params['cinema'] == 'PALACE'``) or
+    a corridor to several auditoriums with exits at the back (multiplex),
+    restrooms at the lobby ends."""
+    rect = spec.interior_rect(0)
+    x0, y0, x1, y1 = rect
+    tiling = Tiling(rect, 0)
+    piers = spec.piers(0)
+    palace = spec.params.get('cinema') == 'PALACE'
+    side = sorted(set(piers['left']) & set(piers['right'])) or piers['left']
+    target = y0 + (7.0 if palace else 10.0)
+    options = [p for p in side if y0 + 5.0 <= p <= y1 - 12.0]
+    if not options:
+        return plan_open(spec, rng)
+    lobby_y = min(options, key=lambda p: abs(p - target))
+    doors = [('front', (x0 + x1) / 2, 2.4 if palace else 3.6)]
+    ends = [p for p in piers['front'] if x0 + 3.0 <= p <= x0 + 5.5]
+    ends_r = [p for p in piers['front'] if x1 - 5.5 <= p <= x1 - 3.0]
+    la, lb = x0, x1
+    if ends and ends_r and x1 - x0 > 20:
+        la, lb = ends[0], ends_r[-1]
+        tiling.add('wc_a', 'bath', (x0, y0, la, lobby_y), 'lobby')
+        tiling.add('wc_b', 'bath', (lb, y0, x1, lobby_y), 'lobby')
+    tiling.add('lobby', 'lobby', (la, y0, lb, lobby_y))
+    # Concession counter along the back of the lobby, ticket desk by the door.
+    mid = (la + lb) / 2
+    tiling.fixtures.append((la + 1.0, lobby_y - 2.2, mid - 1.6, lobby_y - 1.5, 1.05,
+                            'service_counter'))
+    tiling.fixtures.append((lb - 3.4, y0 + 1.6, lb - 1.0, y0 + 2.3, 1.1, 'reception_desk'))
+    if palace:
+        tiling.add('auditorium', 'auditorium', (x0, lobby_y, x1, y1), 'lobby')
+        exit_y = (lobby_y + y1) / 2 + (y1 - lobby_y) * .25
+        doors += [('left', exit_y, 1.6), ('right', exit_y, 1.6)]
+        return Plan([tiling.level()], doors)
+    hall = [p for p in side if lobby_y + 2.4 <= p <= lobby_y + 3.6]
+    hall_y = min(hall, key=lambda p: abs(p - lobby_y - 3.0)) if hall else None
+    if hall_y is None or y1 - hall_y < 10:
+        tiling.add('auditorium', 'auditorium', (x0, lobby_y, x1, y1), 'lobby')
+        doors.append(('back', (x0 + x1) / 2, 1.6))
+        return Plan([tiling.level()], doors)
+    tiling.add('corridor', 'corridor', (x0, lobby_y, x1, hall_y), 'lobby')
+    cuts = _split_bays(x0, x1, piers['back'], 10.0, 16.0)
+    for number, (a, b) in enumerate(zip(cuts, cuts[1:])):
+        tiling.add(f'screen{number}', 'auditorium', (a, hall_y, b, y1), 'corridor')
+        doors.append(('back', (a + b) / 2, 1.6))
+    return Plan([tiling.level()], doors)
+
+
 MALL_CONCOURSE = 9.0       # Width of a mall's concourse.
 
 
@@ -1041,6 +1191,9 @@ PLANNERS = {
     'BIGBOX': plan_bigbox,
     'BAY': plan_bay,
     'MALL': plan_mall,
+    'HOTEL': plan_hotel,
+    'MOTEL': plan_motel,
+    'CINEMA': plan_cinema,
     'SCHOOL': plan_school,
     'CIVIC': plan_civic,
     'STOREFRONT': plan_storefront,

@@ -82,13 +82,24 @@ POI_RULES = {
     'AUTO_REPAIR': dict(blocks=((1, 1),), count=1, minimum=1, front=None, spacing=3,
                         districts={'INDUSTRIAL': 3, 'SUBURBAN': 1.5, 'RESIDENTIAL': 1,
                                    'BRUTALIST': .5}),
+    'HOTEL': dict(blocks=((1, 1),), count=.6, minimum=1, front=('ARTERIAL', 'COLLECTOR'),
+                  spacing=4, districts={'OLD_TOWN': 2.5, 'DOWNTOWN': 2, 'BRUTALIST': 1,
+                                        'RESIDENTIAL': .5}),
+    'MOTEL': dict(blocks=((1, 1),), count=.8, minimum=1, front=('ARTERIAL', 'COLLECTOR'),
+                  spacing=4, districts={'SUBURBAN': 2.5, 'INDUSTRIAL': 2, 'RESIDENTIAL': .5}),
+    'CINEMA': dict(blocks=((1, 1), (2, 1)), count=.5, minimum=1, front=('ARTERIAL', 'COLLECTOR'),
+                   spacing=6, districts={'OLD_TOWN': 2, 'DOWNTOWN': 1.5, 'SUBURBAN': 1.5,
+                                         'RESIDENTIAL': 1}, near=('MALL', 4, 2.0)),
+    'DRIVE_IN': dict(blocks=((2, 1), (2, 2)), count=.3, minimum=1, front=None, spacing=12,
+                     districts={'SUBURBAN': 2, 'INDUSTRIAL': 1.5}),
 }
 # Smallest pad each kind is laid out for (mirrors sites.MIN_PAD).
 POI_MIN_PAD = {'GAS_STATION': (24, 22), 'FAST_FOOD': (26, 24), 'SCHOOL': (40, 32),
                'HOSPITAL': (44, 32), 'POLICE': (28, 26), 'FIRE_STATION': (28, 26),
                'TRANSIT_STATION': (28, 24), 'PARK': (16, 16), 'PARKING_LOT': (20, 20),
                'PARKING_GARAGE': (30, 26), 'STRIP_MALL': (30, 26), 'SHOPPING_PLAZA': (80, 70),
-               'AUTO_REPAIR': (30, 28), 'MALL': (90, 80)}
+               'AUTO_REPAIR': (30, 28), 'MALL': (90, 80), 'HOTEL': (30, 28),
+               'MOTEL': (36, 28), 'CINEMA': (32, 30), 'DRIVE_IN': (80, 40)}
 POI_VERGE = 1.0          # Unpaved strip between a site pad and the footway.
 POI_MIN_DENSITY = .2     # Sites stay inside the built-up area.
 MIDTOWN_STYLES = ('OLD_TOWN', 'RESIDENTIAL', 'BRUTALIST')

@@ -37,7 +37,7 @@ LAYER = {'paint': .010, 'paint_cross': .012, 'paint_mark': .014, 'paint_mark2': 
 PAD_THICKNESS = .35
 KINDS = ('GAS_STATION', 'FAST_FOOD', 'SCHOOL', 'HOSPITAL', 'POLICE', 'FIRE_STATION',
          'TRANSIT_STATION', 'PARK', 'PARKING_LOT', 'PARKING_GARAGE', 'STRIP_MALL',
-         'SHOPPING_PLAZA', 'AUTO_REPAIR', 'MALL')
+         'SHOPPING_PLAZA', 'AUTO_REPAIR', 'MALL', 'HOTEL', 'MOTEL', 'CINEMA', 'DRIVE_IN')
 VARIANTS = {
     'GAS_STATION': ('BACK', 'SIDE'),
     'FAST_FOOD': ('MANSARD', 'BOX', 'DINER'),
@@ -53,20 +53,32 @@ VARIANTS = {
     'SHOPPING_PLAZA': ('PAIR', 'ANCHOR'),
     'AUTO_REPAIR': ('BAYS', 'YARD'),
     'MALL': ('DUMBBELL', 'JUNIOR'),
+    'HOTEL': ('GRAND', 'BUDGET'),
+    'MOTEL': ('STRIP', 'COURT'),
+    'CINEMA': ('PALACE', 'MULTIPLEX'),
+    'DRIVE_IN': ('SINGLE', 'TWIN'),
 }
+# Layouts that suit a district style better (when no variant is asked for).
+STYLE_VARIANTS = {'CINEMA': {'OLD_TOWN': 'PALACE', 'DOWNTOWN': 'PALACE', 'BRUTALIST': 'PALACE',
+                             'SUBURBAN': 'MULTIPLEX', 'INDUSTRIAL': 'MULTIPLEX'},
+                  'HOTEL': {'OLD_TOWN': 'GRAND', 'DOWNTOWN': 'GRAND', 'SUBURBAN': 'BUDGET',
+                            'INDUSTRIAL': 'BUDGET'}}
 # Smallest pad (width, depth) each kind is laid out for.
 MIN_PAD = {'GAS_STATION': (24, 22), 'FAST_FOOD': (26, 24), 'SCHOOL': (40, 32),
            'HOSPITAL': (44, 32), 'POLICE': (28, 26), 'FIRE_STATION': (28, 26),
            'TRANSIT_STATION': (28, 24), 'PARK': (16, 16), 'PARKING_LOT': (20, 20),
            'PARKING_GARAGE': (30, 26), 'STRIP_MALL': (30, 26), 'SHOPPING_PLAZA': (80, 70),
-           'AUTO_REPAIR': (30, 28), 'MALL': (90, 80)}
+           'AUTO_REPAIR': (30, 28), 'MALL': (90, 80), 'HOTEL': (30, 28), 'MOTEL': (36, 28),
+           'CINEMA': (32, 30), 'DRIVE_IN': (80, 40)}
 WALL_COLORS = {'GAS_STATION': (.86, .86, .83, 1), 'FAST_FOOD': (.74, .30, .20, 1),
                'SCHOOL': (.60, .35, .26, 1), 'HOSPITAL': (.85, .86, .87, 1),
                'POLICE': (.44, .47, .54, 1), 'FIRE_STATION': (.64, .23, .19, 1),
                'TRANSIT_STATION': (.68, .70, .68, 1), 'PARKING_GARAGE': (.58, .58, .56, 1),
                'STRIP_MALL': (.80, .74, .64, 1), 'SHOPPING_PLAZA': (.72, .73, .75, 1),
                'PARK': (.66, .64, .60, 1), 'PARKING_LOT': (.62, .62, .60, 1),
-               'AUTO_REPAIR': (.70, .67, .58, 1), 'MALL': (.78, .75, .70, 1)}
+               'AUTO_REPAIR': (.70, .67, .58, 1), 'MALL': (.78, .75, .70, 1),
+               'HOTEL': (.80, .76, .68, 1), 'MOTEL': (.86, .80, .66, 1),
+               'CINEMA': (.56, .31, .28, 1), 'DRIVE_IN': (.84, .82, .78, 1)}
 
 
 @dataclass
@@ -124,7 +136,7 @@ def designed(width, depth, floors, floor_height, seed, profile='NONE', **extra):
 # they are only recorded as markers.
 SMALL_PROPS = ('bench', 'lamp', 'bollard', 'gas_pump', 'dumpster', 'table', 'booth',
                'play_structure', 'swings', 'goal', 'trash_bin', 'air_pump', 'hydrant',
-               'cart_corral', 'tyre_stack')
+               'cart_corral', 'tyre_stack', 'speaker_post')
 
 
 def _turn(quarter, fx, fy):
@@ -228,6 +240,30 @@ class Ground:
         if not self.mark('trash_bin', x, y, base, size=(.6, .6, .9)):
             return
         self.cylinder(x, y, .3, base, base + .9, S_METAL)
+
+    def speaker_post(self, x, y, base=0.0):
+        if not self.mark('speaker_post', x, y, base, size=(.4, .4, 1.4)):
+            return
+        self.boxc(x, y, .12, .12, base, base + 1.2, S_METAL)
+        self.boxc(x, y, .4, .25, base + 1.2, base + 1.45, S_METAL)
+
+    def pool_basin(self, rect, base, rim=.5, bed=-.8, level=.35):
+        """Rectangular pool: a coping rim ``rim`` high round a bed sunk to
+        ``bed`` (below the pad: the pad is cut round it), filled to ``level``
+        when water is on. The water is always a marker."""
+        x0, y0, x1, y1 = rect
+        wall = .35
+        self.mark('water', (x0 + x1) / 2, (y0 + y1) / 2, level, shape='rect',
+                  size=(x1 - x0 - 2 * wall, y1 - y0 - 2 * wall, level - max(bed, base)))
+        for bx0, by0, bx1, by1 in ((x0, y0, x1, y0 + wall), (x0, y1 - wall, x1, y1),
+                                   (x0, y0 + wall, x0 + wall, y1 - wall),
+                                   (x1 - wall, y0 + wall, x1, y1 - wall)):
+            solids.box(self.mesh, bx0, by0, base, bx1, by1, rim, S_CONCRETE)
+        floor = max(bed, base)
+        solids.box(self.mesh, x0 + wall, y0 + wall, base, x1 - wall, y1 - wall, floor + .05, S_CONCRETE)
+        if self.water:
+            solids.box(self.mesh, x0 + wall, y0 + wall, floor + .05, x1 - wall, y1 - wall, level,
+                       S_WATER)
 
     def tyre_stack(self, x, y, base=0.0):
         if not self.mark('tyre_stack', x, y, base, size=(.7, .7, .9)):
@@ -430,12 +466,13 @@ class Composer:
     """Shared state while one site is laid out."""
 
     def __init__(self, kind, width, depth, seed, variant, condition, damage, approach, props=True,
-                 water=False):
+                 water=False, style=None):
         self.kind = kind
         self.W, self.D = width, depth
         self.seed = seed
         self.rng = random.Random((seed * 1000003) ^ zlib.crc32(kind.encode()))
-        self.variant = variant or self.rng.choice(VARIANTS[kind])
+        choice = self.rng.choice(VARIANTS[kind])
+        self.variant = variant or STYLE_VARIANTS.get(kind, {}).get(style) or choice
         self.condition = condition
         self.damage = damage
         self.approach = approach
@@ -540,15 +577,16 @@ class Composer:
 
 
 def compose(kind, width, depth, seed=0, variant=None, condition='INTACT', damage=0.0,
-            approach=0.0, props=True, water=False):
+            approach=0.0, props=True, water=False, style=None):
     """Lay out one site; see the module docstring for coordinates. With
     ``props`` off, small props (``SMALL_PROPS``) are left to the game: they
     appear only in ``Site.markers``. With ``water`` off, fountains and other
-    basins are dry; their water is always a ``water`` marker."""
+    basins are dry; their water is always a ``water`` marker. ``style`` (the
+    district) picks the layout that suits it when no ``variant`` is given."""
     if kind not in KINDS:
         raise ValueError(f'Unknown site kind: {kind}')
     composer = Composer(kind, width, depth, seed, variant, condition, damage, approach, props,
-                        water)
+                        water, style)
     if composer.variant not in VARIANTS[kind]:
         raise ValueError(f'Unknown {kind} variant: {composer.variant}')
     min_w, min_d = MIN_PAD[kind]
@@ -1974,6 +2012,255 @@ def _mall(c):
     g.sign(x1 - 5.0, y0 + 1.8, 5.0, 7.0, 14.0)
 
 
+def _walkway(c, building, depth=2.4, z0=2.6, z1=2.85):
+    """Covered walk along a building's front: a paved strip and a canopy on
+    posts at every other pier (motel rooms are two bays wide)."""
+    g = c.g
+    front = c.spec(building).ground_facade('front')
+    w = building.params['width']
+    g.layer(_local_rect(c, building, 0.0, -depth, w, 0.0), S_CONCRETE, 'walk')
+    canopy = _local_rect(c, building, 0.0, -depth, w, .05)
+    posts = [c.to_site(building, u, -depth + .25) for u in front.bays[2:-1:2]]
+    with c.attached(building):
+        g.canopy(canopy, z0, z1, posts, column_size=.2, base=LAYER['walk'])
+
+
+def _parapet_sign(c, building, share=.3):
+    """Sign band on the front parapet (where it is tall enough)."""
+    spec = c.spec(building)
+    # Below a crowning cornice, whose face would share the sign's plane.
+    top = spec.top + spec.parapet - (.5 if building.params.get('cornice') else .1)
+    if top - (spec.top + .1) < .4:
+        return
+    bw = building.params['width']
+    front = building.y - building.params['depth'] / 2
+    with c.attached(building) as g:
+        g.box(building.x - bw * share, front - .3, spec.top + .1, building.x + bw * share, front + .04,
+              top, S_SIGN)
+
+
+def _hotel(c):
+    """City hotel: guest-room floors over a lobby, a dining room and offices;
+    a canopy over the main door, flags, a sign on the parapet and parking
+    behind. GRAND: taller and corniced; BUDGET: plainer, with more parking."""
+    g = c.g
+    x0, y0, x1, y1 = c.rect
+    c.ground(S_ASPHALT, S_CONCRETE)
+    _lawn_edges(c, ('left', 'right'))
+    grand = c.variant == 'GRAND'
+    bw = min(40.0 if grand else 34.0, c.W - 2 * STRIP - 4)
+    fore = 8.0
+    bd = max(12.0, min(17.0, c.D - 2 * STRIP - fore - 2))
+    bx, by = (x0 + x1) / 2, y0 + fore + bd / 2
+    hotel = c.building('hotel', designed(
+        bw, bd, 7 if grand else 4, 3.3, c.seed, 'HOTEL', ground_floor_height=4.5,
+        window_width=1.4, window_spacing=1.0, window_sides='ALL',
+        ground_floor_windows='STOREFRONT', storefront_window_width=2.0,
+        storefront_window_height=2.6, door_width=2.4, door_height=2.8, front_door_offset=.5,
+        cornice=grand, parapet_height=1.2 if grand else .8, facade_pilasters=grand,
+        pilaster_style='CORNERS', pilaster_sides='FRONT'), bx, by, role='hotel')
+    front = by - bd / 2
+    g.layer((x0 + STRIP, y0, x1 - STRIP, front), S_CONCRETE, 'plaza')
+    _entrance_canopy(c, hotel, width=7.0, depth=5.0)
+    _parapet_sign(c, hotel)
+    for k in (-1, 0, 1):
+        g.flagpole_base(bx + bw * .3 + k * 1.6, y0 + 2.0)
+    if y1 - STRIP - (by + bd / 2) > 14:
+        _parking_field(c, (x0 + STRIP, by + bd / 2 + 2.0, x1 - STRIP, y1 - STRIP), trees=False)
+    g.dumpster(x1 - STRIP - 2.0, by + bd / 2 + 1.0)
+
+
+def _motel(c):
+    """Motel: one-storey rooms behind a covered walk, each with its own door
+    onto the parking; the office at one end and a tall sign by the road.
+    COURT adds a wing of rooms down the side and a pool (dry unless water is
+    on) in a fenced corner of the court."""
+    g = c.g
+    x0, y0, x1, y1 = c.rect
+    c.ground(S_ASPHALT)
+    _lawn_edges(c, ('left', 'right', 'back'))
+    bd, walk = 9.0, 2.4
+
+    def rooms(width, office=True, side='left'):
+        return designed(width, bd, 1, 3.2, c.seed, 'MOTEL', window_width=1.2, window_spacing=1.0,
+                        window_sides='FRONT_ONLY', ground_floor_windows='REGULAR', sill_height=1.0,
+                        window_height=1.3, door_height=2.2, parapet_height=.6,
+                        motel_office=office, office_side=side)
+    back = y1 - STRIP - 1.0
+    by = back - bd / 2
+    court = (c.variant == 'COURT' and c.W >= 44 and
+             back - bd - walk - (y0 + 8.0) >= 16)
+    if not court:
+        c.variant = 'STRIP'
+        bw = c.W - 2 * STRIP - 2
+        row = c.building('rooms', rooms(bw), (x0 + x1) / 2, by, role='motel')
+        _walkway(c, row)
+        walk_front = by - bd / 2 - walk
+        if walk_front - 1.0 - (y0 + 3.0) >= 11.5:
+            _parking_field(c, (x0 + STRIP, y0 + 3.0, x1 - STRIP, walk_front - 1.0), trees=False)
+        else:
+            g.stalls(x0 + STRIP + 1, x1 - STRIP - 1, walk_front - .3, 5.0, -1)
+    else:
+        wing_x = x1 - STRIP - 1.0 - bd / 2
+        bw = c.W - 2 * STRIP - 2 - bd - walk
+        row = c.building('rooms', rooms(bw), x0 + STRIP + 1 + bw / 2, by, role='motel')
+        _walkway(c, row)
+        wl = back - bd - walk - (y0 + 8.0)
+        wing = c.building('wing', rooms(wl, office=False), wing_x, y0 + 8.0 + wl / 2, quarter=3,
+                          role='motel')
+        _walkway(c, wing)
+        # Pool in a fenced corner at the front of the court, parking round it.
+        px0, py0 = x0 + STRIP + 2.0, y0 + 4.0
+        px1, py1 = px0 + 11.0, py0 + 7.0
+        g.fence_bases([(px0 - 1.0, py1 + 1.0), (px0 - 1.0, py0 - 1.0), (px1 + 1.0, py0 - 1.0),
+                       (px1 + 1.0, py1 + 1.0), (px0 + 2.0, py1 + 1.0)], height=1.4)
+        g.pool_basin((px0, py0, px1, py1), 0.0)
+        field_x0 = px1 + 3.0
+        _parking_field(c, (field_x0, y0 + 3.0, wing_x - bd / 2 - walk - 1.0, by - bd / 2 - walk - 1.0),
+                       trees=False)
+    g.sign(x1 - 3.5, y0 + 1.6, 3.2, 3.0, 10.0)
+
+
+def _cinema(c):
+    """Cinema. PALACE: a tall single-screen hall on the street, a marquee over
+    the doors and a blade sign above it. MULTIPLEX: a box of screens behind a
+    glazed lobby, an entrance canopy and parking in front."""
+    g = c.g
+    x0, y0, x1, y1 = c.rect
+    if c.variant == 'PALACE':
+        c.ground(S_CONCRETE)
+        bw = min(26.0, c.W - 2 * STRIP - 4)
+        bd = min(36.0, c.D - 2 * STRIP - 5)
+        bx, by = (x0 + x1) / 2, y0 + 3.0 + bd / 2
+        hall = c.building('cinema', designed(
+            bw, bd, 1, 10.0, c.seed, 'CINEMA', cinema='PALACE', wall_thickness=.4,
+            window_sides='FRONT_ONLY', ground_floor_windows='STOREFRONT',
+            storefront_window_height=2.4, window_width=2.0, window_spacing=1.2, cornice=True,
+            parapet_height=1.4, facade_pilasters=True, pilaster_style='CORNERS',
+            pilaster_sides='FRONT'), bx, by, role='cinema')
+        front = by - bd / 2
+        marquee = min(7.0, bw / 2 - 1.5)
+        with c.attached(hall):
+            g.box(bx - marquee, front - 3.2, 4.0, bx + marquee, front + .05, 5.3, S_SIGN)
+            g.box(bx + marquee - .9, front - 1.4, 5.8, bx + marquee - .4, front + .05, 10.6, S_SIGN)
+        g.layer((x0 + STRIP, y0, x1 - STRIP, front), S_CONCRETE, 'plaza')
+        if y1 - STRIP - (by + bd / 2) > 12:
+            _parking_field(c, (x0 + STRIP, by + bd / 2 + 1.5, x1 - STRIP, y1 - STRIP), trees=False)
+        return
+    if c.D - 2 * STRIP < 42 or c.W < 40:
+        c.variant = 'PALACE'               # No room for a box of screens and its parking.
+        _cinema(c)
+        return
+    c.ground(S_ASPHALT)
+    _lawn_edges(c, ('left', 'right'), front_gap=c.D * .5)
+    bw = min(64.0, c.W - 2 * STRIP - 4)
+    bd = max(26.0, min(40.0, c.D - 2 * STRIP - 16))
+    back = y1 - STRIP - 2.0
+    bx, by = (x0 + x1) / 2, back - bd / 2
+    box = c.building('cinema', designed(
+        bw, bd, 1, 9.0, c.seed, 'CINEMA', cinema='MULTIPLEX', wall_thickness=.35,
+        window_sides='FRONT_ONLY', ground_floor_windows='STOREFRONT_WIDE',
+        storefront_window_height=3.2, window_width=3.2, window_spacing=1.0, parapet_height=1.6),
+        bx, by, role='cinema')
+    front = by - bd / 2
+    _entrance_canopy(c, box, width=10.0, depth=4.0)
+    _parapet_sign(c, box, .25)
+    g.layer((bx - bw / 2, front - 4.0, bx + bw / 2, front), S_CONCRETE, 'walk')
+    _parking_field(c, (x0 + STRIP, y0 + 3.0, x1 - STRIP, front - 5.0), trees=True)
+    g.sign(x1 - 4.0, y0 + 1.6, 4.0, 5.0, 11.0)
+
+
+def _screen_part(width, height):
+    """Drive-in screen facing -y at the origin: a panel on legs, braced behind."""
+    part = Ground()
+    base = 3.0
+    part.box(-width / 2, -.3, base, width / 2, .3, base + height, S_CONCRETE)
+    for k in range(5):
+        x = -width / 2 + .6 + (width - 1.2) * k / 4
+        part.boxc(x, 0, .5, .5, 0.0, base, S_METAL)
+        part.boxc(x, 1.6, .4, .4, 0.0, base + height - .5, S_METAL)
+    return part
+
+
+def _drive_in(c):
+    """Drive-in cinema: a big screen at the far end (TWIN: two side by side),
+    curved rows of stalls facing it with speaker posts between the cars, a
+    concession and projection building in the field, a ticket booth at the
+    gate and a fence round the lot."""
+    g = c.g
+    x0, y0, x1, y1 = c.rect
+    c.ground(S_ASPHALT)
+    _lawn_edges(c, ('left', 'right', 'back'))
+    deep = c.D >= 60
+    m = STRIP + 2.0
+    if deep:
+        # Screen at the back facing the street; u runs along x, v toward the street.
+        sx, sy = (x0 + x1) / 2, y1 - m - 1.0
+        length, half = sy - (y0 + m + 8.0), (x1 - x0) / 2 - m
+
+        def at(u, v):
+            return sx + u, sy - v
+
+        def heading(du, dv):
+            return du, -dv
+        quarter, face = 0, 2
+    else:
+        # Screen at the left end facing along the lot; u runs along y.
+        sx, sy = x0 + m + 1.0, (y0 + y1) / 2 + 2.0
+        length, half = x1 - m - sx, (y1 - y0) / 2 - m - 2.0
+
+        def at(u, v):
+            return sx + v, sy + u
+
+        def heading(du, dv):
+            return dv, du
+        quarter, face = 1, 3
+    twin = c.variant == 'TWIN' and half >= 30
+    if c.variant == 'TWIN' and not twin:
+        c.variant = 'SINGLE'
+    screens = [(-half / 2, half / 2 - 1.5), (half / 2, half / 2 - 1.5)] if twin else [(0.0, half)]
+    width = min(26.0, half * (.9 if twin else 1.2))
+    for us, _ in screens:
+        x, y = at(us, 0.0)
+        g.mesh.place(_screen_part(width, 10.0).mesh, x, y, quarter)
+    # Concession and projection building in the field, facing the screen.
+    cv = min(length * .55, 34.0)
+    cx, cy = at(0.0, cv)
+    kiosk = c.building('concession', designed(
+        14.0, 9.0, 1, 3.8, c.seed, 'RESTAURANT', window_sides=('front', 'left', 'right'),
+        ground_floor_windows='STOREFRONT', storefront_window_height=2.2), cx, cy, quarter=face,
+        role='concession')
+    kx0, ky0, kx1, ky1 = kiosk.footprint
+    for us, reach in screens:
+        radius = 14.0
+        while radius + 3.0 <= length:
+            count = int(radius * math.radians(90) / 3.0)
+            for j in range(count):
+                theta = math.radians(-45) + math.radians(90) * (j + .5) / count
+                u = us + radius * math.sin(theta)
+                v = -4.0 + radius * math.cos(theta)
+                if abs(u - us) > reach - 2.5 or v < 6.0 or v > length - 2.0:
+                    continue
+                x, y = at(u, v)
+                if kx0 - 4 < x < kx1 + 4 and ky0 - 4 < y < ky1 + 4:
+                    continue
+                fx, fy = heading(-math.sin(theta), -math.cos(theta))
+                g.mark('parking_stall', x, y, 0.0, (round(fx, 6), round(fy, 6)), size=(3.0, 5.0))
+                if j % 2 == 0:
+                    side = theta - math.radians(90) / count / 2
+                    px, py = at(us + (radius - 2.9) * math.sin(side), -4.0 + (radius - 2.9) * math.cos(side))
+                    g.speaker_post(px, py)
+            radius += 9.0
+    # Gate, ticket booth and fence (posts only; the fence is a game asset).
+    gx = x1 - m - 6.0
+    g.layer((gx - 3.0, y0 - c.approach, gx + 3.0, y0 + m), S_CONCRETE, 'apron')
+    g.booth(gx + 4.5, y0 + m + 2.0)
+    fx0, fy0, fx1, fy1 = x0 + STRIP + .6, y0 + STRIP + .6, x1 - STRIP - .6, y1 - STRIP - .6
+    g.fence_bases([(gx + 3.5, fy0), (fx1, fy0), (fx1, fy1), (fx0, fy1), (fx0, fy0), (gx - 3.5, fy0)],
+                  height=2.4)
+    g.sign(x0 + 4.0, y0 + 1.6, 6.0, 4.0, 10.0)
+
+
 LAYOUTS = {
     'GAS_STATION': _gas_station,
     'FAST_FOOD': _fast_food,
@@ -1989,6 +2276,10 @@ LAYOUTS = {
     'SHOPPING_PLAZA': _shopping_plaza,
     'AUTO_REPAIR': _auto_repair,
     'MALL': _mall,
+    'HOTEL': _hotel,
+    'MOTEL': _motel,
+    'CINEMA': _cinema,
+    'DRIVE_IN': _drive_in,
 }
 
 

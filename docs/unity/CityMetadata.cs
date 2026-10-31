@@ -180,7 +180,7 @@ namespace Ares.CityGen
     {
         public string name;       // Unique within its floor.
         // bedroom, living, kitchen, bath, hall, corridor, lobby, office, open,
-        // shop, storage, bar, plant, stair, landing, ...
+        // shop, storage, bar, auditorium, plant, stair, landing, ...
         public string kind;
         public int floor;
         public string unit;       // Flat or shop unit it belongs to ("" if none).
@@ -298,7 +298,8 @@ namespace Ares.CityGen
     public class Marker : Pose
     {
         // bench, lamp, bollard, gas_pump, dumpster, table, booth, play_structure,
-        // swings, goal, trash_bin, air_pump, hydrant, cart_corral, tyre_stack (small props),
+        // swings, goal, trash_bin, air_pump, hydrant, cart_corral, tyre_stack, speaker_post
+        // (small props),
         // tree, flagpole, fence, parking_stall; bar_counter, reception_desk,
         // service_counter, shop_counter (fixtures inside buildings); water
         // (position = centre of the surface, size = width, depth, water depth).

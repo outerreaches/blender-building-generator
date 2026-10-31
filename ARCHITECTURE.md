@@ -156,6 +156,9 @@ Programs tile each storey with rectangles and name each room's parent:
 | Warehouse | Open hall, office and WC at a front corner, back stair |
 | Bar | Bar room with counter, kitchen behind, private rooms upstairs |
 | Mall | Anchor stores at both ends (sales floor, stock behind), a concourse between them lined with shop units, an entrance hall and a food court; concourse, hall, food court and anchors are one open space |
+| Hotel | Guest rooms (entry, en-suite bath, bedroom) off a corridor upstairs; lobby with reception desk, dining room, kitchen and offices below |
+| Motel | A row of rooms, each with its own street door and a bath at the back; office with reception desk at one end |
+| Cinema | Lobby with ticket desk and concession counter across the front; one auditorium (palace) or a corridor to several with exits at the back (multiplex) |
 
 The resolver keeps each requested parent when a door fits on the shared wall
 (stair doors only at the entry landing), otherwise re-parents the room to the

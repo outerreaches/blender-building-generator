@@ -1,5 +1,28 @@
 # Changelog
 
+## v0.16.0: Hotels, motels, cinemas and drive-ins
+
+- **Hotel.** Guest-room floors (entry passage, en-suite bath, bedroom off a
+  corridor) over a lobby with a reception desk, a dining room, a kitchen and
+  offices; a canopy over the main door, flags, a sign on the parapet and
+  parking behind. *Grand* (7 floors, corniced) suits old town and downtown,
+  *Budget* (4 floors) the suburbs.
+- **Motel.** One-storey rooms behind a covered walk, each with its own door
+  onto the parking and a bath at the back; the office at one end and a tall
+  sign by the road. *Court* adds a wing down the side and a pool (dry unless
+  **Water** is on).
+- **Cinema.** *Palace*: a tall single-screen hall on the street with a
+  marquee over the doors and a blade sign. *Multiplex*: a box of screens
+  behind a glazed lobby, with exits at the back and parking in front. Both
+  have a ticket desk and a concession counter; auditoriums are listed as
+  rooms of kind `auditorium`.
+- **Drive-in cinema.** A big screen at the far end (*Twin*: two), curved rows
+  of stalls facing it with speaker posts between the cars, a concession
+  stand in the field, a ticket booth at the gate and a fence round the lot.
+- In a city, cinemas and hotels pick the layout that suits their district,
+  and cinemas join the retail round the mall.
+- New small prop: `speaker_post`.
+
 ## v0.15.0: Auto repair, enclosed malls, water switch
 
 - **Auto repair.** A new site: a workshop with roll-up bay doors and a

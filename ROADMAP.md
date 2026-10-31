@@ -12,6 +12,7 @@
 | v0.13 | Small-props switch and city metadata for Unity; walkable stairs, no loose floor pieces, windows kept through damage |
 | v0.14 | Interiors for the game: rooms to furnish, lifts, railings and fixtures in the metadata (game assets, not modelled) |
 | v0.15 | The rest of the retail set: auto repair and an enclosed mall, with the other retail gathered round it; a water switch |
+| v0.16 | Hotels, motels, cinemas and drive-in cinemas |
 
 See [CHANGELOG.md](CHANGELOG.md) for the details.
 

@@ -38,7 +38,7 @@ The original single-building and bulk operators remain available. Architecture u
 | Interior Ratio | Fraction of enterable buildings that get full interior layouts (default 0.25) |
 | Building Budget | Stable sampling cap on eligible lots; reports when capped |
 | Downtown Superblocks | Share of downtown local streets closed so blocks join into 2 x 1 and 2 x 2 superblocks (default 0.35) |
-| Small Props | Model benches, gas pumps, lamps, bollards, bins, dumpsters, tables, play equipment, goals, booths, hydrants, cart corrals and tyre stacks (default on). Off: no meshes for them; the metadata still lists every one for the game to place |
+| Small Props | Model benches, gas pumps, lamps, bollards, bins, dumpsters, tables, play equipment, goals, booths, hydrants, cart corrals, tyre stacks and drive-in speaker posts (default on). Off: no meshes for them; the metadata still lists every one for the game to place |
 | Water | Model water in fountains and other basins (default off: they are dry, and the metadata's `water` markers say where the game adds its own) |
 | Metadata Space | Coordinate space of the city metadata: Unity (default) or Blender |
 | Interior Metadata | List every building's rooms, lifts and railings in the metadata (default on). Off: a much smaller file; counters and desks are still listed |
@@ -209,7 +209,10 @@ between the blocks.
   one from radius 6, two from radius 12.
   - suburbs favour the mall, gas stations, fast food, strip malls and the
     shopping plaza;
-  - industrial districts favour auto repair;
+  - industrial districts favour auto repair, and with the suburbs motels and
+    the drive-in;
+  - old town and downtown favour hotels and cinemas (palace cinemas and grand
+    hotels there, multiplexes and budget hotels in the suburbs);
   - downtown favours garages and the transit station;
   - brutalist districts favour the hospital;
   - residential districts favour schools and parks.
@@ -217,8 +220,8 @@ between the blocks.
   Blocks the lot pass would leave sparse are preferred. Sites of a kind keep
   a minimum spacing.
 - **Retail cluster.** The mall is placed first. The shopping plaza (within
-  5 blocks), strip malls (4) and fast food (3) are drawn toward it, so
-  they gather round the mall at the suburban edge.
+  5 blocks), strip malls (4), cinemas (4) and fast food (3) are drawn toward
+  it, so they gather round the mall at the suburban edge.
 - **Fronts and pads.** A site faces its best allowed road; gas stations, fast
   food, malls, the hospital and the transit station need an arterial or
   collector. The pad keeps a 1 m verge to the footway, is pushed back where a
@@ -248,6 +251,10 @@ at least once.
 | Shopping plaza | Pair, Anchor | 80 x 70 m |
 | Auto repair | Bays (bay doors on the street), Yard (bays on a side forecourt, fenced yard) | 30 x 28 m |
 | Enclosed mall | Dumbbell (two anchors), Junior (a big and a junior anchor) | 90 x 80 m |
+| Hotel | Grand (7 floors, corniced), Budget (4 floors, plainer) | 30 x 28 m |
+| Motel | Strip (one row of rooms), Court (a side wing and a pool) | 36 x 28 m |
+| Cinema | Palace (one tall screen, marquee and blade sign), Multiplex (a box of screens; needs about 40 x 45 m) | 32 x 30 m |
+| Drive-in cinema | Single, Twin (two screens) | 80 x 40 m |
 
 Each site is a `<id>_Grounds` mesh (pad, paint, lawns, walks, canopies,
 pumps, signs, benches, play equipment, using 13 `Site_*` material slots).
@@ -318,7 +325,7 @@ the same way.
 | `lifts` (per building) | One per shaft: centre at its lowest stop, clear size, height, the floors it still serves, a door per floor (position, normal out of the shaft, size) and the `car` at the lowest of them |
 | `railings` (per building) | Base lines on the walking surface (flat points) with a rail height: `stair` handrails along the well side of each switchback, `guard` rails at the stair opening of the top floor, `ramp` rails along parking ramps |
 | `transit_stops` | Shelters and stops: object, variant, road edge |
-| `markers` | Placements for game assets: every small prop (`bench`, `lamp`, `bollard`, `gas_pump`, `dumpster`, `table`, `booth`, `play_structure`, `swings`, `goal`, `trash_bin`, `air_pump`, `hydrant`, `cart_corral`, `tyre_stack`; `modelled` says whether the city mesh has it), `tree` spots, `flagpole` plinths, `fence` lines (post line points and a suggested height) and `parking_stall`s (centre and nose-in direction, for wrecked cars), fixtures inside buildings (`reception_desk`, `shop_counter`, `service_counter`, `bar_counter`, facing the customers, with `building` and `floor`; never modelled), and `water` surfaces (centre at the surface, `shape`, `size` = width, depth and water depth; modelled only with **Water** on). Each has its site id and, where it applies, `size` (width, depth, height), `height`, `scale` (trees), `umbrella` or `barrier` |
+| `markers` | Placements for game assets: every small prop (`bench`, `lamp`, `bollard`, `gas_pump`, `dumpster`, `table`, `booth`, `play_structure`, `swings`, `goal`, `trash_bin`, `air_pump`, `hydrant`, `cart_corral`, `tyre_stack`, `speaker_post`; `modelled` says whether the city mesh has it), `tree` spots, `flagpole` plinths, `fence` lines (post line points and a suggested height) and `parking_stall`s (centre and nose-in direction, for wrecked cars), fixtures inside buildings (`reception_desk`, `shop_counter`, `service_counter`, `bar_counter`, facing the customers, with `building` and `floor`; never modelled), and `water` surfaces (centre at the surface, `shape`, `size` = width, depth and water depth; modelled only with **Water** on). Each has its site id and, where it applies, `size` (width, depth, height), `height`, `scale` (trees), `umbrella` or `barrier` |
 | `counts` | Totals per section and per marker type |
 
 Objects also carry custom properties that the FBX passes to Unity as user

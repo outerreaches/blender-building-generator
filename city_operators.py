@@ -4,7 +4,8 @@ import json
 import math
 import bpy
 from bpy.props import BoolProperty, EnumProperty, FloatProperty, IntProperty
-from .city_plan import CONDITIONS, VERSION, CitySettings, generate_city, stream
+from .city_plan import (CONDITIONS, PRESET_SETTINGS, VERSION, CitySettings, generate_city,
+                        stream)
 from .dims import GROUND_SLAB
 from .metadata import SPACES as METADATA_SPACES, CityMetadata
 from .spec import BuildingSpec
@@ -307,12 +308,24 @@ def remove_generated_collection(collection):
     bpy.data.collections.remove(collection)
 
 
+def _apply_preset(self, context):
+    """Choosing a preset sets the sizes and densities that suit it (still editable)."""
+    for key, value in PRESET_SETTINGS[self.preset].items():
+        setattr(self, key, value)
+
+
 class MESH_OT_generate_city(bpy.types.Operator):
     bl_idname = 'mesh.generate_procedural_city'
     bl_label = 'Generate City'
     bl_description = 'Grow a seeded city with connected roads and district building styles'
     bl_options = {'REGISTER', 'UNDO'}
 
+    preset: EnumProperty(name='Preset', default='CITY', update=_apply_preset,
+                         items=[('CITY', 'City', 'Districts round a downtown of towers, every kind '
+                                 'of site'),
+                                ('SMALL_TOWN', 'Small Town', 'An old-town main street with homes '
+                                 'round it and an industrial edge: low buildings, only the sites '
+                                 'a town has')])
     seed: IntProperty(name='City Seed', default=42)
     radius: IntProperty(name='Radius (Blocks)', default=6, min=2, max=25)
     block_size: FloatProperty(name='Block Size (m)', default=56, min=48, max=120)
@@ -376,7 +389,7 @@ class MESH_OT_generate_city(bpy.types.Operator):
     def draw(self, context):
         layout = self.layout
         for title, names in (
-            ('City Growth', ('seed', 'radius', 'block_size', 'primary_count', 'secondary_count', 'driving_loop_count')),
+            ('City Growth', ('preset', 'seed', 'radius', 'block_size', 'primary_count', 'secondary_count', 'driving_loop_count')),
             ('Density and Access', ('curve_radius', 'core_radius', 'core_density', 'outskirts_density', 'road_density', 'setback', 'sidewalk_width', 'curb_height', 'wasteland', 'highway_reach')),
             ('Buildings', ('style', 'damage', 'max_buildings', 'downtown_superblocks',
                            'points_of_interest', 'small_props', 'water', 'detail')),
@@ -402,6 +415,7 @@ class MESH_OT_generate_city(bpy.types.Operator):
             root = bpy.data.collections.new(f'City_{self.seed}_{self.detail}')
             context.collection.children.link(root)
             root['city_seed'] = self.seed
+            root['city_preset'] = self.preset
             root['generator_version'] = VERSION
             root['addon_version'] = addon_version()
             root['output_detail'] = self.detail

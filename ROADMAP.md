@@ -14,6 +14,7 @@
 | v0.15 | The rest of the retail set: auto repair and an enclosed mall, with the other retail gathered round it; a water switch |
 | v0.16 | Hotels, motels, cinemas and drive-in cinemas |
 | v0.17 | Street patterns: suburban cul-de-sacs; plazas and strip malls repeating round their district centres |
+| v0.18 | Small-town preset: an old-town main street, low buildings, only a town's sites |
 
 See [CHANGELOG.md](CHANGELOG.md) for the details.
 

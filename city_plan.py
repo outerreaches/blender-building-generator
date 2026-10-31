@@ -8,7 +8,7 @@ import json
 import math
 import random
 
-VERSION = 8
+VERSION = 9
 ROAD_WIDTHS = {"HIGHWAY": 20.0, "ARTERIAL": 12.0, "COLLECTOR": 8.0, "LOCAL": 6.0}
 ROAD_RANK = {name: i for i, name in enumerate(ROAD_WIDTHS)}
 # Corner radius at a route bend, before the curve_radius multiplier and clamping.
@@ -107,6 +107,60 @@ POI_VERGE = 1.0          # Unpaved strip between a site pad and the footway.
 POI_MIN_DENSITY = .2     # Sites stay inside the built-up area.
 MIDTOWN_STYLES = ('OLD_TOWN', 'RESIDENTIAL', 'BRUTALIST')
 
+# Small town: an old-town main street in the middle, homes round it and an
+# industrial edge; low buildings and only the sites a town has. Missing kinds
+# (malls, plazas, hospitals, garages, hotels, transit stations) are not built.
+PRESETS = ('CITY', 'SMALL_TOWN')
+# Sizes and densities each preset starts from (the operator applies them when
+# a preset is chosen; they stay editable).
+PRESET_SETTINGS = {
+    'CITY': dict(radius=6, primary_count=6, secondary_count=12, core_density=.95,
+                 outskirts_density=.15, road_density=.55, driving_loop_count=3, max_buildings=600),
+    'SMALL_TOWN': dict(radius=5, primary_count=5, secondary_count=6, core_density=.95,
+                       outskirts_density=.45, road_density=.7, driving_loop_count=1,
+                       max_buildings=250),
+}
+TOWN_STYLES = ('RESIDENTIAL', 'SUBURBAN')
+TOWN_FLOORS = {'OLD_TOWN': (1, 3), 'RESIDENTIAL': (1, 3), 'SUBURBAN': (1, 2),
+               'INDUSTRIAL': (1, 1), 'DOWNTOWN': (2, 4), 'BRUTALIST': (2, 3)}
+TOWN_POIS = {
+    'GAS_STATION': dict(count=1.5, districts={'SUBURBAN': 2, 'INDUSTRIAL': 2, 'RESIDENTIAL': 1,
+                                              'OLD_TOWN': 1}),
+    'FAST_FOOD': dict(count=1.5, districts={'SUBURBAN': 2, 'OLD_TOWN': 1.5, 'RESIDENTIAL': 1,
+                                            'INDUSTRIAL': 1}),
+    'AUTO_REPAIR': dict(districts={'INDUSTRIAL': 3, 'SUBURBAN': 1, 'RESIDENTIAL': 1}),
+    'MOTEL': dict(count=1, districts={'SUBURBAN': 2, 'INDUSTRIAL': 2, 'RESIDENTIAL': .5,
+                                     'OLD_TOWN': .5}),
+    'SCHOOL': dict(blocks=((1, 1),), districts={'RESIDENTIAL': 3, 'SUBURBAN': 2}),
+    'POLICE': dict(districts={'OLD_TOWN': 3, 'RESIDENTIAL': 1}),
+    'FIRE_STATION': dict(districts={'OLD_TOWN': 2, 'RESIDENTIAL': 2, 'INDUSTRIAL': 1,
+                                    'SUBURBAN': 1}),
+    'PARK': dict(count=1.5, districts={'RESIDENTIAL': 2, 'OLD_TOWN': 2, 'SUBURBAN': 2}),
+    'PARKING_LOT': dict(count=.8, districts={'OLD_TOWN': 3, 'INDUSTRIAL': 1}),
+    'STRIP_MALL': dict(count=.8, near=None, districts={'SUBURBAN': 2, 'OLD_TOWN': 1,
+                                                       'RESIDENTIAL': 1}),
+    'CINEMA': dict(blocks=((1, 1),), near=None, districts={'OLD_TOWN': 3}),
+    'DRIVE_IN': dict(minimum=0, count=1, districts={'SUBURBAN': 2, 'INDUSTRIAL': 2,
+                                                    'RESIDENTIAL': 1}),
+}
+
+
+def poi_rules(settings):
+    """The site rules a city uses (a small town keeps its own set)."""
+    if settings.preset != 'SMALL_TOWN':
+        return POI_RULES
+    rules = {}
+    for kind, rule in POI_RULES.items():
+        if kind in TOWN_POIS:
+            merged = dict(rule)
+            for key, value in TOWN_POIS[kind].items():
+                if value is None:
+                    merged.pop(key, None)      # An override of None removes the rule.
+                else:
+                    merged[key] = value
+            rules[kind] = merged
+    return rules
+
 CONDITIONS = ('INTACT', 'WEATHERED', 'SEMI_COLLAPSED', 'RUBBLE_FILLED',
               'PARTIAL_FILLED', 'LOWER_FLOORS', 'SHELL', 'WALL_RING', 'COLLAPSED')
 # Multipliers on the city damage setting; the minimums make the rarer states
@@ -173,6 +227,7 @@ class CitySettings:
     points_of_interest: bool = True   # Sites (sites.py) and transit stops.
     highway_reach: float = 3000.0     # Highway beyond the city edge (m), fading out at its end.
     downtown_superblocks: float = .35  # Share of downtown local streets closed to join blocks.
+    preset: str = "CITY"               # CITY, or SMALL_TOWN: no towers, no big sites.
 
     def validate(self):
         for name, lo, hi in (("radius", 2, 25), ("primary_count", 1, 16),
@@ -195,6 +250,8 @@ class CitySettings:
                 raise ValueError(f"{name} must be finite and in [{lo}, {hi}]")
         if self.style not in ("MIXED", *STYLES):
             raise ValueError("Unknown architecture style")
+        if self.preset not in PRESETS:
+            raise ValueError("Unknown preset")
 
 
 @dataclass(frozen=True)
@@ -295,19 +352,28 @@ def density_at(settings, x, y):
     return settings.core_density * (1 - blend) + settings.outskirts_density * blend
 
 
+# In a small town the centre's district (its old-town main street) reaches
+# less far than the others.
+TOWN_CENTRE_WEIGHT = 1.7
+
+
 def district_at(settings, x, y, locations):
     """Nearest centre/primary location in world metres; defines the district."""
     size = settings.block_size
+    centre = TOWN_CENTRE_WEIGHT if settings.preset == 'SMALL_TOWN' else 1.0
     return min((loc for loc in locations if loc.role != 'SECONDARY'),
-               key=lambda loc: math.dist((x, y), (loc.node[0] * size, loc.node[1] * size)))
+               key=lambda loc: math.dist((x, y), (loc.node[0] * size, loc.node[1] * size)) *
+               (centre if loc.role == 'CENTER' else 1.0))
 
 
-def _assign_districts(primaries):
-    """Downtown core, midtown ring, industrial and suburban edges by sector."""
+def _assign_districts(primaries, town=False):
+    """Downtown core, midtown ring, industrial and suburban edges by sector
+    (a town: homes round the old-town centre, industrial and suburban edges)."""
     order = sorted(primaries, key=lambda loc: (math.hypot(*loc.node), loc.node))
     edge_count = 2 if len(order) >= 5 else (1 if len(order) >= 3 else 0)
     core_count = 1 if len(order) >= 3 else 0
-    assigned = {loc.id: 'DOWNTOWN' for loc in order[:core_count]}
+    # A town's old-town main street is the centre alone; homes surround it.
+    assigned = {loc.id: 'RESIDENTIAL' if town else 'DOWNTOWN' for loc in order[:core_count]}
     remaining = order[core_count:]
     # The outermost primary anchors the industrial edge; the location farthest
     # from it (roughly the opposite side of the map) anchors the suburbs.
@@ -324,8 +390,9 @@ def _assign_districts(primaries):
         else:
             assigned[edge[0].id] = 'INDUSTRIAL'
             assigned[edge[-1].id] = 'SUBURBAN'
+    ring = TOWN_STYLES if town else MIDTOWN_STYLES
     for index, loc in enumerate(remaining):
-        assigned[loc.id] = MIDTOWN_STYLES[index % len(MIDTOWN_STYLES)]
+        assigned[loc.id] = ring[index % len(ring)]
     return assigned
 
 
@@ -541,8 +608,10 @@ def generate_city(settings=CitySettings()):
     settings.validate()
     roads = {}
     center = (0, 0)
+    town = settings.preset == 'SMALL_TOWN'
+    core = 'OLD_TOWN' if town else 'DOWNTOWN'
     locations = [Location("center", center, "CENTER",
-                          "DOWNTOWN" if settings.style == "MIXED" else settings.style)]
+                          core if settings.style == "MIXED" else settings.style)]
     occupied = {center}
 
     def connect(a, b, tier):
@@ -571,7 +640,7 @@ def generate_city(settings=CitySettings()):
     # MIXED gives each district a role: downtown core, midtown ring, and
     # industrial/suburban edges on opposite sides of the map.
     if settings.style == "MIXED":
-        assigned = _assign_districts(locations[1:])
+        assigned = _assign_districts(locations[1:], town)
         locations = [Location(loc.id, loc.node, loc.role, assigned.get(loc.id, loc.style))
                      for loc in locations]
 
@@ -761,7 +830,8 @@ def _place_lots(settings, locations, roads, reserved=frozenset(), culdesacs=()):
                         cy = cell_high_y - sy / 2
                     condition_rng = stream(settings.seed, "condition", ident)
                     condition = _pick_condition(district.style, condition_rng)
-                    floors = rng.randint(*profile['floors'])
+                    floors = rng.randint(*(TOWN_FLOORS.get(district.style, profile['floors'])
+                                           if settings.preset == 'SMALL_TOWN' else profile['floors']))
                     if condition == 'WALL_RING':
                         floors = min(floors, rng.randint(2, 4))
                     # Turning circles and their footway stay clear of the parcel.
@@ -900,7 +970,7 @@ def _place_pois(settings, locations, roads, paths, culdesacs=()):
                     _side_edges(x, y, 1, 1)["W"] + _side_edges(x, y, 1, 1)["E"]))
     taken = set()
     pois = []
-    for kind, rule in POI_RULES.items():
+    for kind, rule in poi_rules(settings).items():
         rng = stream(settings.seed, "poi", kind)
         expected = rule['count'] * urban / 100
         quota = int(expected) + (1 if rng.random() < expected - int(expected) else 0)
@@ -1314,7 +1384,8 @@ def _split_downtown(settings, roads, pad, sides, district, rng, group):
             item_rng = stream(settings.seed, ident)
             condition_rng = stream(settings.seed, "condition", ident)
             condition = _pick_condition(district.style, condition_rng)
-            low, high = profile['floors']
+            low, high = (TOWN_FLOORS['DOWNTOWN'] if settings.preset == 'SMALL_TOWN'
+                         else profile['floors'])
             # Slender plots stay lower.
             floors = min(item_rng.randint(low, high), max(low, int(min(width, depth) * .9) + 4))
             if condition == 'WALL_RING':

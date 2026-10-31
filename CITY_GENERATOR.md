@@ -21,6 +21,7 @@ The original single-building and bulk operators remain available. Architecture u
 
 | Control | Effect |
 | --- | --- |
+| Preset | City (default), or [Small Town](#small-town): no towers and no big sites. Choosing one sets the sizes and densities that suit it |
 | Seed | Repeatable locations, roads, lots and per-building seeds |
 | Radius / Block Size | Square extent in blocks/metres; 6 × 56 is about 672 m across |
 | Primary / Secondary Locations | District seeds (default 6: downtown core, three midtown styles, industrial and suburban edges) and smaller growth destinations |
@@ -70,6 +71,33 @@ Circuits are closed simple paths: no repeated intermediate node or retraced edge
 Edge topology is grouped into continuous same-tier **routes**, preferring a straight continuation at each junction. Every interior corner of a route becomes a circular fillet (tangent-capped at 45% of each adjacent block edge), so a circuit turns through an arc rather than a square corner. Junctions are not hand-built: they are the union of the curved corridors, which gives each intersection its own shape from the incident widths and angles. Route centrelines are serialized under `paths`, separate from the lattice `roads` used for topology and parcels.
 
 The target is a network of connected driving circuits that change road type and district along the way.
+
+## Small town
+
+**Preset: Small Town** makes a rural town instead of a city. Choosing it sets
+radius 5 (about 560 m across), 5 primary and 6 secondary locations, core
+density 0.95, outskirts density 0.45, local roads 0.7, one driving circuit and
+a 250-building budget. All of them stay editable, and choosing **City** puts
+the city's values back. Scripts work the same way: sizes passed to the
+operator override the preset's.
+
+- **Districts.** An old-town main street at the centre, whose district
+  reaches less far than the others, with residential and suburban districts
+  round it and an industrial edge. There is no downtown and no brutalist
+  district.
+- **Heights.** Old town and residential 1–3 floors, suburban 1–2, industrial
+  sheds one storey. With a single **Architecture** style, downtown is 2–4
+  floors and brutalist 2–3.
+- **Sites.** Gas stations, fast food, auto repair, a motel, a school, police
+  and fire stations, parks, a parking lot, strip malls, a palace cinema on
+  the main street, and a drive-in where one fits. Schools and cinemas take a
+  single block. A town has no mall, shopping plaza, hospital, parking garage,
+  transit station or hotel, so the retail is not pulled round a mall.
+- **Streets.** The suburbs get cul-de-sacs, as in a city.
+
+Over twelve seeds a town has 88–126 buildings and 11–15 sites, and 10 of the
+12 got a drive-in. The plan's settings and the metadata's `city` record the
+`preset`.
 
 ## Districts
 
@@ -328,7 +356,7 @@ the same way.
 
 | Field | Contents |
 | --- | --- |
-| `city` | Seed, origin, extent, block size, wasteland, curb height, sidewalk width, whether small props were modelled |
+| `city` | Preset, seed, origin, extent, block size, wasteland, curb height, sidewalk width, whether small props were modelled, interiors listed and water modelled |
 | `districts` | District seeds: id, role, style, position |
 | `roads` | Every route: tier, width, lattice nodes, centreline points at carriageway level (footways run along both sides) |
 | `junctions` | Lattice nodes with roads: position, radius (widest half-width plus footway, or the turning circle plus footway), number of roads, `cul_de_sac` |
@@ -356,7 +384,7 @@ For scale: a radius-8 city with every building detailed has about 490 buildings 
 
 ## Plan data
 
-A JSON text datablock (`<collection>_plan.json`) stores the versioned plan. Coordinates are relative to the collection's stored `origin`; road nodes multiply by `block_size`, while lot positions/dimensions and path points are metres. Schema version 8 adds `culdesacs` (turning-circle node and radius). Version 7 added `party_walls` and `group` to each lot (downtown towers built against neighbours). Version 6 added `outer_roads`. Version 5 added `pois` (kind, centre, width along the frontage, depth, rotation, frontage edge, blocks, seed, condition, damage, approach) and `shelters` (position, rotation, variant, road edge); a site's layout is chosen by `sites.compose` from its seed. Version 4 added `kind`, `condition`, `interiors` and `damage` to each lot alongside the version-3 `paths`: one entry per continuous same-tier route with its lattice `nodes`, flattened metre-space `points` and `width`. Locations and lots carry their district `style`; the per-style profile table is code (`STYLE_PROFILE`), not part of the file. No legacy-plan importer is included.
+A JSON text datablock (`<collection>_plan.json`) stores the versioned plan. Coordinates are relative to the collection's stored `origin`; road nodes multiply by `block_size`, while lot positions/dimensions and path points are metres. Schema version 9 adds `preset` to the settings (`CITY` or `SMALL_TOWN`). Version 8 added `culdesacs` (turning-circle node and radius). Version 7 added `party_walls` and `group` to each lot (downtown towers built against neighbours). Version 6 added `outer_roads`. Version 5 added `pois` (kind, centre, width along the frontage, depth, rotation, frontage edge, blocks, seed, condition, damage, approach) and `shelters` (position, rotation, variant, road edge); a site's layout is chosen by `sites.compose` from its seed. Version 4 added `kind`, `condition`, `interiors` and `damage` to each lot alongside the version-3 `paths`: one entry per continuous same-tier route with its lattice `nodes`, flattened metre-space `points` and `width`. Locations and lots carry their district `style`; the per-style profile table is code (`STYLE_PROFILE`), not part of the file. No legacy-plan importer is included.
 
 ## Code and verification
 

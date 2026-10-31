@@ -57,6 +57,7 @@ namespace Ares.CityGen
     [Serializable]
     public class CityInfo
     {
+        public string preset;           // CITY or SMALL_TOWN.
         public int seed;
         public float[] origin;
         public float extent;

@@ -1,5 +1,21 @@
 # Changelog
 
+## v0.18.0: Small-town preset
+
+- **Preset: Small Town** in Generate City builds a rural town: an old-town
+  main street at the centre, residential and suburban districts round it and
+  an industrial edge, with no downtown or brutalist district. Buildings stay
+  at 1–3 floors (suburban 1–2, industrial sheds one storey).
+- A town has gas stations, fast food, auto repair, a motel, a school, police
+  and fire stations, parks, a parking lot, strip malls, a palace cinema on
+  the main street and, where one fits, a drive-in. It has no mall, shopping
+  plaza, hospital, parking garage, transit station or hotel.
+- Choosing the preset sets a town's size and densities (radius 5, about
+  560 m across, 250-building budget); they stay editable, and **City** puts
+  the city's values back. A town has about 90–125 buildings and 11–15 sites.
+- The plan's settings (schema 9) and the metadata's `city` record the
+  `preset`. City plans are unchanged.
+
 ## v0.17.0: Cul-de-sacs, plazas and strip malls
 
 - **Cul-de-sacs.** Suburbs get short dead-end streets into blocks that no

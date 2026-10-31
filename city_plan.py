@@ -8,7 +8,7 @@ import json
 import math
 import random
 
-VERSION = 9
+VERSION = 10
 ROAD_WIDTHS = {"HIGHWAY": 20.0, "ARTERIAL": 12.0, "COLLECTOR": 8.0, "LOCAL": 6.0}
 ROAD_RANK = {name: i for i, name in enumerate(ROAD_WIDTHS)}
 # Corner radius at a route bend, before the curve_radius multiplier and clamping.
@@ -16,7 +16,9 @@ BEND_RADII = {"HIGHWAY": 26.0, "ARTERIAL": 18.0, "COLLECTOR": 12.0, "LOCAL": 8.0
 # District character. `parcels` divides a block per axis, `footprint` is the
 # fraction of the parcel the building may use (the rest is yard/plaza), `road`
 # scales local street growth, `curve` scales corner fillets and `damage`
-# scales the city damage setting.
+# scales the city damage setting. `tract`: the block is built out whole or
+# left empty (the density times this is the chance it is built), with rows of
+# houses along its streets instead of parcels.
 STYLE_PROFILE = {
     'DOWNTOWN': dict(floors=(8, 24), parcels=1, footprint=(.72, .92), density=1.25,
                      setback=2, road=1.2, curve=.5, damage=1.0),
@@ -28,8 +30,8 @@ STYLE_PROFILE = {
                       setback=.5, road=.85, curve=.8, damage=.8),
     'INDUSTRIAL': dict(floors=(1, 2), parcels=1, footprint=(.75, .95), density=.8,
                        setback=2, road=.6, curve=1.3, damage=1.2),
-    'SUBURBAN': dict(floors=(1, 2), parcels=2, footprint=(.45, .65), density=1.0,
-                     setback=3, road=.5, curve=1.4, damage=.3),
+    'SUBURBAN': dict(floors=(1, 2), parcels=2, footprint=(.85, 1.0), density=1.0,
+                     setback=1, road=.5, curve=1.4, damage=.3, tract=1.6),
 }
 STYLES = tuple(STYLE_PROFILE)
 # Points of interest (sites.py lays them out). ``blocks`` lists footprints in
@@ -291,6 +293,7 @@ class Lot:
     damage: float = 0.0
     party_walls: tuple = ()   # Sides (front/back/left/right) built against a neighbour.
     group: str = ''           # Buildings of one downtown block share a budget draw.
+    bulb: tuple = ()          # Cul-de-sac node of the turning circle the house faces.
 
 
 @dataclass(frozen=True)
@@ -706,6 +709,19 @@ def generate_city(settings=CitySettings()):
 # node with no road, ending in a turning circle of this radius (carriageway).
 CULDESAC_RADIUS = 10.0
 CULDESAC_CHANCE = .7
+# Houses ring the turning circle, facing it across a front yard this deep, at
+# least BULB_GAP apart; their size range (along the circle, away from it).
+BULB_YARD = 4.0
+BULB_GAP = 2.0
+BULB_HOUSE = ((9.0, 11.0), (8.5, 10.5))
+# Share of a developed tract's plots that get a house (a ring round a
+# turning circle is always built in full).
+TRACT_FILL = .9
+# Tract rows: plot width along the street, the gap between houses, and the
+# deepest house.
+TRACT_PLOT = 10.0
+TRACT_GAP = 3.0
+TRACT_DEPTH = 11.0
 
 
 def _add_culdesacs(settings, locations, roads):
@@ -759,8 +775,166 @@ def _pick_condition(style, rng):
     return 'INTACT'
 
 
-def _place_lots(settings, locations, roads, reserved=frozenset(), culdesacs=()):
+def _corners(center, width, depth, rotation):
+    """World corners of a footprint (width along its front, depth away)."""
+    c, s = math.cos(rotation), math.sin(rotation)
+    return [(center[0] + x * c - y * s, center[1] + x * s + y * c)
+            for x, y in ((-width / 2, -depth / 2), (width / 2, -depth / 2),
+                         (width / 2, depth / 2), (-width / 2, depth / 2))]
+
+
+def _apart(a, b, gap):
+    """Two convex polygons are at least ``gap`` apart along some edge normal."""
+    for polygon in (a, b):
+        for (x0, y0), (x1, y1) in zip(polygon, polygon[1:] + polygon[:1]):
+            nx, ny = y1 - y0, x0 - x1
+            length = math.hypot(nx, ny)
+            nx, ny = nx / length, ny / length
+            pa = [x * nx + y * ny for x, y in a]
+            pb = [x * nx + y * ny for x, y in b]
+            if min(pb) - max(pa) >= gap or min(pa) - max(pb) >= gap:
+                return True
+    return False
+
+
+def _clear_of_bulbs(corners, bulbs):
+    """No turning circle (centre x, y; clearance) reaches the footprint."""
+    for bx, by, clear in bulbs:
+        inside = all((x1 - x0) * (by - y0) - (y1 - y0) * (bx - x0) >= 0
+                     for (x0, y0), (x1, y1) in zip(corners, corners[1:] + corners[:1]))
+        if inside or min(_point_segment(bx, by, a, b)
+                         for a, b in zip(corners, corners[1:] + corners[:1])) < clear:
+            return False
+    return True
+
+
+def _point_segment(px, py, a, b):
+    (ax, ay), (bx, by) = a, b
+    dx, dy = bx - ax, by - ay
+    t = max(0.0, min(1.0, ((px - ax) * dx + (py - ay) * dy) / (dx * dx + dy * dy)))
+    return math.hypot(px - ax - t * dx, py - ay - t * dy)
+
+
+def _make_lot(settings, ident, rng, district, profile, center, width, depth, rotation,
+              frontage, bulb=()):
+    """Condition, height and damage of an ordinary building (draws from ``rng``
+    in the order the lot pass always has)."""
+    condition_rng = stream(settings.seed, "condition", ident)
+    condition = _pick_condition(district.style, condition_rng)
+    floors = rng.randint(*(TOWN_FLOORS.get(district.style, profile['floors'])
+                           if settings.preset == 'SMALL_TOWN' else profile['floors']))
+    if condition == 'WALL_RING':
+        floors = min(floors, rng.randint(2, 4))
+    damage = min(1.0, max(
+        settings.damage * profile['damage'] * CONDITION_DAMAGE[condition],
+        CONDITION_MIN_DAMAGE[condition]))
+    if floors > 8:
+        # Tall towers carry more visible damage than low-rise blocks.
+        damage = min(1.0, damage * (1 + min(.5, (floors - 8) * .045)))
+    interiors = (condition in INTERIOR_CONDITIONS and
+                 condition_rng.random() < settings.interior_ratio)
+    return Lot(ident, center, width, depth, rotation, district.style, district.id, floors,
+               rng.randrange(2**31), frontage, condition=condition, interiors=interiors,
+               damage=damage, bulb=bulb)
+
+
+def _bulb_lots(settings, locations, roads, reserved, culdesacs):
+    """Suburban houses in a ring round each turning circle, facing it."""
+    size, walk = settings.block_size, settings.sidewalk_width
+    clear = [(c['node'][0] * size, c['node'][1] * size, c['radius'] + walk + 1.0)
+             for c in culdesacs]
+    (w_low, w_high), (d_low, d_high) = BULB_HOUSE
     lots = []
+    for bulb in culdesacs:
+        node = tuple(bulb['node'])
+        stub = next(key for key in sorted(roads) if node in key)
+        start = stub[0] if stub[1] == node else stub[1]
+        heading = math.atan2(start[1] - node[1], start[0] - node[0])
+        front = bulb['radius'] + walk + BULB_YARD
+        # The first place round from the street keeps the widest house clear of
+        # the street's footway (the houses along it face the street itself).
+        corridor = ROAD_WIDTHS['LOCAL'] / 2 + walk + BULB_GAP
+        first = next(math.radians(d) for d in range(10, 91)
+                     if front * math.sin(math.radians(d)) -
+                     w_high / 2 * math.cos(math.radians(d)) >= corridor)
+        pitch = 2 * math.atan((w_high + BULB_GAP) / 2 / front)
+        span = 2 * math.pi - 2 * first
+        count = int(span / pitch) + 1
+        step = span / (count - 1)
+        for index in range(count):
+            angle = heading + first + index * step
+            # Named after the block it stands in, like every lot.
+            spot = (node[0] + (front + d_high / 2) * math.cos(angle) / size,
+                    node[1] + (front + d_high / 2) * math.sin(angle) / size)
+            ident = f"lot_{math.floor(spot[0])}_{math.floor(spot[1])}_ring{index}"
+            rng = stream(settings.seed, ident)
+            width, depth = rng.uniform(w_low, w_high), rng.uniform(d_low, d_high)
+            centre = (node[0] * size + (front + depth / 2) * math.cos(angle),
+                      node[1] * size + (front + depth / 2) * math.sin(angle))
+            # Local -y (the front) faces the circle.
+            rotation = math.atan2(math.sin(angle - math.pi / 2), math.cos(angle - math.pi / 2))
+            corners = _corners(centre, width, depth, rotation)
+            district = district_at(settings, *centre, locations)
+            if district.style != 'SUBURBAN':
+                continue
+            if any((math.floor(x / size), math.floor(y / size)) in reserved for x, y in corners):
+                continue
+            others = [c for c in clear if math.dist(c[:2], (node[0] * size, node[1] * size)) > 1]
+            if not _clear_of_bulbs(corners, others):
+                continue
+            if not all(_apart(corners, _corners(lot.center, lot.width, lot.depth, lot.rotation),
+                              BULB_GAP) for lot in lots):
+                continue
+            lots.append(_make_lot(settings, ident, rng, district, STYLE_PROFILE['SUBURBAN'],
+                                  centre, width, depth, rotation, stub, node))
+    return lots
+
+
+def _tract_rows(streets, low_x, high_x, low_y, high_y, profile, rng):
+    """Houses in rows along a suburban block's streets: (side, index, centre,
+    width along the street, depth). The rows on the south and north streets
+    run the block's width; those on the west and east fit between them."""
+    span_x, span_y = high_x - low_x, high_y - low_y
+    def band(side, across):
+        opposite = {"S": "N", "N": "S", "W": "E", "E": "W"}[side]
+        room = (across - TRACT_GAP) / 2 if opposite in streets else across
+        return min(TRACT_DEPTH, room)
+    depths = {side: band(side, span_y if side in "SN" else span_x) for side in streets}
+    houses = []
+    for side in streets:
+        if side in "SN":
+            start, end = low_x, high_x
+        else:
+            start = low_y + (depths["S"] + TRACT_GAP if "S" in depths else 0)
+            end = high_y - (depths["N"] + TRACT_GAP if "N" in depths else 0)
+        length = end - start
+        count = max(1, round((length + TRACT_GAP) / (TRACT_PLOT + TRACT_GAP)))
+        plot = (length - (count - 1) * TRACT_GAP) / count
+        if plot < 5 or depths[side] < 5:
+            continue
+        for index in range(count):
+            width = plot * rng.uniform(*profile['footprint'])
+            depth = depths[side] * rng.uniform(*profile['footprint'])
+            if width < 5 or depth < 5:
+                continue
+            along = start + index * (plot + TRACT_GAP) + plot / 2
+            # The front wall stands on the street-facing building line.
+            if side == "S":
+                center = (along, low_y + depth / 2)
+            elif side == "N":
+                center = (along, high_y - depth / 2)
+            elif side == "W":
+                center = (low_x + depth / 2, along)
+            else:
+                center = (high_x - depth / 2, along)
+            houses.append((side, index, center, width, depth))
+    return houses
+
+
+def _place_lots(settings, locations, roads, reserved=frozenset(), culdesacs=()):
+    rings = _bulb_lots(settings, locations, roads, reserved, culdesacs)
+    ring_corners = [_corners(lot.center, lot.width, lot.depth, lot.rotation) for lot in rings]
+    lots = list(rings)
     size = settings.block_size
     bulbs = [(c['node'][0] * size, c['node'][1] * size,
               c['radius'] + settings.sidewalk_width + 1.0) for c in culdesacs]
@@ -779,7 +953,10 @@ def _place_lots(settings, locations, roads, reserved=frozenset(), culdesacs=()):
                        "E": edge((x + 1, y), (x + 1, y + 1))}
             district = district_at(settings, (x + .5) * size, (y + .5) * size, locations)
             profile = STYLE_PROFILE[district.style]
-            cells = profile['parcels']
+            tract = profile.get('tract', 0)
+            if tract and stream(settings.seed, "tract", x, y).random() > min(
+                    1.0, density_at(settings, (x + .5) * size, (y + .5) * size) * tract):
+                continue
             margins = {}
             for side, (a, b) in borders.items():
                 half = max(nodes.get(a, 0), nodes.get(b, 0))
@@ -790,6 +967,24 @@ def _place_lots(settings, locations, roads, reserved=frozenset(), culdesacs=()):
             high_x = (x + 1) * size - margins["E"]
             low_y = y * size + margins["S"]
             high_y = (y + 1) * size - margins["N"]
+            if tract:
+                streets = [side for side in "SNWE" if borders[side] in roads and
+                           roads[borders[side]] != "HIGHWAY"]
+                for side, index, center, width, depth in _tract_rows(
+                        streets, low_x, high_x, low_y, high_y, profile,
+                        stream(settings.seed, "tract_rows", x, y)):
+                    ident = f"lot_{x}_{y}_{side}{index}"
+                    rng = stream(settings.seed, ident)
+                    if rng.random() > TRACT_FILL:
+                        continue
+                    box = _corners(center, width, depth, SIDE_ROTATION[side])
+                    if not _clear_of_bulbs(box, bulbs) or not all(
+                            _apart(box, ring, BULB_GAP) for ring in ring_corners):
+                        continue
+                    lots.append(_make_lot(settings, ident, rng, district, profile, center,
+                                          width, depth, SIDE_ROTATION[side], borders[side]))
+                continue
+            cells = profile['parcels']
             cell_x = (high_x - low_x - 2 * (cells - 1)) / cells
             cell_y = (high_y - low_y - 2 * (cells - 1)) / cells
             if min(cell_x, cell_y) < 5:
@@ -828,32 +1023,20 @@ def _place_lots(settings, locations, roads, reserved=frozenset(), culdesacs=()):
                         cy = cell_low_y + sy / 2
                     else:
                         cy = cell_high_y - sy / 2
-                    condition_rng = stream(settings.seed, "condition", ident)
-                    condition = _pick_condition(district.style, condition_rng)
-                    floors = rng.randint(*(TOWN_FLOORS.get(district.style, profile['floors'])
-                                           if settings.preset == 'SMALL_TOWN' else profile['floors']))
-                    if condition == 'WALL_RING':
-                        floors = min(floors, rng.randint(2, 4))
-                    # Turning circles and their footway stay clear of the parcel.
+                    # Turning circles and their footway stay clear of the parcel,
+                    # and so do the houses round them.
                     if any(math.hypot(max(cx - sx / 2 - bx, 0, bx - cx - sx / 2),
                                       max(cy - sy / 2 - by, 0, by - cy - sy / 2)) < clear
                            for bx, by, clear in bulbs):
                         continue
+                    box = [(cx - sx / 2, cy - sy / 2), (cx + sx / 2, cy - sy / 2),
+                           (cx + sx / 2, cy + sy / 2), (cx - sx / 2, cy + sy / 2)]
+                    if not all(_apart(box, ring, BULB_GAP) for ring in ring_corners):
+                        continue
                     width, depth = (sy, sx) if side in "WE" else (sx, sy)
                     rotation = {"S": 0, "E": math.pi / 2, "N": math.pi, "W": -math.pi / 2}[side]
-                    damage = min(1.0, max(
-                        settings.damage * profile['damage'] * CONDITION_DAMAGE[condition],
-                        CONDITION_MIN_DAMAGE[condition]))
-                    if floors > 8:
-                        # Tall towers carry more visible damage than low-rise blocks.
-                        damage = min(1.0, damage * (1 + min(.5, (floors - 8) * .045)))
-                    interiors = (condition in INTERIOR_CONDITIONS and
-                                 condition_rng.random() < settings.interior_ratio)
-                    lots.append(Lot(ident, (cx, cy), width, depth, rotation,
-                                    district.style, district.id, floors,
-                                    rng.randrange(2**31), borders[side],
-                                    condition=condition, interiors=interiors,
-                                    damage=damage))
+                    lots.append(_make_lot(settings, ident, rng, district, profile, (cx, cy),
+                                          width, depth, rotation, borders[side]))
     return lots
 
 

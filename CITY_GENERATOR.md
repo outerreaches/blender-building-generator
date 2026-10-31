@@ -95,7 +95,7 @@ operator override the preset's.
   transit station or hotel, so the retail is not pulled round a mall.
 - **Streets.** The suburbs get cul-de-sacs, as in a city.
 
-Over twelve seeds a town has 88–126 buildings and 11–15 sites, and 10 of the
+Over twelve seeds a town has 140–180 buildings and 11–15 sites, and 10 of the
 12 got a drive-in. The plan's settings and the metadata's `city` record the
 `preset`.
 
@@ -112,9 +112,9 @@ Each district changes all of the following, not just the material colour:
 | Residential | 2×2 | 80–100% | ×1.0 | 0 m | ×1.0 | ×1.0 | ×0.9 |
 | Brutalist | 2×2 | 85–100% | ×0.95 | 0.5 m | ×0.85 | ×0.8 | ×0.8 |
 | Industrial | 1 | 75–95% | ×0.8 | 2 m | ×0.6 | ×1.3 | ×1.2 |
-| Suburban | 2×2 | 45–65% | ×1.0 | 3 m | ×0.5 | ×1.4 | ×0.3 |
+| Suburban | Rows along its streets | 85–100% of a 10 m plot | ×1.6, whole blocks | 1 m | ×0.5 | ×1.4 | ×0.3 |
 
-"Footprint" is the fraction of the parcel the shell may occupy; the remainder becomes the yard, plaza or hardstanding. Industrial gets one wide shed per block and suburban four small houses with gardens. Local street growth multiplies the road-density probability, so downtown is a tighter grid while the industrial and suburban edges have fewer, longer blocks. Corner radii scale the per-tier fillet, which makes suburban bends wider and downtown corners tighter. Damage scales the city setting, so the suburbs stay mostly intact.
+"Footprint" is the fraction of the parcel the shell may occupy; the remainder becomes the yard, plaza or hardstanding. Industrial gets one wide shed per block. Suburbs are built in tracts: a block is built out or left empty (the density times 1.6 is the chance it is built), and a built block is lined with houses along each of its streets, on plots about 10 m wide with 3 m between houses and up to 11 m deep. The rows along the side streets fit between the end rows, and about one plot in ten stays empty. Local street growth multiplies the road-density probability, so downtown is a tighter grid while the industrial and suburban edges have fewer, longer blocks. Corner radii scale the per-tier fillet, which makes suburban bends wider and downtown corners tighter. Damage scales the city setting, so the suburbs stay mostly intact.
 
 ### Dense downtown
 
@@ -211,8 +211,10 @@ Condition weights per district (percent; `CONDITION_WEIGHTS` in `city_plan.py`):
   with suburban blocks on at least three sides and none downtown, may get a
   short local street from a neighbouring road node. Its end is a turning
   circle with a 10 m carriageway radius, ringed by the footway. The houses
-  either side face the new street, and lots and site pads keep clear of the
-  circle. Each one is listed in the plan's `culdesacs` and, in the metadata,
+  either side face the new street, and a ring of up to seven houses faces
+  the circle across a 4 m front yard, each with a path to the footway (fewer
+  where a site or another district takes a corner). Other lots and site pads
+  keep clear of the circle. Each one is listed in the plan's `culdesacs` and, in the metadata,
   as a junction with `cul_de_sac` set.
 - **Plazas and strip malls repeat round their district centres.** Parks in
   old town and downtown are laid out as plazas and are drawn toward those
@@ -384,7 +386,7 @@ For scale: a radius-8 city with every building detailed has about 490 buildings 
 
 ## Plan data
 
-A JSON text datablock (`<collection>_plan.json`) stores the versioned plan. Coordinates are relative to the collection's stored `origin`; road nodes multiply by `block_size`, while lot positions/dimensions and path points are metres. Schema version 9 adds `preset` to the settings (`CITY` or `SMALL_TOWN`). Version 8 added `culdesacs` (turning-circle node and radius). Version 7 added `party_walls` and `group` to each lot (downtown towers built against neighbours). Version 6 added `outer_roads`. Version 5 added `pois` (kind, centre, width along the frontage, depth, rotation, frontage edge, blocks, seed, condition, damage, approach) and `shelters` (position, rotation, variant, road edge); a site's layout is chosen by `sites.compose` from its seed. Version 4 added `kind`, `condition`, `interiors` and `damage` to each lot alongside the version-3 `paths`: one entry per continuous same-tier route with its lattice `nodes`, flattened metre-space `points` and `width`. Locations and lots carry their district `style`; the per-style profile table is code (`STYLE_PROFILE`), not part of the file. No legacy-plan importer is included.
+A JSON text datablock (`<collection>_plan.json`) stores the versioned plan. Coordinates are relative to the collection's stored `origin`; road nodes multiply by `block_size`, while lot positions/dimensions and path points are metres. Schema version 10 adds `bulb` to each lot: the cul-de-sac node a house round a turning circle faces (empty for the rest). Those houses are turned to face the circle, so a lot's `rotation` is no longer always a quarter turn. Version 9 added `preset` to the settings (`CITY` or `SMALL_TOWN`). Version 8 added `culdesacs` (turning-circle node and radius). Version 7 added `party_walls` and `group` to each lot (downtown towers built against neighbours). Version 6 added `outer_roads`. Version 5 added `pois` (kind, centre, width along the frontage, depth, rotation, frontage edge, blocks, seed, condition, damage, approach) and `shelters` (position, rotation, variant, road edge); a site's layout is chosen by `sites.compose` from its seed. Version 4 added `kind`, `condition`, `interiors` and `damage` to each lot alongside the version-3 `paths`: one entry per continuous same-tier route with its lattice `nodes`, flattened metre-space `points` and `width`. Locations and lots carry their district `style`; the per-style profile table is code (`STYLE_PROFILE`), not part of the file. No legacy-plan importer is included.
 
 ## Code and verification
 

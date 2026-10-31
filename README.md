@@ -26,11 +26,11 @@ sized for the game's 2 m player capsule.
   tops keep the window grid. Every wall, slab, partition and stair is a
   closed solid: no holes, no flipped faces, no z-fighting.
 - **Cities.** Seeded district growth, curved roads with filleted junctions
-  and connected driving circuits, footways and curbs, suburban cul-de-sacs,
-  a dense downtown of party-walled towers and superblocks, and highways that
-  run out into the wasteland. A **Small Town** preset builds a rural town
-  instead: an old-town main street, low houses round it and only the sites a
-  town has.
+  and connected driving circuits, footways and curbs, built-out suburbs with
+  houses round their cul-de-sacs, a dense downtown of party-walled towers
+  and superblocks, and highways that run out into the wasteland. A **Small
+  Town** preset builds a rural town instead: an old-town main street, low
+  houses round it and only the sites a town has.
 - **Points of interest.** Eighteen kinds of site, each with two to four
   layouts: gas stations, fast food, auto repair, schools, hospitals, police
   and fire stations, transit stations, parks, parking lots and garages, strip

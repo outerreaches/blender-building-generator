@@ -1,5 +1,20 @@
 # Changelog
 
+## v0.18.1: Built-out suburbs, houses round cul-de-sacs, drive-in fixes
+
+- **Suburbs are built out.** Suburban blocks are built in tracts, whole or
+  not at all, and a built block is lined with houses along each of its
+  streets: plots about 10 m wide, 3 m between houses, houses filling most of
+  the plot. A town's suburbs have about twice as many houses as before.
+- **Houses round cul-de-sacs.** Up to seven houses ring each turning circle,
+  facing it across a 4 m front yard, each with a 3 m path to the footway.
+- **Drive-in cinema.** The concession stand is in a back corner: beside the
+  screen in a deep lot (twin screens move over to make room), at the far
+  end of the field in a shallow one. The ticket booth faces into the lot and
+  its barrier reaches across the way in (it pointed away from the lane).
+- Plan schema 10: lots gain `bulb`, and houses round a turning circle have
+  rotations other than quarter turns.
+
 ## v0.18.0: Small-town preset
 
 - **Preset: Small Town** in Generate City builds a rural town: an old-town

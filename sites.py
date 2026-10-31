@@ -2186,8 +2186,8 @@ def _screen_part(width, height):
 def _drive_in(c):
     """Drive-in cinema: a big screen at the far end (TWIN: two side by side),
     curved rows of stalls facing it with speaker posts between the cars, a
-    concession and projection building in the field, a ticket booth at the
-    gate and a fence round the lot."""
+    concession stand in a back corner, a ticket booth at the gate and a fence
+    round the lot."""
     g = c.g
     x0, y0, x1, y1 = c.rect
     c.ground(S_ASPHALT)
@@ -2204,7 +2204,7 @@ def _drive_in(c):
 
         def heading(du, dv):
             return du, -dv
-        quarter, face = 0, 2
+        quarter = 0
     else:
         # Screen at the left end facing along the lot; u runs along y.
         sx, sy = x0 + m + 1.0, (y0 + y1) / 2 + 2.0
@@ -2215,21 +2215,33 @@ def _drive_in(c):
 
         def heading(du, dv):
             return dv, du
-        quarter, face = 1, 3
-    twin = c.variant == 'TWIN' and half >= 30
+        quarter = 1
+    # Concession stand in a back corner, away from the gate: beside the screen
+    # in a deep lot (the screens keep clear of it), at the far end of the
+    # field in a shallow one (the screen fills its own end).
+    kw, kd = 14.0, 9.0
+    if deep:
+        kx, ky, kq = x0 + m + 1.0 + kw / 2, y1 - m - 1.0 - kd / 2, 0
+        low = kx + kw / 2 + 3.0 - sx      # Screens keep 3 m from it.
+    else:
+        kx, ky, kq = x1 - m - 1.0 - kd / 2, y1 - m - 1.0 - kw / 2, 3
+        low = -half
+    extent = (half - low) / 4             # Half the field each twin screen serves.
+    twin = c.variant == 'TWIN' and extent >= 13
     if c.variant == 'TWIN' and not twin:
         c.variant = 'SINGLE'
-    screens = [(-half / 2, half / 2 - 1.5), (half / 2, half / 2 - 1.5)] if twin else [(0.0, half)]
-    width = min(26.0, half * (.9 if twin else 1.2))
+    if twin:
+        screens = [(low + extent, extent - 1.5), (low + 3 * extent, extent - 1.5)]
+        width = min(26.0, 1.8 * extent)
+    else:
+        screens = [(0.0, half)]
+        width = min(26.0, half * 1.2, 2 * min(half, -low))
     for us, _ in screens:
         x, y = at(us, 0.0)
         g.mesh.place(_screen_part(width, 10.0).mesh, x, y, quarter)
-    # Concession and projection building in the field, facing the screen.
-    cv = min(length * .55, 34.0)
-    cx, cy = at(0.0, cv)
     kiosk = c.building('concession', designed(
-        14.0, 9.0, 1, 3.8, c.seed, 'RESTAURANT', window_sides=('front', 'left', 'right'),
-        ground_floor_windows='STOREFRONT', storefront_window_height=2.2), cx, cy, quarter=face,
+        kw, kd, 1, 3.8, c.seed, 'RESTAURANT', window_sides=('front', 'left', 'right'),
+        ground_floor_windows='STOREFRONT', storefront_window_height=2.2), kx, ky, quarter=kq,
         role='concession')
     kx0, ky0, kx1, ky1 = kiosk.footprint
     for us, reach in screens:
@@ -2255,7 +2267,8 @@ def _drive_in(c):
     # Gate, ticket booth and fence (posts only; the fence is a game asset).
     gx = x1 - m - 6.0
     g.layer((gx - 3.0, y0 - c.approach, gx + 3.0, y0 + m), S_CONCRETE, 'apron')
-    g.booth(gx + 4.5, y0 + m + 2.0)
+    # Beside the way in, facing into the lot, its barrier across the inbound lane.
+    g.booth(gx + 4.5, y0 + m + 2.0, quarter=2)
     fx0, fy0, fx1, fy1 = x0 + STRIP + .6, y0 + STRIP + .6, x1 - STRIP - .6, y1 - STRIP - .6
     g.fence_bases([(gx + 3.5, fy0), (fx1, fy0), (fx1, fy1), (fx0, fy1), (fx0, fy0), (gx - 3.5, fy0)],
                   height=2.4)

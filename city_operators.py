@@ -73,6 +73,9 @@ def build_roads(plan, collection):
     return obj
 
 
+BULB_PATH = 3.0   # Width of the path from a house round a turning circle to its footway.
+
+
 def build_frontage(lot, plan, collection, sunken=None):
     """Level foundation and a clear concrete approach from sidewalk to entrance.
 
@@ -91,15 +94,27 @@ def build_frontage(lot, plan, collection, sunken=None):
                       (1, 2, 6, 5), (2, 3, 7, 6), (3, 0, 4, 7)))
     # Local building coordinates: door faces -Y.
     half_w, half_d = lot.width / 2, lot.depth / 2
-    road = next(r for r in plan.roads if (r.a, r.b) == lot.frontage)
     size = plan.settings.block_size
-    mid = ((road.a[0] + road.b[0]) * size / 2, (road.a[1] + road.b[1]) * size / 2)
-    facing = (math.sin(lot.rotation), -math.cos(lot.rotation))
-    distance = sum((mid[i] - lot.center[i]) * facing[i] for i in range(2))
-    approach_end = distance - road.width / 2 - plan.settings.sidewalk_width
+    path = None
+    if lot.bulb:
+        # A house round a turning circle: a path to the circle's footway (a
+        # full-width approach would square off against its curve).
+        radius = next(b['radius'] for b in plan.culdesacs if tuple(b['node']) == tuple(lot.bulb))
+        centre = (lot.bulb[0] * size, lot.bulb[1] * size)
+        approach_end = math.dist(centre, lot.center) - radius - plan.settings.sidewalk_width
+        path = BULB_PATH / 2
+    else:
+        road = next(r for r in plan.roads if (r.a, r.b) == lot.frontage)
+        mid = ((road.a[0] + road.b[0]) * size / 2, (road.a[1] + road.b[1]) * size / 2)
+        facing = (math.sin(lot.rotation), -math.cos(lot.rotation))
+        distance = sum((mid[i] - lot.center[i]) * facing[i] for i in range(2))
+        approach_end = distance - road.width / 2 - plan.settings.sidewalk_width
+    front = half_d if path else approach_end
+    if path:
+        slab(-path, -approach_end, path, -half_d)
     if sunken:
         xs = sorted({-half_w, half_w, sunken[0], sunken[2]})
-        ys = sorted({-approach_end, half_d, sunken[1], sunken[3]})
+        ys = sorted({-front, half_d, sunken[1], sunken[3]})
         for x0, x1 in zip(xs, xs[1:]):
             for y0, y1 in zip(ys, ys[1:]):
                 if x1 - x0 < 1e-4 or y1 - y0 < 1e-4:
@@ -108,7 +123,7 @@ def build_frontage(lot, plan, collection, sunken=None):
                           sunken[1] <= (y0 + y1) / 2 <= sunken[3])
                 slab(x0, y0, x1, y1, h - GROUND_SLAB if inside else h)
     else:
-        slab(-half_w, -approach_end, half_w, half_d)
+        slab(-half_w, -front, half_w, half_d)
     obj = mesh_object(lot.id + '_Foundation', vertices, faces, collection,
                       material('City_Pavement', (.42, .41, .38, 1)))
     obj.rotation_euler.z = lot.rotation

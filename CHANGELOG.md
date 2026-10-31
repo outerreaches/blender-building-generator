@@ -1,5 +1,21 @@
 # Changelog
 
+## v0.19.0: Organic city shape
+
+- **City Shape: Organic** in Generate City gives the city a seeded,
+  irregular edge instead of filling the square map: lobes and notches, two
+  to four fingers where it has grown out along a road, a stretch along the
+  highway, and a frayed line block by block. **Irregularity** (0 to 1,
+  default 0.6) scales it; 0 is round.
+- Districts, local streets and the routes between districts stay inside the
+  edge, density fades toward it, and nothing is built past it; the highways
+  still cross it and run out into the wasteland. Driving circuits leave and
+  rejoin the highway inside the city.
+- An organic city covers about half the map; raise the radius by about 1.4×
+  for a city of similar size. **Square** (the default) is unchanged.
+- The plan's settings (schema 11) and the metadata's `city` record the
+  `shape`.
+
 ## v0.18.1: Built-out suburbs, houses round cul-de-sacs, drive-in fixes
 
 - **Suburbs are built out.** Suburban blocks are built in tracts, whole or

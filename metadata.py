@@ -332,7 +332,7 @@ class CityMetadata:
             'format': FORMAT, 'schema': SCHEMA, 'addon_version': self.addon_version,
             'plan_version': _plan_version(), 'collection': self.collection,
             'space': space.describe(),
-            'city': {'preset': settings.preset, 'seed': settings.seed,
+            'city': {'preset': settings.preset, 'shape': settings.shape, 'seed': settings.seed,
                      'origin': space.point(self.origin),
                      'extent': _r(extent), 'block_size': size,
                      'wasteland': settings.wasteland, 'curb_height': settings.curb_height,

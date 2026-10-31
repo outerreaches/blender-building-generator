@@ -58,6 +58,7 @@ namespace Ares.CityGen
     public class CityInfo
     {
         public string preset;           // CITY or SMALL_TOWN.
+        public string shape;            // SQUARE or ORGANIC (an irregular edge).
         public int seed;
         public float[] origin;
         public float extent;

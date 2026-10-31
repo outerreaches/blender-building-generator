@@ -2,13 +2,14 @@
 """Deterministic city growth, independent of Blender. Coordinates are metres."""
 from dataclasses import asdict, dataclass, field
 from collections import deque
+from functools import lru_cache
 import hashlib
 import heapq
 import json
 import math
 import random
 
-VERSION = 10
+VERSION = 11
 ROAD_WIDTHS = {"HIGHWAY": 20.0, "ARTERIAL": 12.0, "COLLECTOR": 8.0, "LOCAL": 6.0}
 ROAD_RANK = {name: i for i, name in enumerate(ROAD_WIDTHS)}
 # Corner radius at a route bend, before the curve_radius multiplier and clamping.
@@ -230,6 +231,8 @@ class CitySettings:
     highway_reach: float = 3000.0     # Highway beyond the city edge (m), fading out at its end.
     downtown_superblocks: float = .35  # Share of downtown local streets closed to join blocks.
     preset: str = "CITY"               # CITY, or SMALL_TOWN: no towers, no big sites.
+    shape: str = "SQUARE"              # SQUARE fills the map; ORGANIC has an irregular edge.
+    irregularity: float = .6           # How far an organic edge wanders.
 
     def validate(self):
         for name, lo, hi in (("radius", 2, 25), ("primary_count", 1, 16),
@@ -246,6 +249,7 @@ class CitySettings:
                              ("damage", 0, 1), ("interior_ratio", 0, 1),
                              ("setback", 1, 8), ("wasteland", 0, 20000),
                              ("highway_reach", 0, 20000), ("downtown_superblocks", 0, 1),
+                             ("irregularity", 0, 1),
                              ("sidewalk_width", 1.2, 5), ("curb_height", 0, .25)):
             value = getattr(self, name)
             if not math.isfinite(value) or not lo <= value <= hi:
@@ -254,6 +258,8 @@ class CitySettings:
             raise ValueError("Unknown architecture style")
         if self.preset not in PRESETS:
             raise ValueError("Unknown preset")
+        if self.shape not in SHAPES:
+            raise ValueError("Unknown city shape")
 
 
 @dataclass(frozen=True)
@@ -347,8 +353,105 @@ def edge(a, b):
     return tuple(sorted((a, b)))
 
 
+# City shape. SQUARE fills the map. ORGANIC has an edge that wanders with the
+# bearing: a base reach (a fraction of the map's half-width) plus a few seeded
+# harmonics, fingers and a stretch along the highway (towns grow along their
+# roads), all scaled by the irregularity, and value noise that frays it block
+# by block.
+SHAPES = ('SQUARE', 'ORGANIC')
+OUTLINE_BASE = .74
+OUTLINE_HARMONICS = (2, 3, 4, 5, 7)
+OUTLINE_SWING = .45      # Harmonic k swings up to this / k**0.7 at irregularity 1.
+OUTLINE_STRETCH = .16    # Extra reach along the highway at irregularity 1.
+OUTLINE_FRAY = .14       # Edge noise at irregularity 1 (fraction of the reach).
+OUTLINE_FRAY_SCALE = 2.0  # Blocks per noise cell.
+OUTLINE_LEAST = .3       # The edge never comes nearer than this.
+# Fingers: narrow lobes where the town has grown out along a road (count,
+# reach at irregularity 1, half-width in radians).
+OUTLINE_FINGERS = (2, 4)
+OUTLINE_FINGER_REACH = (.2, .4)
+OUTLINE_FINGER_WIDTH = (.15, .3)
+
+
+@lru_cache(maxsize=64)
+def _outline_terms(settings):
+    rng = stream(settings.seed, "outline")
+    harmonics = [(k, settings.irregularity * OUTLINE_SWING / k ** .7 * rng.uniform(.5, 1.0),
+                  rng.uniform(0, 2 * math.pi)) for k in OUTLINE_HARMONICS]
+    fingers = [(rng.uniform(-math.pi, math.pi),
+                settings.irregularity * rng.uniform(*OUTLINE_FINGER_REACH),
+                rng.uniform(*OUTLINE_FINGER_WIDTH))
+               for _ in range(rng.randint(*OUTLINE_FINGERS))]
+    return harmonics, fingers
+
+
+def _noise(seed, x, y):
+    """Smooth value noise in [0, 1] on a unit lattice."""
+    ix, iy = math.floor(x), math.floor(y)
+    fx, fy = x - ix, y - iy
+    fx, fy = fx * fx * (3 - 2 * fx), fy * fy * (3 - 2 * fy)
+    def corner(i, j):
+        return _fray(seed, ix + i, iy + j)
+    top = corner(0, 0) * (1 - fx) + corner(1, 0) * fx
+    bottom = corner(0, 1) * (1 - fx) + corner(1, 1) * fx
+    return top * (1 - fy) + bottom * fy
+
+
+@lru_cache(maxsize=65536)
+def _fray(seed, i, j):
+    return stream(seed, "fray", i, j).random()
+
+
+@lru_cache(maxsize=64)
+def _outside(settings):
+    """Lattice nodes, and edges by their midpoint, past an organic city's edge."""
+    size, radius = settings.block_size, settings.radius
+    nodes = frozenset((x, y) for x in range(-radius, radius + 1)
+                      for y in range(-radius, radius + 1)
+                      if not in_city(settings, x * size, y * size))
+    edges = frozenset(edge((x, y), (x + dx, y + dy))
+                      for x in range(-radius, radius + 1) for y in range(-radius, radius + 1)
+                      for dx, dy in ((1, 0), (0, 1))
+                      if not in_city(settings, (x + dx / 2) * size, (y + dy / 2) * size))
+    return nodes, edges
+
+
+def organic_edge(settings, bearing):
+    """Reach of an organic city's edge along a bearing, as a fraction of the
+    map's half-width (before fraying); never past the map."""
+    harmonics, fingers = _outline_terms(settings)
+    reach = OUTLINE_BASE + sum(a * math.cos(k * bearing + phase) for k, a, phase in harmonics)
+    for centre, length, width in fingers:
+        off = math.atan2(math.sin(bearing - centre), math.cos(bearing - centre))
+        reach += length * math.exp(-(off / width) ** 2)
+    reach += settings.irregularity * OUTLINE_STRETCH * math.cos(bearing) ** 4
+    square = .98 / max(abs(math.cos(bearing)), abs(math.sin(bearing)))
+    return min(square, max(OUTLINE_LEAST, reach))
+
+
+def spread(settings, x, y):
+    """How far out a point (metres from the centre) lies: 0 at the centre, 1
+    at the city's edge. A square city's edge is the inscribed circle (its
+    corners lie past 1); an organic city's is its outline."""
+    half = settings.radius * settings.block_size
+    distance = math.hypot(x, y) / half
+    if settings.shape != 'ORGANIC' or distance == 0:
+        return distance
+    fray = OUTLINE_FRAY * settings.irregularity * (
+        2 * _noise(settings.seed, x / (settings.block_size * OUTLINE_FRAY_SCALE),
+                   y / (settings.block_size * OUTLINE_FRAY_SCALE)) - 1)
+    return distance / organic_edge(settings, math.atan2(y, x)) + fray
+
+
+def in_city(settings, x, y):
+    """Inside the city's edge (every point of a square city is)."""
+    return settings.shape != 'ORGANIC' or spread(settings, x, y) <= 1.0
+
+
 def density_at(settings, x, y):
-    distance = math.hypot(x, y) / (settings.radius * settings.block_size)
+    distance = spread(settings, x, y)
+    if distance > 1.0 and settings.shape == 'ORGANIC':
+        return 0.0
     blend = min(1.0, max(0.0, (distance - settings.core_radius) /
                          max(.001, 1 - settings.core_radius)))
     blend = blend * blend * (3 - 2 * blend)
@@ -399,8 +502,18 @@ def _assign_districts(primaries, town=False):
     return assigned
 
 
-def _route(start, target, roads, settings, blocked=frozenset()):
-    """Dijkstra routing: favour existing streets, with stable corridor variation."""
+def _route(start, target, roads, settings, blocked=frozenset(), confine=False,
+           closed=frozenset()):
+    """Dijkstra routing: favour existing streets, with stable corridor variation.
+    ``confine``: an organic city's streets stay inside its edge (start and
+    target excepted); without a way inside, the route may leave it, unless
+    ``confine`` is 'strict'. ``closed``: edges the route may not use."""
+    if confine and settings.shape == 'ORGANIC':
+        nodes, edges = _outside(settings)
+        path = _route(start, target, roads, settings, set(blocked) | (nodes - {start, target}),
+                      closed=edges)
+        if path is not None or confine == 'strict':
+            return path
     queue = [(0.0, start)]
     cost = {start: 0.0}
     parent = {}
@@ -419,6 +532,8 @@ def _route(start, target, roads, settings, blocked=frozenset()):
             if max(map(abs, other)) > settings.radius or other in blocked:
                 continue
             key = edge(node, other)
+            if key in closed:
+                continue
             step = .65 if key in roads else 1 + stream(settings.seed, "route", key).random() * .4
             candidate = distance + step
             if candidate < cost.get(other, math.inf):
@@ -459,11 +574,22 @@ def _add_driving_loops(settings, locations, roads):
         return []
     highway = {key: tier for key, tier in roads.items() if tier == 'HIGHWAY'}
     spine = _network_path((-settings.radius, 0), (settings.radius, 0), highway)
+    # Circuits leave and rejoin the highway inside the city: the unbroken run
+    # of the highway nearest the centre that lies within its edge.
+    inside = [in_city(settings, n[0] * settings.block_size, n[1] * settings.block_size)
+              for n in spine]
+    low = high = min(range(len(spine)), key=lambda i: (math.hypot(*spine[i]), i))
+    while low > 0 and inside[low - 1]:
+        low -= 1
+    while high < len(spine) - 1 and inside[high + 1]:
+        high += 1
+    spine = spine[low:high + 1]
     highway_nodes = {node for key in highway for node in key}
     anchors = [loc.node for loc in locations if loc.node not in highway_nodes]
     fallback = [(x, y) for x in range(-settings.radius + 1, settings.radius)
                 for y in range(-settings.radius + 1, settings.radius)
-                if (x, y) not in highway_nodes and (x, y) not in anchors]
+                if (x, y) not in highway_nodes and (x, y) not in anchors and
+                in_city(settings, x * settings.block_size, y * settings.block_size)]
     stream(settings.seed, 'loop_anchors').shuffle(fallback)
     anchors.extend(fallback)
     circuits, signatures = [], set()
@@ -475,11 +601,12 @@ def _add_driving_loops(settings, locations, roads):
             continue
         start, end = spine[left], spine[right]
         # Keep the outward leg from touching any other highway node or the exit.
-        outward = _route(start, anchor, roads, settings, highway_nodes - {start})
+        outward = _route(start, anchor, roads, settings, highway_nodes - {start},
+                         confine='strict')
         if outward is None:
             continue
         returning = _route(anchor, end, roads, settings,
-                           (highway_nodes - {end}) | set(outward[:-1]))
+                           (highway_nodes - {end}) | set(outward[:-1]), confine='strict')
         if returning is None:
             continue
         street_path = outward + returning[1:]
@@ -618,7 +745,7 @@ def generate_city(settings=CitySettings()):
     occupied = {center}
 
     def connect(a, b, tier):
-        path = _route(a, b, roads, settings)
+        path = _route(a, b, roads, settings, confine=tier != "HIGHWAY")
         if path is None:
             raise ValueError('Unable to connect location')
         for u, v in zip(path, path[1:]):
@@ -627,9 +754,10 @@ def generate_city(settings=CitySettings()):
                 roads[key] = tier
 
     # Major destinations grow around the center before neighbourhood infill.
+    size = settings.block_size
     candidates = [(x, y) for x in range(-settings.radius + 1, settings.radius)
                   for y in range(-settings.radius + 1, settings.radius)
-                  if .3 * settings.radius <= math.hypot(x, y) <= .85 * settings.radius]
+                  if .3 <= spread(settings, x * size, y * size) <= .85]
     rng = stream(settings.seed, "locations")
     rng.shuffle(candidates)
     for index in range(min(settings.primary_count, len(candidates))):
@@ -652,12 +780,15 @@ def generate_city(settings=CitySettings()):
         connect(end, center, "HIGHWAY")
 
     candidates = [(x, y) for x in range(-settings.radius + 1, settings.radius)
-                  for y in range(-settings.radius + 1, settings.radius) if (x, y) not in occupied]
+                  for y in range(-settings.radius + 1, settings.radius)
+                  if (x, y) not in occupied and (settings.shape != 'ORGANIC' or
+                                                 spread(settings, x * size, y * size) <= .9)]
     rng.shuffle(candidates)
     for index, node in enumerate(candidates[:settings.secondary_count]):
         district = min((loc for loc in locations if loc.role != 'SECONDARY'),
                        key=lambda loc: math.dist(node, loc.node))
-        network = {n for road in roads for n in road}
+        network = {n for road in roads for n in road
+                   if in_city(settings, n[0] * size, n[1] * size)} or {center}
         target = min(sorted(network), key=lambda n: math.dist(node, n))
         connect(node, target, "COLLECTOR")
         # A node already on a road needs no extra edge.
@@ -677,6 +808,8 @@ def generate_city(settings=CitySettings()):
                 continue
             tested.add(key)
             x, y = ((node[i] + other[i]) * settings.block_size / 2 for i in range(2))
+            if not in_city(settings, x, y):
+                continue
             profile = STYLE_PROFILE[district_at(settings, x, y, locations).style]
             chance = (settings.road_density * profile['road'] *
                       (.2 + .8 * density_at(settings, x, y)))
@@ -875,7 +1008,7 @@ def _bulb_lots(settings, locations, roads, reserved, culdesacs):
             rotation = math.atan2(math.sin(angle - math.pi / 2), math.cos(angle - math.pi / 2))
             corners = _corners(centre, width, depth, rotation)
             district = district_at(settings, *centre, locations)
-            if district.style != 'SUBURBAN':
+            if district.style != 'SUBURBAN' or not in_city(settings, *centre):
                 continue
             if any((math.floor(x / size), math.floor(y / size)) in reserved for x, y in corners):
                 continue

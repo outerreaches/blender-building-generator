@@ -25,12 +25,13 @@ sized for the game's 2 m player capsule.
   seven collapse archetypes, blast holes, rubble fills and mounds. Broken
   tops keep the window grid. Every wall, slab, partition and stair is a
   closed solid: no holes, no flipped faces, no z-fighting.
-- **Cities.** Seeded district growth, curved roads with filleted junctions
-  and connected driving circuits, footways and curbs, built-out suburbs with
-  houses round their cul-de-sacs, a dense downtown of party-walled towers
-  and superblocks, and highways that run out into the wasteland. A **Small
-  Town** preset builds a rural town instead: an old-town main street, low
-  houses round it and only the sites a town has.
+- **Cities.** Seeded district growth inside a square or an organic outline,
+  curved roads with filleted junctions and connected driving circuits,
+  footways and curbs, built-out suburbs with houses round their cul-de-sacs,
+  a dense downtown of party-walled towers and superblocks, and highways that
+  run out into the wasteland. A **Small Town** preset builds a rural town
+  instead: an old-town main street, low houses round it and only the sites a
+  town has.
 - **Points of interest.** Eighteen kinds of site, each with two to four
   layouts: gas stations, fast food, auto repair, schools, hospitals, police
   and fire stations, transit stations, parks, parking lots and garages, strip
@@ -94,8 +95,9 @@ All generators are in the 3D viewport under **Shift+A > Mesh**:
 To make a city:
 
 1. **Shift+A > Mesh > Generate City.** Pick the **Preset** (City or Small
-   Town), and keep **Output** on **Layout Preview** while you tune the seed,
-   radius and density; it is fast.
+   Town) and the **City Shape** (Square, or Organic for an irregular edge),
+   and keep **Output** on **Layout Preview** while you tune the seed, radius
+   and density; it is fast.
 2. Switch **Output** to **Detailed Shells** for windows, doors, floors,
    damage and interiors. Both use the same plan.
 3. Export with **File > Export > Generated City for Unity (.fbx)** and pick

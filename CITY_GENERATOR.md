@@ -24,6 +24,8 @@ The original single-building and bulk operators remain available. Architecture u
 | Preset | City (default), or [Small Town](#small-town): no towers and no big sites. Choosing one sets the sizes and densities that suit it |
 | Seed | Repeatable locations, roads, lots and per-building seeds |
 | Radius / Block Size | Square extent in blocks/metres; 6 × 56 is about 672 m across |
+| City Shape | Square (default): the city fills the map. Organic: an [irregular edge](#city-shape) |
+| Irregularity | How far an organic edge wanders, 0 (round) to 1 (default 0.6) |
 | Primary / Secondary Locations | District seeds (default 6: downtown core, three midtown styles, industrial and suburban edges) and smaller growth destinations |
 | Driving Circuits | Target count of distinct highway-to-district circuits, 0–8 |
 | Core Radius Fraction | Distance over which core density stays constant |
@@ -98,6 +100,34 @@ operator override the preset's.
 Over twelve seeds a town has 140–180 buildings and 11–15 sites, and 10 of the
 12 got a drive-in. The plan's settings and the metadata's `city` record the
 `preset`.
+
+## City shape
+
+With **City Shape: Square** the streets fill the whole map, and the city
+thins out toward its edges only through the density settings. **Organic**
+gives the city a seeded, irregular edge, and nothing but the highways
+crosses it:
+
+- **The edge.** Its reach along each bearing is a base of 0.74 of the map's
+  half-width, plus a few seeded waves (lobes and notches), two to four
+  fingers where the town has grown out along a road, and a stretch along the
+  highway. Value noise frays it block by block. **Irregularity** scales all
+  of these; at 0 the city is round. The edge never comes nearer than 0.3 of
+  the half-width, nor passes the map.
+- **Inside it.** Districts are seeded inside the edge, local streets grow
+  only within it, and routes between districts stay inside (a link leaves
+  only when there is no way round; driving circuits never do). Density fades
+  from the core to the edge rather than to the map's border, and nothing is
+  built past it. Buildings in edge blocks may stand a little past the line.
+- **Highways** still run from the map's sides through the centre and out
+  into the wasteland.
+
+An organic city covers about half the map, and on average has 57–71% of the
+buildings a square city of the same radius has (fewer at small radii). Raise
+the radius by about 1.4× for a city of similar size. Shapes read best from
+radius 8 up; at radius 6 the 12-block lattice leaves little room for lobes.
+**Core Radius Fraction** is measured to the edge on each bearing. The plan's
+settings and the metadata's `city` record the `shape`.
 
 ## Districts
 
@@ -358,7 +388,7 @@ the same way.
 
 | Field | Contents |
 | --- | --- |
-| `city` | Preset, seed, origin, extent, block size, wasteland, curb height, sidewalk width, whether small props were modelled, interiors listed and water modelled |
+| `city` | Preset, shape, seed, origin, extent, block size, wasteland, curb height, sidewalk width, whether small props were modelled, interiors listed and water modelled |
 | `districts` | District seeds: id, role, style, position |
 | `roads` | Every route: tier, width, lattice nodes, centreline points at carriageway level (footways run along both sides) |
 | `junctions` | Lattice nodes with roads: position, radius (widest half-width plus footway, or the turning circle plus footway), number of roads, `cul_de_sac` |
@@ -386,7 +416,7 @@ For scale: a radius-8 city with every building detailed has about 490 buildings 
 
 ## Plan data
 
-A JSON text datablock (`<collection>_plan.json`) stores the versioned plan. Coordinates are relative to the collection's stored `origin`; road nodes multiply by `block_size`, while lot positions/dimensions and path points are metres. Schema version 10 adds `bulb` to each lot: the cul-de-sac node a house round a turning circle faces (empty for the rest). Those houses are turned to face the circle, so a lot's `rotation` is no longer always a quarter turn. Version 9 added `preset` to the settings (`CITY` or `SMALL_TOWN`). Version 8 added `culdesacs` (turning-circle node and radius). Version 7 added `party_walls` and `group` to each lot (downtown towers built against neighbours). Version 6 added `outer_roads`. Version 5 added `pois` (kind, centre, width along the frontage, depth, rotation, frontage edge, blocks, seed, condition, damage, approach) and `shelters` (position, rotation, variant, road edge); a site's layout is chosen by `sites.compose` from its seed. Version 4 added `kind`, `condition`, `interiors` and `damage` to each lot alongside the version-3 `paths`: one entry per continuous same-tier route with its lattice `nodes`, flattened metre-space `points` and `width`. Locations and lots carry their district `style`; the per-style profile table is code (`STYLE_PROFILE`), not part of the file. No legacy-plan importer is included.
+A JSON text datablock (`<collection>_plan.json`) stores the versioned plan. Coordinates are relative to the collection's stored `origin`; road nodes multiply by `block_size`, while lot positions/dimensions and path points are metres. Schema version 11 adds `shape` and `irregularity` to the settings. Version 10 added `bulb` to each lot: the cul-de-sac node a house round a turning circle faces (empty for the rest). Those houses are turned to face the circle, so a lot's `rotation` is no longer always a quarter turn. Version 9 added `preset` to the settings (`CITY` or `SMALL_TOWN`). Version 8 added `culdesacs` (turning-circle node and radius). Version 7 added `party_walls` and `group` to each lot (downtown towers built against neighbours). Version 6 added `outer_roads`. Version 5 added `pois` (kind, centre, width along the frontage, depth, rotation, frontage edge, blocks, seed, condition, damage, approach) and `shelters` (position, rotation, variant, road edge); a site's layout is chosen by `sites.compose` from its seed. Version 4 added `kind`, `condition`, `interiors` and `damage` to each lot alongside the version-3 `paths`: one entry per continuous same-tier route with its lattice `nodes`, flattened metre-space `points` and `width`. Locations and lots carry their district `style`; the per-style profile table is code (`STYLE_PROFILE`), not part of the file. No legacy-plan importer is included.
 
 ## Code and verification
 

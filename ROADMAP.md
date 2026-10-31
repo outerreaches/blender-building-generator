@@ -15,6 +15,7 @@
 | v0.16 | Hotels, motels, cinemas and drive-in cinemas |
 | v0.17 | Street patterns: suburban cul-de-sacs; plazas and strip malls repeating round their district centres |
 | v0.18 | Small-town preset: an old-town main street, low buildings, only a town's sites; suburbs built out, houses round cul-de-sacs (v0.18.1) |
+| v0.19 | Organic city shape: an irregular edge with lobes, notches and fingers |
 
 See [CHANGELOG.md](CHANGELOG.md) for the details.
 

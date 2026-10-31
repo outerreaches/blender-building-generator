@@ -343,6 +343,12 @@ class MESH_OT_generate_city(bpy.types.Operator):
                                  'a town has')])
     seed: IntProperty(name='City Seed', default=42)
     radius: IntProperty(name='Radius (Blocks)', default=6, min=2, max=25)
+    shape: EnumProperty(name='City Shape', default='SQUARE',
+                        items=[('SQUARE', 'Square', 'Streets and buildings fill the whole map'),
+                               ('ORGANIC', 'Organic', 'An irregular edge with lobes, notches and '
+                                'fingers along the roads; the city fills less of the map')])
+    irregularity: FloatProperty(name='Irregularity', default=.6, min=0, max=1,
+                                description='How far an organic edge wanders (0: round)')
     block_size: FloatProperty(name='Block Size (m)', default=56, min=48, max=120)
     primary_count: IntProperty(name='Primary Locations', default=6, min=1, max=16)
     secondary_count: IntProperty(name='Secondary Locations', default=12, min=0, max=100)
@@ -404,7 +410,7 @@ class MESH_OT_generate_city(bpy.types.Operator):
     def draw(self, context):
         layout = self.layout
         for title, names in (
-            ('City Growth', ('preset', 'seed', 'radius', 'block_size', 'primary_count', 'secondary_count', 'driving_loop_count')),
+            ('City Growth', ('preset', 'seed', 'radius', 'shape', 'irregularity', 'block_size', 'primary_count', 'secondary_count', 'driving_loop_count')),
             ('Density and Access', ('curve_radius', 'core_radius', 'core_density', 'outskirts_density', 'road_density', 'setback', 'sidewalk_width', 'curb_height', 'wasteland', 'highway_reach')),
             ('Buildings', ('style', 'damage', 'max_buildings', 'downtown_superblocks',
                            'points_of_interest', 'small_props', 'water', 'detail')),
@@ -413,6 +419,8 @@ class MESH_OT_generate_city(bpy.types.Operator):
             group = layout.box()
             group.label(text=title)
             for name in names:
+                if name == 'irregularity' and self.shape != 'ORGANIC':
+                    continue
                 group.prop(self, name)
         if self.detail == 'SHELLS':
             layout.prop(self, 'interior_ratio')
@@ -431,6 +439,7 @@ class MESH_OT_generate_city(bpy.types.Operator):
             context.collection.children.link(root)
             root['city_seed'] = self.seed
             root['city_preset'] = self.preset
+            root['city_shape'] = self.shape
             root['generator_version'] = VERSION
             root['addon_version'] = addon_version()
             root['output_detail'] = self.detail

@@ -62,7 +62,8 @@ VARIANTS = {
 STYLE_VARIANTS = {'CINEMA': {'OLD_TOWN': 'PALACE', 'DOWNTOWN': 'PALACE', 'BRUTALIST': 'PALACE',
                              'SUBURBAN': 'MULTIPLEX', 'INDUSTRIAL': 'MULTIPLEX'},
                   'HOTEL': {'OLD_TOWN': 'GRAND', 'DOWNTOWN': 'GRAND', 'SUBURBAN': 'BUDGET',
-                            'INDUSTRIAL': 'BUDGET'}}
+                            'INDUSTRIAL': 'BUDGET'},
+                  'PARK': {'OLD_TOWN': 'PLAZA', 'DOWNTOWN': 'PLAZA'}}
 # Smallest pad (width, depth) each kind is laid out for.
 MIN_PAD = {'GAS_STATION': (24, 22), 'FAST_FOOD': (26, 24), 'SCHOOL': (40, 32),
            'HOSPITAL': (44, 32), 'POLICE': (28, 26), 'FIRE_STATION': (28, 26),

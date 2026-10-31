@@ -13,6 +13,7 @@
 | v0.14 | Interiors for the game: rooms to furnish, lifts, railings and fixtures in the metadata (game assets, not modelled) |
 | v0.15 | The rest of the retail set: auto repair and an enclosed mall, with the other retail gathered round it; a water switch |
 | v0.16 | Hotels, motels, cinemas and drive-in cinemas |
+| v0.17 | Street patterns: suburban cul-de-sacs; plazas and strip malls repeating round their district centres |
 
 See [CHANGELOG.md](CHANGELOG.md) for the details.
 
@@ -27,8 +28,6 @@ See [CHANGELOG.md](CHANGELOG.md) for the details.
 
 **City**
 
-- Street patterns: suburban cul-de-sacs, plazas and strip malls repeating near
-  their district anchors.
 - Irregular block subdivision and curved frontages; parcels are still
   axis-aligned sub-cells of the block lattice.
 - More variety: a courthouse or city hall, authored facade kits, rooftop

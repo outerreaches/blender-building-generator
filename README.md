@@ -26,9 +26,9 @@ sized for the game's 2 m player capsule.
   tops keep the window grid. Every wall, slab, partition and stair is a
   closed solid: no holes, no flipped faces, no z-fighting.
 - **Cities.** Seeded district growth, curved roads with filleted junctions
-  and connected driving circuits, footways and curbs, a dense downtown of
-  party-walled towers and superblocks, and highways that run out into the
-  wasteland.
+  and connected driving circuits, footways and curbs, suburban cul-de-sacs,
+  a dense downtown of party-walled towers and superblocks, and highways that
+  run out into the wasteland.
 - **Points of interest.** Eighteen kinds of site, each with two to four
   layouts: gas stations, fast food, auto repair, schools, hospitals, police
   and fire stations, transit stations, parks, parking lots and garages, strip

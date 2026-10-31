@@ -177,6 +177,20 @@ Condition weights per district (percent; `CONDITION_WEIGHTS` in `city_plan.py`):
 | Industrial | 32 | 24 | 8 | 8 | 8 | 4 | 10 | 4 | 2 |
 | Suburban | 58 | 24 | 5 | 4 | 4 | 2 | 1 | 1 | 1 |
 
+## Street patterns
+
+- **Cul-de-sacs.** In the suburbs, a lattice node that no street reaches,
+  with suburban blocks on at least three sides and none downtown, may get a
+  short local street from a neighbouring road node. Its end is a turning
+  circle with a 10 m carriageway radius, ringed by the footway. The houses
+  either side face the new street, and lots and site pads keep clear of the
+  circle. Each one is listed in the plan's `culdesacs` and, in the metadata,
+  as a junction with `cul_de_sac` set.
+- **Plazas and strip malls repeat round their district centres.** Parks in
+  old town and downtown are laid out as plazas and are drawn toward those
+  districts' centres; strip malls are drawn toward suburban and industrial
+  centres, and there are a few more of them.
+
 ## Highways beyond the city
 
 The highway runs from map edge to map edge through the centre. At each end it
@@ -317,7 +331,7 @@ the same way.
 | `city` | Seed, origin, extent, block size, wasteland, curb height, sidewalk width, whether small props were modelled |
 | `districts` | District seeds: id, role, style, position |
 | `roads` | Every route: tier, width, lattice nodes, centreline points at carriageway level (footways run along both sides) |
-| `junctions` | Lattice nodes with roads: position, radius (widest half-width plus footway), number of roads |
+| `junctions` | Lattice nodes with roads: position, radius (widest half-width plus footway, or the turning circle plus footway), number of roads, `cul_de_sac` |
 | `driving_loops`, `outer_roads` | The driving circuits; the highways beyond the city edge (start, forward, length, fade) |
 | `buildings` | One per lot: object name, style, district, condition, damage, floors, height, interiors, enterable floors, party walls, block group, footprint (position at the base, forward = front, width, depth), and `entrances` (each street door's position, outward forward and width) |
 | `sites` | Points of interest: grounds object, kind, variant, condition, pad; their buildings with the same fields as above |
@@ -342,7 +356,7 @@ For scale: a radius-8 city with every building detailed has about 490 buildings 
 
 ## Plan data
 
-A JSON text datablock (`<collection>_plan.json`) stores the versioned plan. Coordinates are relative to the collection's stored `origin`; road nodes multiply by `block_size`, while lot positions/dimensions and path points are metres. Schema version 7 adds `party_walls` and `group` to each lot (downtown towers built against neighbours). Version 6 added `outer_roads`. Version 5 added `pois` (kind, centre, width along the frontage, depth, rotation, frontage edge, blocks, seed, condition, damage, approach) and `shelters` (position, rotation, variant, road edge); a site's layout is chosen by `sites.compose` from its seed. Version 4 added `kind`, `condition`, `interiors` and `damage` to each lot alongside the version-3 `paths`: one entry per continuous same-tier route with its lattice `nodes`, flattened metre-space `points` and `width`. Locations and lots carry their district `style`; the per-style profile table is code (`STYLE_PROFILE`), not part of the file. No legacy-plan importer is included.
+A JSON text datablock (`<collection>_plan.json`) stores the versioned plan. Coordinates are relative to the collection's stored `origin`; road nodes multiply by `block_size`, while lot positions/dimensions and path points are metres. Schema version 8 adds `culdesacs` (turning-circle node and radius). Version 7 added `party_walls` and `group` to each lot (downtown towers built against neighbours). Version 6 added `outer_roads`. Version 5 added `pois` (kind, centre, width along the frontage, depth, rotation, frontage edge, blocks, seed, condition, damage, approach) and `shelters` (position, rotation, variant, road edge); a site's layout is chosen by `sites.compose` from its seed. Version 4 added `kind`, `condition`, `interiors` and `damage` to each lot alongside the version-3 `paths`: one entry per continuous same-tier route with its lattice `nodes`, flattened metre-space `points` and `width`. Locations and lots carry their district `style`; the per-style profile table is code (`STYLE_PROFILE`), not part of the file. No legacy-plan importer is included.
 
 ## Code and verification
 

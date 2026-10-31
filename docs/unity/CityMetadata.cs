@@ -95,6 +95,7 @@ namespace Ares.CityGen
         public float[] position;
         public float radius;      // Widest road half-width plus the footway.
         public int roads;         // Road segments meeting here.
+        public bool cul_de_sac;   // A dead end with a turning circle (radius above).
     }
 
     [Serializable]

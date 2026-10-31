@@ -72,6 +72,11 @@ def _segments(plan):
     for road in getattr(plan, 'outer_roads', ()):
         (x, y), (dx, dy) = road['start'], road['direction']
         rows.append((x, y, x + dx * OUTER_STUB, y + dy * OUTER_STUB, road['width'] / 2))
+    size = plan.settings.block_size
+    for bulb in getattr(plan, 'culdesacs', ()):
+        # A turning circle: a zero-length segment as wide as the circle.
+        x, y = bulb['node'][0] * size, bulb['node'][1] * size
+        rows.append((x, y, x, y, bulb['radius']))
     return rows
 
 

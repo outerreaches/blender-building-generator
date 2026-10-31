@@ -315,10 +315,14 @@ class CityMetadata:
         for road in plan.roads:
             for node in (road.a, road.b):
                 degree[node] = degree.get(node, 0) + 1
+        # A cul-de-sac's turning circle sets its junction radius.
+        for bulb in getattr(plan, 'culdesacs', ()):
+            junctions.setdefault(tuple(bulb['node']), []).append(bulb['radius'])
         roads = [{'id': path['id'], 'tier': path['tier'], 'width': path['width'],
                   'nodes': _flat(path['nodes']),
                   'points': _flat(space.point((ox + x, oy + y, oz)) for x, y in path['points'])}
                  for path in plan.paths]
+        bulbs = {tuple(bulb['node']) for bulb in getattr(plan, 'culdesacs', ())}
         markers = sorted(self.markers, key=lambda m: m['type'])
         counts = {}
         for marker in markers:
@@ -339,7 +343,8 @@ class CityMetadata:
             'roads': roads,
             'junctions': [{'node': list(node), 'position': node_point(node),
                            'radius': _r(max(halves) + settings.sidewalk_width),
-                           'roads': degree[node]} for node, halves in sorted(junctions.items())],
+                           'roads': degree[node], 'cul_de_sac': node in bulbs}
+                          for node, halves in sorted(junctions.items())],
             'driving_loops': [{'id': loop.get('id', f'loop_{k}'),
                                'nodes': _flat(loop['nodes']),
                                'tiers': list(loop.get('tiers', ())),

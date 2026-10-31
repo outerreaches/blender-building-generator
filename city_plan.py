@@ -8,7 +8,7 @@ import json
 import math
 import random
 
-VERSION = 7
+VERSION = 8
 ROAD_WIDTHS = {"HIGHWAY": 20.0, "ARTERIAL": 12.0, "COLLECTOR": 8.0, "LOCAL": 6.0}
 ROAD_RANK = {name: i for i, name in enumerate(ROAD_WIDTHS)}
 # Corner radius at a route bend, before the curve_radius multiplier and clamping.
@@ -40,8 +40,10 @@ STYLES = tuple(STYLE_PROFILE)
 # kind; ``districts`` weights district styles (styles left out only take a
 # site when the minimum cannot be met otherwise). ``per_radius`` replaces the
 # count with a number by map radius ((radius, count), ...). ``near`` pulls a
-# kind toward sites placed before it: (kind, blocks, weight factor). Kinds are
-# placed in this order, so the mall comes first and the retail around it.
+# kind toward sites placed before it: (kind, blocks, weight factor), and
+# ``anchors`` toward district centres of given styles: (styles, blocks,
+# factor). Kinds are placed in this order, so the mall comes first and the
+# retail around it.
 POI_RULES = {
     'MALL': dict(blocks=((2, 2),), count=0, minimum=0, per_radius=((6, 1), (12, 2)),
                  front=('ARTERIAL', 'COLLECTOR'), spacing=10,
@@ -54,12 +56,13 @@ POI_RULES = {
                                            'OLD_TOWN': 1}),
     'SCHOOL': dict(blocks=((2, 1), (1, 1)), count=1, minimum=1, front=None, spacing=4,
                    districts={'RESIDENTIAL': 3, 'SUBURBAN': 2, 'BRUTALIST': 2, 'OLD_TOWN': 1}),
-    'STRIP_MALL': dict(blocks=((1, 1), (2, 1)), count=1, minimum=1, front=('ARTERIAL', 'COLLECTOR'),
+    'STRIP_MALL': dict(blocks=((1, 1), (2, 1)), count=1.5, minimum=1, front=('ARTERIAL', 'COLLECTOR'),
                        spacing=3, districts={'SUBURBAN': 3, 'RESIDENTIAL': 1.5, 'INDUSTRIAL': 1,
-                                             'BRUTALIST': 1}, near=('MALL', 4, 3.0)),
+                                             'BRUTALIST': 1}, near=('MALL', 4, 3.0),
+                       anchors=(('SUBURBAN', 'INDUSTRIAL'), 3, 2.0)),
     'PARK': dict(blocks=((1, 1), (2, 1)), count=2, minimum=1, front=None, spacing=2,
                  districts={'RESIDENTIAL': 3, 'OLD_TOWN': 2, 'BRUTALIST': 2, 'DOWNTOWN': 1.5,
-                            'SUBURBAN': 1.5}),
+                            'SUBURBAN': 1.5}, anchors=(('OLD_TOWN', 'DOWNTOWN'), 2, 2.5)),
     'TRANSIT_STATION': dict(blocks=((1, 1),), count=1, minimum=1, front=('ARTERIAL', 'COLLECTOR'),
                             spacing=4, districts={'DOWNTOWN': 3, 'BRUTALIST': 2, 'OLD_TOWN': 1.5,
                                                   'RESIDENTIAL': 1, 'INDUSTRIAL': 1}),
@@ -274,6 +277,7 @@ class CityPlan:
     pois: list = field(default_factory=list)
     shelters: list = field(default_factory=list)
     outer_roads: list = field(default_factory=list)
+    culdesacs: list = field(default_factory=list)    # [{'node': [x, y], 'radius': m}]
 
     def to_json(self):
         return json.dumps({"version": VERSION, **asdict(self)}, sort_keys=True, indent=2)
@@ -611,12 +615,14 @@ def generate_city(settings=CitySettings()):
                     frontier.append(other)
 
     _close_downtown_streets(settings, locations, roads)
+    culdesacs = _add_culdesacs(settings, locations, roads)
     road_list = [Road(a, b, tier) for (a, b), tier in sorted(roads.items())]
     paths = _build_paths(settings, roads, locations)
-    pois = _place_pois(settings, locations, roads, paths) if settings.points_of_interest else []
+    pois = (_place_pois(settings, locations, roads, paths, culdesacs)
+            if settings.points_of_interest else [])
     reserved = {block for poi in pois for block in poi.blocks}
     downtown, dense = _place_downtown(settings, locations, roads, paths, reserved)
-    lots = downtown + _place_lots(settings, locations, roads, reserved | dense)
+    lots = downtown + _place_lots(settings, locations, roads, reserved | dense, culdesacs)
     # Stable priority sampling avoids truncating one geographical side of the
     # city; the buildings of one downtown block are kept or dropped together.
     lots.sort(key=lambda lot: (stream(settings.seed, "budget", lot.group or lot.id).random(), lot.id))
@@ -624,7 +630,55 @@ def generate_city(settings=CitySettings()):
     lots = sorted(lots[:settings.max_buildings], key=lambda lot: lot.id)
     shelters = _place_shelters(settings, roads, lots, pois) if settings.points_of_interest else []
     return CityPlan(settings, locations, road_list, paths, lots, eligible, driving_loops,
-                    pois, shelters, _outer_roads(settings, paths))
+                    pois, shelters, _outer_roads(settings, paths), culdesacs)
+
+
+# Suburban cul-de-sacs: a short street from the network to an inner lattice
+# node with no road, ending in a turning circle of this radius (carriageway).
+CULDESAC_RADIUS = 10.0
+CULDESAC_CHANCE = .7
+
+
+def _add_culdesacs(settings, locations, roads):
+    """Dead-end stubs into suburban blocks. A node no street reaches, with
+    suburban blocks on at least three sides, gets one local street from a
+    neighbouring road node; the houses either side face it and its end is a
+    turning circle (``culdesacs``)."""
+    size = settings.block_size
+    degree = {}
+    for a, b in roads:
+        for node in (a, b):
+            degree[node] = degree.get(node, 0) + 1
+    radius = settings.radius
+    added = []
+    for x in range(-radius + 1, radius):
+        for y in range(-radius + 1, radius):
+            node = (x, y)
+            if degree.get(node) or any(math.dist(node, end) < 1.5 for end in added):
+                continue
+            cells = [(x - 1, y - 1), (x, y - 1), (x - 1, y), (x, y)]
+            styles = [district_at(settings, (cx + .5) * size, (cy + .5) * size, locations).style
+                      for cx, cy in cells]
+            # Downtown blocks are built out to the footway: no turning circle beside them.
+            if styles.count('SUBURBAN') < 3 or 'DOWNTOWN' in styles:
+                continue
+            if density_at(settings, x * size, y * size) < .2:
+                continue
+            neighbours = [(x + dx, y + dy) for dx, dy in ((1, 0), (0, 1), (-1, 0), (0, -1))
+                          if degree.get((x + dx, y + dy)) and
+                          roads.get(edge(node, (x + dx, y + dy))) is None]
+            neighbours = [n for n in neighbours if all(
+                roads.get(edge(n, m)) != 'HIGHWAY' for m in
+                ((n[0] + 1, n[1]), (n[0] - 1, n[1]), (n[0], n[1] + 1), (n[0], n[1] - 1)))]
+            rng = stream(settings.seed, 'culdesac', node)
+            if not neighbours or rng.random() > CULDESAC_CHANCE:
+                continue
+            start = rng.choice(sorted(neighbours))
+            roads[edge(start, node)] = 'LOCAL'
+            degree[start] = degree.get(start, 0) + 1
+            degree[node] = 1
+            added.append(node)
+    return [{'node': [x, y], 'radius': CULDESAC_RADIUS} for x, y in added]
 
 
 def _pick_condition(style, rng):
@@ -636,9 +690,11 @@ def _pick_condition(style, rng):
     return 'INTACT'
 
 
-def _place_lots(settings, locations, roads, reserved=frozenset()):
+def _place_lots(settings, locations, roads, reserved=frozenset(), culdesacs=()):
     lots = []
     size = settings.block_size
+    bulbs = [(c['node'][0] * size, c['node'][1] * size,
+              c['radius'] + settings.sidewalk_width + 1.0) for c in culdesacs]
     # Use actual adjacent street envelopes rather than the widest road citywide.
     nodes = {}
     for (a, b), tier in roads.items():
@@ -708,6 +764,11 @@ def _place_lots(settings, locations, roads, reserved=frozenset()):
                     floors = rng.randint(*profile['floors'])
                     if condition == 'WALL_RING':
                         floors = min(floors, rng.randint(2, 4))
+                    # Turning circles and their footway stay clear of the parcel.
+                    if any(math.hypot(max(cx - sx / 2 - bx, 0, bx - cx - sx / 2),
+                                      max(cy - sy / 2 - by, 0, by - cy - sy / 2)) < clear
+                           for bx, by, clear in bulbs):
+                        continue
                     width, depth = (sy, sx) if side in "WE" else (sx, sy)
                     rotation = {"S": 0, "E": math.pi / 2, "N": math.pi, "W": -math.pi / 2}[side]
                     damage = min(1.0, max(
@@ -822,13 +883,16 @@ def _poi_pad(settings, x, y, wx, wy, nodes, rows, verge=POI_VERGE):
     return None
 
 
-def _place_pois(settings, locations, roads, paths):
+def _place_pois(settings, locations, roads, paths, culdesacs=()):
     size = settings.block_size
     nodes = {}
     for (a, b), tier in roads.items():
         for node in (a, b):
             nodes[node] = max(nodes.get(node, 0), ROAD_WIDTHS[tier] / 2)
     rows = _path_rows(paths)
+    # Turning circles keep pads clear like any carriageway.
+    rows += [(c['node'][0] * size, c['node'][1] * size, c['node'][0] * size, c['node'][1] * size,
+              c['radius']) for c in culdesacs]
     radius = settings.radius
     urban = sum(1 for x in range(-radius, radius) for y in range(-radius, radius)
                 if density_at(settings, (x + .5) * size, (y + .5) * size) >= POI_MIN_DENSITY and
@@ -848,6 +912,11 @@ def _place_pois(settings, locations, roads, paths):
         if 'near' in rule:
             anchor, reach, factor = rule['near']
             near = [p.center for p in pois if p.kind == anchor]
+        centres = []
+        if 'anchors' in rule:
+            styles, centre_reach, centre_factor = rule['anchors']
+            centres = [(loc.node[0] * size, loc.node[1] * size) for loc in locations
+                       if loc.style in styles]
         candidates = []
         for along, away in rule['blocks']:
             for wx, wy, fronts in ((along, away, "SN"), (away, along, "WE")):
@@ -876,6 +945,11 @@ def _place_pois(settings, locations, roads, paths):
                         if near and weight > 0 and any(math.dist((cx, cy), centre) <= reach * size
                                                        for centre in near):
                             weight *= factor
+                        # Plazas and strip malls repeat round their district centres.
+                        if centres and weight > 0 and any(
+                                math.dist((cx, cy), centre) <= centre_reach * size
+                                for centre in centres):
+                            weight *= centre_factor
                         key = stream(settings.seed, "poi", kind, x, y, wx, wy).random()
                         candidates.append((weight > 0, key ** (1 / max(weight, .02)),
                                            (x, y, wx, wy), group, front, district))

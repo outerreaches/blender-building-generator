@@ -1,5 +1,18 @@
 # Changelog
 
+## v0.17.0: Cul-de-sacs, plazas and strip malls
+
+- **Cul-de-sacs.** Suburbs get short dead-end streets into blocks that no
+  street reached, each ending in a turning circle (10 m carriageway radius,
+  ringed by the footway). The houses either side face the new street; lots
+  and site pads keep clear of the circle. The plan lists them in
+  `culdesacs` (plan schema 8), and the metadata marks their junctions with
+  `cul_de_sac`.
+- **Plazas and strip malls repeat round their district centres.** Parks in
+  old town and downtown are plazas and gather near those districts' centres;
+  strip malls gather near suburban and industrial centres, and there are a
+  few more of them.
+
 ## v0.16.0: Hotels, motels, cinemas and drive-ins
 
 - **Hotel.** Guest-room floors (entry passage, en-suite bath, bedroom off a

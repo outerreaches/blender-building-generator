@@ -18,9 +18,10 @@ sized for the game's 2 m player capsule.
   arcades, pilotis, setbacks, crowns), old town, residential and brutalist
   blocks, industrial sheds and suburban houses.
 - **Real interiors.** Floor plans for apartments, shops, offices, houses,
-  warehouses and bars. Every room can be reached through a door the player
-  fits, stairs can be climbed (stacked flights keep their headroom), and
-  towers get stair-and-lift cores.
+  warehouses, bars, hotels, malls and cinemas with stadium seating. Every
+  room can be reached through a door the player fits, stairs can be climbed
+  (stacked flights keep their headroom), and towers get stair-and-lift
+  cores.
 - **Damage that holds together.** Nine conditions from intact to collapsed,
   seven collapse archetypes, blast holes, rubble fills and mounds. Broken
   tops keep the window grid. Every wall, slab, partition and stair is a
@@ -41,10 +42,10 @@ sized for the game's 2 m player capsule.
 - **Unity export.** A city-only FBX (metre scale, Y-up, triangulated) and a
   `.city.json` with roads, junctions, buildings and their entrances, sites,
   and markers for game assets (props, trees, fences, flagpoles, parking
-  stalls, counters, desks and cinema seats). Every building also lists its rooms to furnish
-  (doors, windows, blank wall runs), its lifts (shaft, doors, car) and its
-  railings, since furniture, railings and lift parts are game assets. C#
-  classes for `JsonUtility` are included.
+  stalls, counters, desks and cinema seats). Every building also lists its
+  rooms to furnish (doors, windows, blank wall runs), its lifts (shaft,
+  doors, car) and its railings, since furniture, railings and lift parts are
+  game assets. C# classes for `JsonUtility` are included.
 - **Deterministic.** The same seed and settings give the same result. The
   generator is pure Python up to a thin Blender adapter.
 
@@ -55,6 +56,16 @@ sized for the game's 2 m player capsule.
 <p align="center">
   <img src="docs/images/interiors.jpg" alt="Cutaway of a residential floor plan with flats, corridor and stair" width="390">
   <img src="docs/images/site_school.jpg" alt="A school site with a court and a playing field" width="390">
+</p>
+
+<p align="center">
+  <img src="docs/images/organic_city.jpg" alt="A city with an organic outline: lobes and fingers along its roads" width="390">
+  <img src="docs/images/small_town.jpg" alt="A small town with an organic outline: an old-town main street, suburbs and cul-de-sacs" width="390">
+</p>
+
+<p align="center">
+  <img src="docs/images/culdesac.jpg" alt="Houses round a suburban cul-de-sac" width="390">
+  <img src="docs/images/cinema_seating.jpg" alt="Stadium seating in a cinema auditorium; the seat markers are drawn as blocks" width="390">
 </p>
 
 ## Requirements

@@ -42,15 +42,23 @@ See [CHANGELOG.md](CHANGELOG.md) for the details.
 - Navigation checks and vehicle swept-clearance tests.
 - Unity import and play-mode tests.
 
-## Later: terrain and infrastructure
+## Planned: terrain and infrastructure
 
-- **Elevation changes**: terrain height across the map, streets on grades,
-  stepped pads and retaining walls; streets currently sit on one plane.
-- **Railway and subway**: surface rail corridors with crossings, elevated
-  sections and subway entrances or stations tied to the transit sites.
-- **Bridges**: road and rail bridges over rail cuts, water or dips in the
-  terrain, with headroom and slope limits for vehicles.
-- **Tunnel entrances**: portals where roads or rail go below grade.
+Design: [docs/design/elevation.md](docs/design/elevation.md). Flat cities
+stay as they are; every feature below is off until its setting is changed.
+
+| Version | Scope |
+| --- | --- |
+| v0.21 | Terrain (Flat, Rolling, Terraced benches with a plateau), roads graded to per-tier limits, level pads with plinths, ground and streets on the terrain, metadata heights, a separate heightmap export for Unity |
+| v0.22 | Cross-sections: roadside ditches outside the dense districts, embankments and cuttings, retaining walls, ramp and stair streets at escarpments, culverts |
+| v0.23 | Levels: elevated, at-grade and below-grade structures; a raised highway with ramps; road tunnels at the map edge; rail with level crossings and a freight siding; subway routes with station entrances; the sewer network as data, with manholes |
+| v0.24 | Megacity preset: megablocks, stacked highway decks, skybridges and collapsed spans, built from instanced modules with a low-poly skyline ring |
+
+## Later
+
+- Walkable subway tunnels and platforms.
+- Walkable sewers: some reachable, some collapsed, some breaking into the
+  subway tunnels.
 - **Water edge, optional**: a river crossing the city, or a dried-up
   coastline with port infrastructure (quays, cranes, warehouses, a dry
   harbour basin).

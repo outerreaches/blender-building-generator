@@ -46,6 +46,7 @@ PARAPET = (1.5, .3, 1.0)   # Walls dropping more than this get a parapet this th
 # with VIADUCT_CLEARANCE under it at least, for VIADUCT_SPAN or more, on
 # piers about PIER_SPACING apart (the first PIER_END from each end).
 DECK_DEPTH = 1.2
+ABUTMENT_DROP = .02        # An abutment's wall stops this far under the road.
 VIADUCT_CLEARANCE = 4.5
 VIADUCT_SPAN = 20.0
 PIER_SPACING = 18.0
@@ -827,9 +828,17 @@ def _terraced_ground(plan):
     # Verge against the paving: the wall (a curb's face, or an embankment's
     # side) faces the street where the verge is higher, the verge where the
     # paving is.
+    def foot(point):
+        # Under a street's own paving (a viaduct's abutment) the wall stops
+        # just beneath it, so nothing stands proud of the road.
+        x, y = point[0], point[1]
+        if grading.streets.value(x, y) < walk - .25 and grading.stair_at(x, y) is None:
+            return grading.paved(x, y) - ABUTMENT_DROP, True
+        return grading.wall_foot(x, y), False
     for a, b, level in iso_edges:
-        wall(a, b, grading.wall_foot(a[0], a[1]), z_of(a, level, 'verge'),
-             grading.wall_foot(b[0], b[1]), z_of(b, level, 'verge'), False)
+        (fa, under_a), (fb, under_b) = foot(a), foot(b)
+        wall(a, b, fa, z_of(a, level, 'verge'), fb, z_of(b, level, 'verge'), False,
+             not (under_a or under_b))
     # Verge against the ground beyond it: the retaining wall.
     for key in sorted(verge_edges):
         entries = verge_edges[key]
@@ -1023,7 +1032,9 @@ class Grading:
         self.field = self.streets
         self.stairs, self.spans = [], {}
         if self.terraces:
-            self.base = plan.ground_surface().base
+            self.base = _Facets(settings.radius,
+                                {(x, y): z for x, y, z in self.terraces.get('ground', ())},
+                                self.line, self._index)
             # Levels: 0 off the terraces; a terrace's top, and each of its
             # slopes and corners (sheets meeting where they agree, and
             # walled where they do not).
@@ -1166,11 +1177,45 @@ class Grading:
         return self.surface(x, y) + pavement_height(self.plan, x, y, self.nodes)
 
 
+SLOPE_KNOTS = ((0.0, 1.0), (.2, .88), (.8, .12), (1.0, 0.0))   # As city_plan's.
+
+
 def _slope_profile(t):
     """Share of a terrace's rise left a fraction ``t`` down its slope (as
-    ``city_plan.slope_profile``)."""
+    ``city_plan.slope_profile``): three flat facets."""
     t = max(0.0, min(1.0, t))
-    return 1 - t * t * (3 - 2 * t)
+    for (t0, h0), (t1, h1) in zip(SLOPE_KNOTS, SLOPE_KNOTS[1:]):
+        if t <= t1:
+            return h0 + (h1 - h0) * (t - t0) / (t1 - t0)
+    return 0.0
+
+
+def _corner_distance(a, b):
+    a, b = max(0.0, a), max(0.0, b)
+    return max(a, b, (a + b) / math.sqrt(2))
+
+
+class _Facets:
+    """The hills as flat facets (as ``city_plan.Facets``), on the ground's
+    snapped lines."""
+
+    def __init__(self, radius, heights, line, index):
+        self.radius, self.heights, self.line, self.index = radius, heights, line, index
+
+    def __call__(self, x, y):
+        if not self.heights:
+            return 0.0
+        i, j = self.index(x), self.index(y)
+        if i < -self.radius or j < -self.radius or i >= self.radius or j >= self.radius:
+            return 0.0
+        x0, x1, y0, y1 = self.line(i), self.line(i + 1), self.line(j), self.line(j + 1)
+        u, v = (x - x0) / (x1 - x0), (y - y0) / (y1 - y0)
+        h = self.heights
+        h00, h10 = h.get((i, j), 0.0), h.get((i + 1, j), 0.0)
+        h01, h11 = h.get((i, j + 1), 0.0), h.get((i + 1, j + 1), 0.0)
+        if u >= v:
+            return h00 + (h10 - h00) * u + (h11 - h10) * v
+        return h00 + (h01 - h00) * v + (h11 - h01) * u
 
 
 def _slope_rises(region, line):
@@ -1192,7 +1237,7 @@ def _slope_rises(region, line):
         (cx, sx), (cy, sy) = corner['x'], corner['y']
         found[tuple(corner['cell'])] = (
             lambda x, y, cx=cx, sx=sx, cy=cy, sy=sy: step * _slope_profile(
-                math.hypot(max(0.0, down(x, cx, sx)), max(0.0, down(y, cy, sy)))))
+                _corner_distance(down(x, cx, sx), down(y, cy, sy))))
     return found
 
 

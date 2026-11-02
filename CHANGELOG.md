@@ -1,5 +1,22 @@
 # Changelog
 
+## v0.22.2: Low-poly slopes, wide ramp curves, drivable viaducts
+
+- **Low-poly terrain.** A terrace's natural sides are now three flat facets
+  (shoulder, face, toe), and their corners turn in flat facets. The hills
+  under a terraced city are flat facets too, two triangles a block.
+- **Ramp curves.** Ramps turn on a wide curve (about 25 m radius) in 30°
+  chords instead of a tight 90° corner. A ramp is one road class all the
+  way, and it climbs at a steady grade along its curved route (never over
+  10%), easing flat only at its ends.
+- **Drivable viaducts.** The abutment at each end of a viaduct stops just
+  under the road and carries no parapet. Before, a lip and a parapet
+  across the carriageway blocked the deck.
+- **No dead-end ramps.** A ramp whose top met no street (only a stair) now
+  gets a street across the terrace's top to the streets there, or is taken
+  away if the top has none.
+- Plan schema 15.
+
 ## v0.22.1: Natural sides, viaducts and set-back walls on terraces
 
 - **Natural sides.** Each terrace now falls to the hills round it on one

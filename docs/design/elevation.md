@@ -2,6 +2,11 @@
 
 Status: v0.21 (Rolling hills) and v0.22 (Terraced) done; the rest planned.
 
+**As built in v0.22.2:** slopes and the hills under a terraced city are
+flat facets (low-poly); ramps turn on wide chorded curves and climb at a
+steady grade along their route; viaduct abutments stay under the road; a
+ramp always meets a street on top.
+
 **As built in v0.22.1:** each terrace falls naturally to the hills on one
 to three random sides (a one-block slope band; rounded corner blocks where
 two meet). High ramps stand on viaducts (piers, cap beams, parapets, flat

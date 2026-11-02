@@ -9,7 +9,7 @@ import json
 import math
 import random
 
-VERSION = 14
+VERSION = 15
 ROAD_WIDTHS = {"HIGHWAY": 20.0, "ARTERIAL": 12.0, "COLLECTOR": 8.0, "LOCAL": 6.0}
 ROAD_RANK = {name: i for i, name in enumerate(ROAD_WIDTHS)}
 # Corner radius at a route bend, before the curve_radius multiplier and clamping.
@@ -512,6 +512,7 @@ RAMP_GRADE = .10
 RAMP_EASE = .15          # Share of a ramp edge eased flat at each end.
 MAX_RAMPS = 2            # Vehicle ramps up to a plateau.
 RAMP_FLAT = .05          # Most the base hills may change along a ramp edge (m).
+RAMP_BEND = (40.0, 30.0)  # A ramp turns on this radius (as far as the block allows), in chords of this many degrees.
 TERRACE_BENCH = .4       # ...or along a lattice edge under a terrace.
 STAIR_WIDTH = 6.0
 PLATEAU_SHARE = .15      # Of the city's blocks.
@@ -534,6 +535,18 @@ def ramp_profile(t):
     if t > 1 - e:
         return 1 - (1 - t) * (1 - t) / (2 * e * (1 - e))
     return (t - e / 2) / (1 - e)
+
+
+def ramp_bends(terraces):
+    """{node: (radius, degrees per chord)} where a ramp turns: a wide curve
+    in a few straight chords."""
+    bends = {}
+    for ramp in (terraces or {}).get('ramps', ()):
+        nodes = [tuple(n) for n in ramp['nodes']]
+        for a, node, b in zip(nodes, nodes[1:], nodes[2:]):
+            if (node[0] - a[0], node[1] - a[1]) != (b[0] - node[0], b[1] - node[1]):
+                bends[node] = RAMP_BEND
+    return bends
 
 
 def ramp_shape(t, ease_a=True, ease_b=True):
@@ -575,13 +588,63 @@ def _cell_corners(cell):
     return [(x, y), (x + 1, y), (x, y + 1), (x + 1, y + 1)]
 
 
+def _turn_loss(size):
+    """Metres a ramp's turn saves on the two lattice edges it cuts across."""
+    tangent = min(RAMP_BEND[0], .45 * size)
+    return 2 * tangent - tangent * math.pi / 2
+
+
 def ramp_reach(step, size):
     """Lattice edges a ramp needs beyond the terrace's edge block to climb
-    ``step``, every edge eased at both ends (where it turns, too)."""
+    ``step`` at a steady grade along its route (allowing for two turns),
+    easing flat over RAMP_EASE of a block at each end."""
     for extra in range(12):
-        if (step / (extra + 1) + RAMP_FLAT) / size / (1 - RAMP_EASE) <= RAMP_GRADE:
+        length = (extra + 1) * size - (2 * _turn_loss(size) if extra else 0.0)
+        if (step + RAMP_FLAT * (extra + 1)) / (length - RAMP_EASE * size) <= RAMP_GRADE:
             return extra
     return 12
+
+
+class RampLine:
+    """A ramp's road level along its route: its lattice nodes with their
+    turns curved (``_fillet_points``), climbing at a steady grade between
+    its top and foot heights and easing flat over RAMP_EASE of a block at
+    each end."""
+
+    def __init__(self, nodes, size, z_top, z_foot):
+        self.points = _fillet_points(nodes, size, 'LOCAL', 0.0, None, ramp_bends(
+            {'ramps': [{'nodes': [list(n) for n in nodes]}]}))
+        self.lengths = [math.dist(a, b) for a, b in zip(self.points, self.points[1:])]
+        self.total = sum(self.lengths)
+        self.ease = min(RAMP_EASE * size, self.total / 2)
+        self.z_top, self.z_foot = z_top, z_foot
+
+    def along(self, x, y):
+        """Arc length to the point of the route nearest (x, y)."""
+        best, at, start = math.inf, 0.0, 0.0
+        for (a, b), length in zip(zip(self.points, self.points[1:]), self.lengths):
+            if length:
+                dx, dy = b[0] - a[0], b[1] - a[1]
+                t = max(0.0, min(1.0, ((x - a[0]) * dx + (y - a[1]) * dy) / (length * length)))
+                distance = math.hypot(x - a[0] - dx * t, y - a[1] - dy * t)
+                if distance < best:
+                    best, at = distance, start + t * length
+            start += length
+        return at
+
+    def level(self, s):
+        total, ease = self.total, self.ease
+        s = max(0.0, min(total, s))
+        if s < ease:
+            share = s * s / (2 * ease * (total - ease))
+        elif s > total - ease:
+            share = 1 - (total - s) ** 2 / (2 * ease * (total - ease))
+        else:
+            share = (s - ease / 2) / (total - ease)
+        return self.z_top + (self.z_foot - self.z_top) * share
+
+    def __call__(self, x, y):
+        return self.level(self.along(x, y))
 
 
 def _terraces(settings, locations, roads):
@@ -647,6 +710,11 @@ def _terraces(settings, locations, roads):
             for key in cuts:
                 roads.pop(key, None)
             roads.update(added)
+            for ramp in ramps:
+                keys = [edge(tuple(a), tuple(b)) for a, b in zip(ramp['nodes'], ramp['nodes'][1:])]
+                tier = min((roads[key] for key in keys), key=ROAD_RANK.get)
+                for key in keys:
+                    roads[key] = tier
             result['regions'].append({'cells': sorted([list(c) for c in cells]), 'step': step,
                                       'kind': kind, **soft})
             result['ramps'] += ramps
@@ -722,10 +790,25 @@ def slope_cells(region):
             {tuple(corner['cell']) for corner in region.get('corners', ())})
 
 
+# A terrace's slope is three flat facets (low-poly): a shoulder, the face and
+# a toe, through these (fraction down, share of the rise left).
+SLOPE_KNOTS = ((0.0, 1.0), (.2, .88), (.8, .12), (1.0, 0.0))
+
+
 def slope_profile(t):
     """Share of a terrace's rise left a fraction ``t`` down its slope."""
     t = max(0.0, min(1.0, t))
-    return 1 - t * t * (3 - 2 * t)
+    for (t0, h0), (t1, h1) in zip(SLOPE_KNOTS, SLOPE_KNOTS[1:]):
+        if t <= t1:
+            return h0 + (h1 - h0) * (t - t0) / (t1 - t0)
+    return 0.0
+
+
+def corner_distance(a, b):
+    """How far down a corner block is, from its two slopes' fractions: an
+    octagon, so the corner turns in flat facets too."""
+    a, b = max(0.0, a), max(0.0, b)
+    return max(a, b, (a + b) / math.sqrt(2))
 
 
 def slope_rises(region, line=lambda k: k):
@@ -746,7 +829,7 @@ def slope_rises(region, line=lambda k: k):
         (cx, sx), (cy, sy) = corner['x'], corner['y']
         found[tuple(corner['cell'])] = (
             lambda x, y, cx=cx, sx=sx, cy=cy, sy=sy: step * slope_profile(
-                math.hypot(max(0.0, down(x, cx, sx)), max(0.0, down(y, cy, sy)))))
+                corner_distance(down(x, cx, sx), down(y, cy, sy))))
     return found
 
 
@@ -1007,10 +1090,12 @@ def _terrace_guard(terraces):
     return guard
 
 
-def _finish_terraces(terraces, roads, stairs, keep=frozenset()):
+def _finish_terraces(settings, terraces, roads, stairs, keep=frozenset()):
     """Add the stairs the local streets asked for, where both ends have a
-    street; take away dead ends at a terrace's foot (whose turning end would
-    cut into it), unless a stair, a ramp or a location (``keep``) needs them."""
+    street. A ramp whose top meets no street on the terrace is joined to the
+    terrace's streets across its top, or (none there) taken away. Then take
+    away dead ends at a terrace's foot (whose turning end would cut into
+    it), unless a stair, a ramp or a location (``keep``) needs them."""
     if not terraces:
         return
     have = {n for key in roads for n in key}
@@ -1022,6 +1107,40 @@ def _finish_terraces(terraces, roads, stairs, keep=frozenset()):
             terraces['stairs'].append({'low': list(low), 'high': list(high),
                                        'width': STAIR_WIDTH})
     terraces['stairs'].sort(key=lambda s: (s['low'], s['high']))
+    radius = settings.radius
+    for region in terraces['regions']:
+        cells = terrace_footprint(region)
+        corners = {n for c in cells for n in _cell_corners(c)}
+        inner = {n for n in corners if all(c in cells for c in _node_cells(n))}
+        ramp_keys = {edge(tuple(a), tuple(b)) for r in terraces['ramps']
+                     for a, b in zip(r['nodes'], r['nodes'][1:])}
+        for ramp in list(terraces['ramps']):
+            nodes = [tuple(n) for n in ramp['nodes']]
+            top = nodes[0]
+            if top not in inner:
+                continue
+            keys = {edge(a, b) for a, b in zip(nodes, nodes[1:])}
+            if any(top in key for key in roads if key not in keys):
+                continue
+            streets = {n for key in roads if key not in ramp_keys
+                       and key[0] in inner and key[1] in inner for n in key}
+            path = None
+            if streets:
+                target = min(sorted(streets), key=lambda n: (math.dist(n, top), n))
+                blocked = ({(x, y) for x in range(-radius, radius + 1)
+                            for y in range(-radius, radius + 1)} - inner) - {top, target}
+                path = _route(top, target, roads, settings, blocked)
+            if path:
+                for a, b in zip(path, path[1:]):
+                    roads.setdefault(edge(a, b), 'LOCAL')
+                continue
+            for key in keys:
+                roads.pop(key, None)
+            terraces['ramps'].remove(ramp)
+    # A stair needs a street at both ends.
+    have = {n for key in roads for n in key}
+    terraces['stairs'] = [s for s in terraces['stairs']
+                          if tuple(s['low']) in have and tuple(s['high']) in have]
     foot = set()
     for region in terraces['regions']:
         cells = terrace_footprint(region)
@@ -1161,6 +1280,14 @@ class RoadSurface:
         self.size = settings.block_size
         self.heights = heights
         self.ramps = ramp_ends(terraces)
+        # A ramp's edges take its level along its own (curved) route.
+        self.lines = {}
+        for ramp in terraces.get('ramps', ()):
+            nodes = [tuple(n) for n in ramp['nodes']]
+            line = RampLine(nodes, self.size, heights.get(nodes[0], 0.0),
+                            heights.get(nodes[-1], 0.0))
+            for a, b in zip(nodes, nodes[1:]):
+                self.lines[edge(a, b)] = line
         self.adjacent = defaultdict(list)
         for road in roads:
             a, b = (road.a, road.b) if hasattr(road, 'a') else road
@@ -1180,7 +1307,9 @@ class RoadSurface:
             distance = math.hypot(x - ax - dx * t, y - ay - dy * t)
             # A street the point is not abreast of (it lies past the street's
             # end) only counts when no street is abreast of it.
-            (found if t == raw else beyond).append((distance, self._level(a, b, t)))
+            line = self.lines.get(edge(a, b))
+            level = line(x, y) if line is not None else self._level(a, b, t)
+            (found if t == raw else beyond).append((distance, level))
         found = found or beyond
         if not found:
             return self.ground(x, y)
@@ -1196,7 +1325,8 @@ class RoadSurface:
         ax, ay, bx, by = a[0] * size, a[1] * size, b[0] * size, b[1] * size
         dx, dy = bx - ax, by - ay
         t = max(0.0, min(1.0, ((x - ax) * dx + (y - ay) * dy) / (dx * dx + dy * dy)))
-        return self._level(a, b, t)
+        line = self.lines.get(edge(a, b))
+        return line(x, y) if line is not None else self._level(a, b, t)
 
     def _level(self, a, b, t):
         za, zb = self.heights.get(a, 0.0), self.heights.get(b, 0.0)
@@ -1209,13 +1339,48 @@ class RoadSurface:
         return za + (zb - za) * shape
 
 
+class Facets:
+    """The hills as flat facets: each block two triangles split along its
+    rising diagonal, through its corners' heights (zero off the lattice).
+    ``line`` maps a lattice line to the coordinate it stands at."""
+
+    def __init__(self, settings, heights, line=None):
+        self.radius = settings.radius
+        self.size = settings.block_size
+        self.heights = heights
+        self.line = line or (lambda k: k * self.size)
+
+    def _index(self, value):
+        k = math.floor(value / self.size)
+        while value < self.line(k):
+            k -= 1
+        while value >= self.line(k + 1):
+            k += 1
+        return k
+
+    def __call__(self, x, y):
+        if not self.heights:
+            return 0.0
+        i, j = self._index(x), self._index(y)
+        if i < -self.radius or j < -self.radius or i >= self.radius or j >= self.radius:
+            return 0.0
+        x0, x1, y0, y1 = self.line(i), self.line(i + 1), self.line(j), self.line(j + 1)
+        u, v = (x - x0) / (x1 - x0), (y - y0) / (y1 - y0)
+        h = self.heights
+        h00, h10 = h.get((i, j), 0.0), h.get((i + 1, j), 0.0)
+        h01, h11 = h.get((i, j + 1), 0.0), h.get((i + 1, j + 1), 0.0)
+        if u >= v:
+            return h00 + (h10 - h00) * u + (h11 - h10) * v
+        return h00 + (h01 - h00) * v + (h11 - h01) * u
+
+
 class TerraceGround:
-    """Natural ground on a terraced city: the base hills blended across each
-    block, plus the rise of the terrace the block belongs to (falling away
-    across its slope)."""
+    """Natural ground on a terraced city: the base hills in flat facets,
+    plus the rise of the terrace the block belongs to (falling away across
+    its slopes)."""
 
     def __init__(self, settings, terraces):
-        self.base = Surface(settings, {(x, y): z for x, y, z in terraces.get('ground', ())})
+        self.base = Facets(settings, {(x, y): z for x, y, z in terraces.get('ground', ())})
         self.size = settings.block_size
         self.rise = terrace_cells(terraces)
         self.slopes = {}
@@ -1516,21 +1681,26 @@ def _unit(a, b):
     return (dx / length, dy / length) if length else (0.0, 0.0)
 
 
-def _fillet_points(nodes, size, tier, curve_radius, scales=None):
+def _fillet_points(nodes, size, tier, curve_radius, scales=None, bends=None):
     """Flatten corner arcs into a metre-space centreline for one route.
 
     Tangent length is capped at 45% of each adjacent edge, so two bends on one
     block never meet. The route therefore keeps its lattice topology while every
-    interior corner becomes an arc of ``BEND_RADII[tier] * curve_radius``.
+    interior corner becomes an arc of ``BEND_RADII[tier] * curve_radius``, or
+    at a node in ``bends`` ({node: (radius, degrees per chord)}) that radius
+    in chords of that angle.
     """
     base = [(n[0] * size, n[1] * size) for n in nodes]
     base_radius = BEND_RADII[tier] * curve_radius
-    if base_radius <= 0:
+    bends = bends or {}
+    if base_radius <= 0 and not bends:
         points = list(base)
     else:
         points = [base[0]]
         for index in range(1, len(base) - 1):
-            radius = base_radius * (scales[index] if scales else 1.0)
+            bend = bends.get(tuple(nodes[index]))
+            radius = (bend[0] if bend else
+                      base_radius * (scales[index] if scales else 1.0))
             if radius <= 0:
                 continue
             previous, corner, following = base[index - 1], base[index], base[index + 1]
@@ -1553,7 +1723,7 @@ def _fillet_points(nodes, size, tier, curve_radius, scales=None):
             centre = (start[0] - uy * arc_radius * sign,
                       start[1] + ux * arc_radius * sign)
             angle = math.atan2(start[1] - centre[1], start[0] - centre[0])
-            steps = max(2, math.ceil(turn / math.radians(12)))
+            steps = max(2, math.ceil(turn / math.radians(bend[1] if bend else 12)))
             points.append(start)
             for step in range(1, steps):
                 theta = angle + sign * turn * step / steps
@@ -1564,8 +1734,9 @@ def _fillet_points(nodes, size, tier, curve_radius, scales=None):
     return points
 
 
-def _build_paths(settings, roads, locations):
-    """Group lattice edges into continuous same-tier routes, then round corners."""
+def _build_paths(settings, roads, locations, bends=None):
+    """Group lattice edges into continuous same-tier routes, then round corners
+    (``bends``: wider, coarser corners at some nodes, see ``_fillet_points``)."""
     adjacency = {}
     for (a, b), tier in roads.items():
         adjacency.setdefault(a, []).append((b, tier))
@@ -1609,7 +1780,7 @@ def _build_paths(settings, roads, locations):
                                             node[1] * settings.block_size,
                                             locations).style]['curve'] for node in nodes]
         points = _fillet_points(nodes, settings.block_size, tier, settings.curve_radius,
-                                scales)
+                                scales, bends)
         paths.append({'id': f'road_path_{len(paths)}', 'tier': tier,
                       'width': ROAD_WIDTHS[tier], 'nodes': nodes,
                       'points': points})
@@ -1717,9 +1888,9 @@ def generate_city(settings=CitySettings()):
 
     _close_downtown_streets(settings, locations, roads, guard['keep'])
     culdesacs = _add_culdesacs(settings, locations, roads, guard)
-    _finish_terraces(terraces, roads, stairs, {loc.node for loc in locations})
+    _finish_terraces(settings, terraces, roads, stairs, {loc.node for loc in locations})
     road_list = [Road(a, b, tier) for (a, b), tier in sorted(roads.items())]
-    paths = _build_paths(settings, roads, locations)
+    paths = _build_paths(settings, roads, locations, ramp_bends(terraces))
     pois = (_place_pois(settings, locations, roads, paths, culdesacs, terraces)
             if settings.points_of_interest else [])
     # A terrace's slope is open ground.
@@ -1753,6 +1924,12 @@ def generate_city(settings=CitySettings()):
             raised = _terrace_raises(terraces)
             heights = {node: round(heights.get(node, 0.0) + raised.get(node, 0.0), 3)
                        for node in sorted(set(heights) | set(raised))}
+            for ramp in terraces['ramps']:
+                nodes = [tuple(n) for n in ramp['nodes']]
+                line = RampLine(nodes, size, heights.get(nodes[0], 0.0),
+                                heights.get(nodes[-1], 0.0))
+                for node in nodes[1:-1]:
+                    heights[node] = round(line(node[0] * size, node[1] * size), 3)
             heights = {node: z for node, z in heights.items() if z}
             surface = RoadSurface(settings, heights, roads, terraces)
 

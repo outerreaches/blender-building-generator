@@ -1,5 +1,24 @@
 # Changelog
 
+## v0.22.3: Built-up terraces with edge streets, natural sides at the city's edge
+
+- **Edge streets on top.** The streets round a terrace's edge now run
+  along its top, with the retaining wall beyond their outer footway.
+  Buildings at the edge face a street instead of standing with their exits
+  against the drop. Where no street runs along the edge, buildings on top
+  keep 6 m from the wall.
+- **Built-up tops.** Terraces stand only in downtown and residential
+  districts, and every street across a terrace's top is laid and every
+  block on it built. Corner blocks have their edge streets, so none are
+  left empty.
+- **Natural sides at the city's edge.** A terrace stands at the city's
+  edge, and its natural sides (one to three) face out of the city. Its
+  slopes run down into the open ground beyond: the map's edge, or past an
+  organic city's outline.
+- The hills round a terrace are graded level with it out to the junctions
+  round its top, so stairs and walls there drop its full height.
+- Plan schema 16.
+
 ## v0.22.2: Low-poly slopes, wide ramp curves, drivable viaducts
 
 - **Low-poly terrain.** A terrace's natural sides are now three flat facets

@@ -9,7 +9,7 @@ import json
 import math
 import random
 
-VERSION = 15
+VERSION = 16
 ROAD_WIDTHS = {"HIGHWAY": 20.0, "ARTERIAL": 12.0, "COLLECTOR": 8.0, "LOCAL": 6.0}
 ROAD_RANK = {name: i for i, name in enumerate(ROAD_WIDTHS)}
 # Corner radius at a route bend, before the curve_radius multiplier and clamping.
@@ -519,7 +519,9 @@ PLATEAU_SHARE = .15      # Of the city's blocks.
 PLATEAU_CELLS = (6, 40)
 PODIUM_CELLS = (3, 6)
 TERRACE_TRIES = 40
-TERRACE_STREETS = .7     # Least chance of a local street across a terrace's top.
+TERRACE_STREETS = 1.0    # Chance of a local street across a terrace's top: every one.
+TERRACE_STYLES = ('DOWNTOWN', 'RESIDENTIAL')   # Districts a terrace may stand in.
+EDGE_REACH = 2           # Blocks a terrace's seed may stand from the city's edge.
 
 
 def ramp_profile(t):
@@ -675,34 +677,54 @@ def _terraces(settings, locations, roads):
             return (cell not in taken and
                     all(max(map(abs, c)) <= radius - 1 for c in corners) and
                     in_city(settings, (cell[0] + .5) * size, (cell[1] + .5) * size) and
+                    district_at(settings, (cell[0] + .5) * size, (cell[1] + .5) * size,
+                                locations).style in TERRACE_STYLES and
                     not set(corners) & (highway | bulbs))
+
+        def at_edge(cell):
+            """A block at the city's edge, where a natural side runs down
+            into the open ground beyond: the map's outer ring, or (organic)
+            a block outside the city's outline."""
+            corners = _cell_corners(cell)
+            if cell in taken or set(corners) & (highway | bulbs):
+                return False
+            if not all(max(map(abs, c)) <= radius for c in corners):
+                return False
+            ring = any(max(map(abs, c)) == radius for c in corners)
+            return ring or not in_city(settings, (cell[0] + .5) * size,
+                                       (cell[1] + .5) * size)
         if kind == 'plateau':
             target = max(PLATEAU_CELLS[0], min(PLATEAU_CELLS[1],
                                                round(PLATEAU_SHARE * len(city_cells))))
-            prefer = {'DOWNTOWN': 3.0, 'OLD_TOWN': 2.0, 'BRUTALIST': 2.0, 'RESIDENTIAL': 1.0}
+            prefer = {'DOWNTOWN': 3.0, 'RESIDENTIAL': 1.5}
         else:
             target = rng.randint(*PODIUM_CELLS)
-            prefer = {'OLD_TOWN': 3.0, 'RESIDENTIAL': 2.0, 'DOWNTOWN': 1.5, 'BRUTALIST': 1.0}
+            prefer = {'RESIDENTIAL': 2.0, 'DOWNTOWN': 1.5}
+        # A terrace stands at the city's edge (its natural sides fall away
+        # beyond it), in the built-up districts first.
+        edge_cells = [(x, y) for x in range(-radius, radius) for y in range(-radius, radius)
+                      if at_edge((x, y))]
         seeds = []
         for cell in city_cells:
-            if allowed(cell):
+            if allowed(cell) and any(max(abs(cell[0] - e[0]), abs(cell[1] - e[1])) <= EDGE_REACH
+                                     for e in edge_cells):
                 style = district_at(settings, (cell[0] + .5) * size, (cell[1] + .5) * size,
                                     locations).style
-                # Built-up districts first: the terrace is a district of its own.
                 weight = prefer.get(style, .3) * density_at(
-                    settings, (cell[0] + .5) * size, (cell[1] + .5) * size) ** 2
+                    settings, (cell[0] + .5) * size, (cell[1] + .5) * size)
                 seeds.append((rng.random() ** (1 / max(weight, .01)), cell))
         seeds.sort(reverse=True)
         for _, seed_cell in seeds[:TERRACE_TRIES]:
             cells = _grow_terrace(seed_cell, target, allowed, rng)
             if len(cells) < min(target, 4):
                 continue
-            # One to three sides fall to the hills round it as natural slopes.
-            soft = _soft_sides(cells, allowed, rng)
+            # One to three sides fall to the hills round it as natural slopes,
+            # always at the city's edge.
+            soft = _soft_sides(cells, at_edge, rng)
             if soft is None:
                 continue
             band = slope_cells(soft)
-            found = _check_terrace(settings, roads, cells | band, step, reach, kind, highway,
+            found = _check_terrace(settings, roads, cells, band, step, reach, kind, highway,
                                    bulbs, looped, taken)
             if found is None:
                 continue
@@ -848,33 +870,39 @@ def _grow_terrace(seed_cell, target, allowed, rng):
             break
         cells.add(max(options, key=lambda n: sum(m in cells for m in neighbours(n)) +
                       1.5 * rng.random()))
-    for cell in sorted({n for c in cells for n in neighbours(c)}):
-        if cell not in cells and allowed(cell) and all(n in cells for n in neighbours(cell)):
-            cells.add(cell)
-    return cells
+    # Holes and notches filled (a notch's mouth would be a street over a pit).
+    while True:
+        notches = [cell for cell in sorted({n for c in cells for n in neighbours(c)})
+                   if cell not in cells and allowed(cell) and
+                   sum(n in cells for n in neighbours(cell)) >= 3]
+        if not notches:
+            return cells
+        cells.update(notches)
 
 
-def _check_terrace(settings, roads, cells, step, reach, kind, highway, bulbs, looped, taken):
+def _edge_cells(key):
+    """The two blocks either side of a lattice edge."""
+    a, b = key
+    if a[1] == b[1]:
+        return ((min(a[0], b[0]), a[1] - 1), (min(a[0], b[0]), a[1]))
+    return ((a[0] - 1, min(a[1], b[1])), (a[0], min(a[1], b[1])))
+
+
+def _check_terrace(settings, roads, cells, band, step, reach, kind, highway, bulbs, looped,
+                   taken):
     """Ramps, stairs, street cuts and added ramp streets for a terrace over
-    ``cells``, or None when it would cut a highway, a driving circuit or a
-    cul-de-sac, leave the network in pieces, or have no ramp."""
+    ``cells`` (with its slopes over ``band``), or None when it would cut a
+    highway, a driving circuit or a cul-de-sac, leave the network in pieces,
+    or have no ramp. Every corner of the terrace's blocks is on top: the
+    streets round its edge run along the top, the wall beyond them."""
     radius = settings.radius
-    corners = {c for cell in cells for c in _cell_corners(cell)}
-    inner = {n for n in corners if all(c in cells for c in _node_cells(n))}
-    if not inner:
-        return None
-    rim = corners - inner
-    # A street between two terrace blocks with both ends at the foot would run
-    # in a trench through the terrace: it goes.
-    cuts = []
-    for a, b in roads:
-        if a in rim and b in rim:
-            if a[1] == b[1]:
-                beside = ((min(a[0], b[0]), a[1] - 1), (min(a[0], b[0]), a[1]))
-            else:
-                beside = ((a[0] - 1, min(a[1], b[1])), (a[0], min(a[1], b[1])))
-            if all(c in cells for c in beside):
-                cuts.append(edge(a, b))
+    footprint = cells | band
+    corners = {c for cell in footprint for c in _cell_corners(cell)}
+    inner = {c for cell in cells for c in _cell_corners(cell)}
+    # A street between two raised junctions with no terrace block beside it
+    # would stand over lower ground: it goes.
+    cuts = [key for key in roads if key[0] in inner and key[1] in inner and
+            not any(c in cells for c in _edge_cells(key))]
     crossing = sorted((a, b) if a in inner else (b, a) for (a, b) in roads
                       if (a in inner) != (b in inner))
     if any(roads[edge(a, b)] == 'HIGHWAY' for a, b in crossing):
@@ -883,7 +911,8 @@ def _check_terrace(settings, roads, cells, step, reach, kind, highway, bulbs, lo
     # A ramp may also climb where no street crosses yet (a new street).
     faces = sorted({(n, m) for n in inner for m in
                     ((n[0] + 1, n[1]), (n[0] - 1, n[1]), (n[0], n[1] + 1), (n[0], n[1] - 1))
-                    if m in rim})
+                    if m not in inner and max(map(abs, m)) <= radius - 1 and
+                    m not in highway and m not in bulbs})
     options = []
 
     def free(n):
@@ -1058,9 +1087,9 @@ def _terrace_guard(terraces):
     guard = {'nodes': set(), 'edges': set(), 'stairs': set(), 'keep': set(), 'avoid': set(),
              'top': set()}
     for region in terraces.get('regions', ()):
-        cells = terrace_footprint(region)
-        corners = {n for c in cells for n in _cell_corners(c)}
-        inner = {n for n in corners if all(c in cells for c in _node_cells(n))}
+        tops = {tuple(c) for c in region['cells']}
+        corners = {n for c in terrace_footprint(region) for n in _cell_corners(c)}
+        inner = {n for c in tops for n in _cell_corners(c)}
         guard['nodes'] |= inner
         guard['avoid'] |= corners
         for node in corners:
@@ -1069,12 +1098,10 @@ def _terrace_guard(terraces):
                 if (a in inner) != (b in inner):
                     guard['stairs'].add(key)
                 elif a in inner and b in inner:
-                    guard['top'].add(key)
-                elif a in corners and b in corners and a not in inner and b not in inner:
-                    beside = (((min(a[0], b[0]), a[1] - 1), (min(a[0], b[0]), a[1]))
-                              if a[1] == b[1] else
-                              ((a[0] - 1, min(a[1], b[1])), (a[0], min(a[1], b[1]))))
-                    if all(c in cells for c in beside):
+                    # Along the top (its edge too); none floating over lower ground.
+                    if any(c in tops for c in _edge_cells(key)):
+                        guard['top'].add(key)
+                    else:
                         guard['edges'].add(key)
     for ramp in terraces.get('ramps', ()):
         nodes = [tuple(n) for n in ramp['nodes']]
@@ -1109,9 +1136,7 @@ def _finish_terraces(settings, terraces, roads, stairs, keep=frozenset()):
     terraces['stairs'].sort(key=lambda s: (s['low'], s['high']))
     radius = settings.radius
     for region in terraces['regions']:
-        cells = terrace_footprint(region)
-        corners = {n for c in cells for n in _cell_corners(c)}
-        inner = {n for n in corners if all(c in cells for c in _node_cells(n))}
+        inner = {n for c in region['cells'] for n in _cell_corners(tuple(c))}
         ramp_keys = {edge(tuple(a), tuple(b)) for r in terraces['ramps']
                      for a, b in zip(r['nodes'], r['nodes'][1:])}
         for ramp in list(terraces['ramps']):
@@ -1143,9 +1168,8 @@ def _finish_terraces(settings, terraces, roads, stairs, keep=frozenset()):
                           if tuple(s['low']) in have and tuple(s['high']) in have]
     foot = set()
     for region in terraces['regions']:
-        cells = terrace_footprint(region)
-        corners = {n for c in cells for n in _cell_corners(c)}
-        foot |= {n for n in corners if not all(c in cells for c in _node_cells(n))}
+        corners = {n for c in terrace_footprint(region) for n in _cell_corners(c)}
+        foot |= corners - {n for c in region['cells'] for n in _cell_corners(tuple(c))}
     needed = set(keep) | {tuple(n) for s in terraces['stairs'] for n in (s['low'], s['high'])}
     needed |= {tuple(n) for ramp in terraces['ramps'] for n in ramp['nodes']}
     while True:
@@ -1169,6 +1193,10 @@ def _terrace_benches(terraces):
         corners = {n for c in terrace_footprint(region) for n in _cell_corners(c)}
         keys |= {key for n in corners for key in _node_edges(n)
                  if key[0] in corners and key[1] in corners}
+        # And out to the junctions round its top, so a stair or a wall there
+        # drops the terrace's full height.
+        keys |= {key for c in region['cells'] for n in _cell_corners(tuple(c))
+                 for key in _node_edges(n)}
     return sorted(keys)
 
 
@@ -1177,12 +1205,9 @@ def _terrace_raises(terraces):
     by its step; a ramp's junctions part of the way."""
     raised = {}
     for region in terraces['regions']:
-        cells = terrace_footprint(region)
-        for cell in cells:
-            for node in _cell_corners(cell):
-                x, y = node
-                if all(c in cells for c in ((x - 1, y - 1), (x, y - 1), (x - 1, y), (x, y))):
-                    raised[node] = region['step']
+        for cell in region['cells']:
+            for node in _cell_corners(tuple(cell)):
+                raised[node] = region['step']
     for ramp in terraces['ramps']:
         for node, rise in zip(ramp['nodes'], ramp['raises']):
             raised[tuple(node)] = max(raised.get(tuple(node), 0.0), rise)
@@ -1206,12 +1231,16 @@ def terrace_slopes(terraces):
     return {c for region in (terraces or {}).get('regions', ()) for c in slope_cells(region)}
 
 
-WALL_CLEAR = 3.5          # Pads keep this far from a terrace's wall line.
+WALL_CLEAR = 3.5          # Pads below a terrace's wall keep this far from it.
+TOP_CLEAR = 6.0           # Buildings on a terrace keep this far from its edge or a ramp's cut.
+WALL_VERGE = 2.5          # A wall stands this far behind a footway (as streets.WALL_GAP).
 
 
-def _wall_rows(settings, terraces):
-    """Every lattice edge where a terrace meets lower ground, as carriageway
-    rows (as ``_path_rows``) wide enough to keep site pads WALL_CLEAR off it."""
+def _wall_rows(settings, terraces, roads):
+    """Where a terrace drops away, as carriageway rows (as ``_path_rows``)
+    that keep site pads clear: WALL_CLEAR below a wall (at the outer edge of
+    a street along the top, or on the block line, where pads on top keep
+    TOP_CLEAR from it), and WALL_CLEAR from a ramp's walls."""
     size, walk = settings.block_size, settings.sidewalk_width
     rows = []
     for region in (terraces or {}).get('regions', ()):
@@ -1227,8 +1256,29 @@ def _wall_rows(settings, terraces):
                                             (((x + 1, y), (x + 1, y + 1)), (x + 1, y), 0)):
                 if neighbour in footprint or (axis is not None and side != axis):
                     continue
-                rows.append((a[0] * size, a[1] * size, b[0] * size, b[1] * size,
-                             max(0.0, WALL_CLEAR - walk)))
+                if axis is not None:
+                    # A slope's side: nothing is built above it.
+                    rows.append((a[0] * size, a[1] * size, b[0] * size, b[1] * size,
+                                 max(0.0, WALL_CLEAR - walk)))
+                    continue
+                key = edge(a, b)
+                if key in roads:
+                    # The street runs along the top; its outer footway's edge
+                    # is the wall: pads below keep WALL_CLEAR off it.
+                    shift = ROAD_WIDTHS[roads[key]] / 2 + walk
+                    dx, dy = neighbour[0] - x, neighbour[1] - y
+                    rows.append((a[0] * size + dx * shift, a[1] * size + dy * shift,
+                                 b[0] * size + dx * shift, b[1] * size + dy * shift,
+                                 max(0.0, WALL_CLEAR - walk)))
+                else:
+                    # A wall on the block line: TOP_CLEAR above it too.
+                    rows.append((a[0] * size, a[1] * size, b[0] * size, b[1] * size,
+                                 max(0.0, TOP_CLEAR - walk)))
+    for key in ramp_ends(terraces or {}):
+        if key in roads:
+            (ax, ay), (bx, by) = key
+            rows.append((ax * size, ay * size, bx * size, by * size,
+                         ROAD_WIDTHS[roads[key]] / 2 + WALL_CLEAR))
     return rows
 
 
@@ -1238,8 +1288,9 @@ def _stair_rows(settings, stairs):
 
 
 def terrace_walls(terraces):
-    """{cell: lattice edges its buildings may not face}: a terrace's foot
-    streets for its own blocks, and every ramp for all."""
+    """{cell: lattice edges its buildings may not face}: for the blocks round
+    a terrace, the streets along its top edge (the wall stands below them);
+    for all, every ramp."""
     walls = {}
     ramp_edges = {edge(tuple(a), tuple(b)) for ramp in terraces.get('ramps', ())
                   for a, b in zip(ramp['nodes'], ramp['nodes'][1:])}
@@ -1251,7 +1302,7 @@ def terrace_walls(terraces):
                      ((x, y), (x, y + 1)): (x - 1, y), ((x + 1, y), (x + 1, y + 1)): (x + 1, y)}
             for (a, b), neighbour in sides.items():
                 if neighbour not in footprint:
-                    walls.setdefault((x, y), set()).add(edge(a, b))
+                    walls.setdefault(neighbour, set()).add(edge(a, b))
     blocked = defaultdict(set, {cell: set(edges) for cell, edges in walls.items()})
     for key in ramp_edges:
         (ax, ay), (bx, by) = key
@@ -2199,6 +2250,8 @@ def _tract_rows(streets, low_x, high_x, low_y, high_y, profile, rng):
 
 def _place_lots(settings, locations, roads, reserved=frozenset(), culdesacs=(), terraces=None):
     walls = terrace_obstacles(terraces)[0]
+    tops = terrace_cells(terraces or {})
+    footprints = set().union(*(terrace_footprint(r) for r in (terraces or {}).get('regions', ())))
     rings = _bulb_lots(settings, locations, roads, reserved, culdesacs)
     ring_corners = [_corners(lot.center, lot.width, lot.depth, lot.rotation) for lot in rings]
     lots = list(rings)
@@ -2225,16 +2278,26 @@ def _place_lots(settings, locations, roads, reserved=frozenset(), culdesacs=(), 
                     1.0, density_at(settings, (x + .5) * size, (y + .5) * size) * tract):
                 continue
             margins = {}
+            walled = walls.get((x, y), ())
             for side, (a, b) in borders.items():
                 half = max(nodes.get(a, 0), nodes.get(b, 0))
                 # District setback adds the front yard, plaza or hardstanding.
                 margins[side] = (half + settings.sidewalk_width + 2 + settings.setback +
                                  profile['setback'] + .5)
+                key = borders[side]
+                if key in walled and key in roads:
+                    # Below a street along a terrace's top, or beside a ramp:
+                    # clear of the wall at its footway's edge.
+                    margins[side] = max(margins[side], ROAD_WIDTHS[roads[key]] / 2 +
+                                        settings.sidewalk_width + WALL_CLEAR)
+                beyond = {"S": (x, y - 1), "N": (x, y + 1), "W": (x - 1, y), "E": (x + 1, y)}[side]
+                if (x, y) in tops and beyond not in footprints and key not in roads:
+                    # On top, where the wall stands on the block line.
+                    margins[side] = max(margins[side], TOP_CLEAR + .75)
             low_x = x * size + margins["W"]
             high_x = (x + 1) * size - margins["E"]
             low_y = y * size + margins["S"]
             high_y = (y + 1) * size - margins["N"]
-            walled = walls.get((x, y), ())
             if tract:
                 streets = [side for side in "SNWE" if borders[side] in roads and
                            roads[borders[side]] != "HIGHWAY" and borders[side] not in walled]
@@ -2275,7 +2338,7 @@ def _place_lots(settings, locations, roads, reserved=frozenset(), culdesacs=(), 
                     cell_high_y = cell_low_y + cell_y
                     cx, cy = (cell_low_x + cell_high_x) / 2, (cell_low_y + cell_high_y) / 2
                     density = min(1.0, density_at(settings, cx, cy) * profile['density'])
-                    if rng.random() > density:
+                    if rng.random() > density and (x, y) not in tops:
                         continue
                     side = rng.choice(sides)
                     # The unused part of the parcel is the yard, plaza or hardstanding.
@@ -2415,7 +2478,7 @@ def _place_pois(settings, locations, roads, paths, culdesacs=(), terraces=None):
         for node in (a, b):
             nodes[node] = max(nodes.get(node, 0), ROAD_WIDTHS[tier] / 2)
     rows = (_path_rows(paths) + _stair_rows(settings, stair_rows) +
-            _wall_rows(settings, terraces))
+            _wall_rows(settings, terraces, roads))
     # Turning circles keep pads clear like any carriageway.
     rows += [(c['node'][0] * size, c['node'][1] * size, c['node'][0] * size, c['node'][1] * size,
               c['radius']) for c in culdesacs]
@@ -2754,7 +2817,8 @@ def _place_downtown(settings, locations, roads, paths, reserved, terraces=None):
             nodes[node] = max(nodes.get(node, 0), ROAD_WIDTHS[tier] / 2)
     walls, region, stairs, stair_rows = terrace_obstacles(terraces)
     rows = (_path_rows(paths) + _stair_rows(settings, stair_rows) +
-            _wall_rows(settings, terraces))
+            _wall_rows(settings, terraces, roads))
+    tops = terrace_cells(terraces or {})
     verge = max(DOWNTOWN_VERGE, settings.setback - settings.sidewalk_width + .1)
     owned = {(x, y) for x in range(-radius, radius) for y in range(-radius, radius)
              if (x, y) not in reserved and _downtown(settings, locations, (x, y))}
@@ -2792,7 +2856,9 @@ def _place_downtown(settings, locations, roads, paths, reserved, terraces=None):
         taken.update(group)
         rng = stream(settings.seed, "downtown", "group", x, y, wx, wy)
         cx, cy = (pad[0] + pad[2]) / 2, (pad[1] + pad[3]) / 2
-        if rng.random() > min(1.0, density_at(settings, cx, cy) * profile['density']):
+        # A terrace's top is always built on.
+        if rng.random() > min(1.0, density_at(settings, cx, cy) * profile['density']) and \
+                not tops.keys() & set(group):
             continue
         district = district_at(settings, cx, cy, locations)
         lots.extend(_split_downtown(settings, roads, pad, sides, district, rng,

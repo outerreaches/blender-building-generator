@@ -174,19 +174,28 @@ write the graded ground as a heightmap (see [Unity export](#unity-export)).
 blocks, walled on some sides and falling naturally to the hills on others:
 
 - **The plateau** rises **Plateau Height** metres (default 18), over about
-  15% of the city's blocks (6 to 40), preferring the built-up districts.
+  15% of the city's blocks (6 to 40).
 - **Podiums** rise 4.2 m (one storey), over three to six blocks each.
-- **Natural sides.** Each terrace falls to the hills round it on one to
-  three of its sides, chosen at random. That side is one block of open
-  hillside in three flat facets (a shoulder, the face and a toe), with no
-  buildings on it. Where two natural sides meet at a corner, a faceted
-  (octagonal) slope joins them. The other sides are retaining walls.
+- **Where.** Terraces stand only in the downtown and residential districts,
+  at the city's edge, preferring the built-up blocks there.
+- **Built up.** A terrace's top is a full district: every street across it
+  is laid and every block is built on.
+- **Natural sides.** Each terrace falls on one to three of its sides,
+  chosen at random among those facing out of the city. A natural side is one
+  block of open hillside in three flat facets (a shoulder, the face and a
+  toe), running down into the open ground beyond the city: the map's edge,
+  or past an organic city's outline. Where two natural sides meet at a
+  corner, a faceted (octagonal) slope joins them. The other sides are
+  retaining walls.
 - **Low-poly hills.** Under a terraced city the hills are flat facets too:
   each block is two triangles through its corners' heights.
-- **Benches.** The hills under a terrace are graded nearly level, so it
-  stands its full height all round. A terrace's edge follows block edges,
-  so every block is on one level. Its streets rise with it; the streets
-  round its foot stay below, and the terrace's own blocks never face them.
+- **Benches.** The hills under a terrace, and out to the junctions round
+  it, are graded nearly level, so it stands its full height all round. A
+  terrace's edge follows block edges, so every block is on one level.
+- **Edge streets on top.** The streets round a terrace's edge run along its
+  top, with the wall beyond their outer footway, so the buildings at the
+  edge face a street, not a drop. The blocks below never face those
+  streets.
 - **Ramps.** Two ramps climb to the plateau; every street onto a podium is
   one. A ramp is a street straight out from the terrace (or turning at most
   twice). It turns on a wide curve (about 25 m radius) in 30° chords, and
@@ -214,8 +223,9 @@ blocks, walled on some sides and falling naturally to the hills on others:
     2.5 m back from the footway, behind a verge at the footway's level.
     Ground less than about 1 m above the footway slopes up across the verge
     instead.
-  - **Clear of buildings:** sites and towers keep 3.5 m from a terrace's
-    wall line.
+  - **Clear of buildings:** buildings below a wall keep 3.5 m from its foot;
+    buildings on top keep 6 m from a wall standing on the block line (where
+    no street runs along the edge).
   - **Parapets:** walls dropping more than 1.5 m carry a 1 m parapet on
     their upper side.
   - **No pockets:** dead-end streets at a terrace's foot are taken away, so
@@ -555,7 +565,7 @@ For scale: a radius-8 city with every building detailed has about 490 buildings 
 
 ## Plan data
 
-A JSON text datablock (`<collection>_plan.json`) stores the versioned plan. Coordinates are relative to the collection's stored `origin`; road nodes multiply by `block_size`, while lot positions/dimensions and path points are metres. Schema version 15 gives a ramp one road class and its junctions' heights along its curved route. Version 14 added each terrace's natural sides: `slopes` (`axis`, downhill `sign`, crest lattice `line`, `cells`) and `corners` (a `cell` joining two slopes, with each slope's `line` and `sign` along `x` and `y`). Version 13 added `plateau_height` and `podiums` to the settings and `terraces` to the plan: `regions` (each terrace's `cells`, `step` and `kind`), `ramps` (lattice `nodes` from the top down and each one's `raises` above the hills), `stairs` (`low` and `high` lattice nodes, `width`) and `ground` (the hills' node heights under the terraces; `heights` are then the road level). Version 12 added `terrain` and `relief` to the settings, `heights` (each lattice node's graded height, where it is not zero) to the plan, and `level` (pad or road height) to every lot, site and stop. Version 11 added `shape` and `irregularity` to the settings. Version 10 added `bulb` to each lot: the cul-de-sac node a house round a turning circle faces (empty for the rest). Those houses are turned to face the circle, so a lot's `rotation` is no longer always a quarter turn. Version 9 added `preset` to the settings (`CITY` or `SMALL_TOWN`). Version 8 added `culdesacs` (turning-circle node and radius). Version 7 added `party_walls` and `group` to each lot (downtown towers built against neighbours). Version 6 added `outer_roads`. Version 5 added `pois` (kind, centre, width along the frontage, depth, rotation, frontage edge, blocks, seed, condition, damage, approach) and `shelters` (position, rotation, variant, road edge); a site's layout is chosen by `sites.compose` from its seed. Version 4 added `kind`, `condition`, `interiors` and `damage` to each lot alongside the version-3 `paths`: one entry per continuous same-tier route with its lattice `nodes`, flattened metre-space `points` and `width`. Locations and lots carry their district `style`; the per-style profile table is code (`STYLE_PROFILE`), not part of the file. No legacy-plan importer is included.
+A JSON text datablock (`<collection>_plan.json`) stores the versioned plan. Coordinates are relative to the collection's stored `origin`; road nodes multiply by `block_size`, while lot positions/dimensions and path points are metres. Schema version 16 raises every corner of a terrace's blocks (the streets round its edge run along the top) and keeps terraces in the downtown and residential districts at the city's edge. Version 15 gave a ramp one road class and its junctions' heights along its curved route. Version 14 added each terrace's natural sides: `slopes` (`axis`, downhill `sign`, crest lattice `line`, `cells`) and `corners` (a `cell` joining two slopes, with each slope's `line` and `sign` along `x` and `y`). Version 13 added `plateau_height` and `podiums` to the settings and `terraces` to the plan: `regions` (each terrace's `cells`, `step` and `kind`), `ramps` (lattice `nodes` from the top down and each one's `raises` above the hills), `stairs` (`low` and `high` lattice nodes, `width`) and `ground` (the hills' node heights under the terraces; `heights` are then the road level). Version 12 added `terrain` and `relief` to the settings, `heights` (each lattice node's graded height, where it is not zero) to the plan, and `level` (pad or road height) to every lot, site and stop. Version 11 added `shape` and `irregularity` to the settings. Version 10 added `bulb` to each lot: the cul-de-sac node a house round a turning circle faces (empty for the rest). Those houses are turned to face the circle, so a lot's `rotation` is no longer always a quarter turn. Version 9 added `preset` to the settings (`CITY` or `SMALL_TOWN`). Version 8 added `culdesacs` (turning-circle node and radius). Version 7 added `party_walls` and `group` to each lot (downtown towers built against neighbours). Version 6 added `outer_roads`. Version 5 added `pois` (kind, centre, width along the frontage, depth, rotation, frontage edge, blocks, seed, condition, damage, approach) and `shelters` (position, rotation, variant, road edge); a site's layout is chosen by `sites.compose` from its seed. Version 4 added `kind`, `condition`, `interiors` and `damage` to each lot alongside the version-3 `paths`: one entry per continuous same-tier route with its lattice `nodes`, flattened metre-space `points` and `width`. Locations and lots carry their district `style`; the per-style profile table is code (`STYLE_PROFILE`), not part of the file. No legacy-plan importer is included.
 
 ## Code and verification
 

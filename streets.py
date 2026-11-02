@@ -47,6 +47,7 @@ PARAPET = (1.5, .3, 1.0)   # Walls dropping more than this get a parapet this th
 # piers about PIER_SPACING apart (the first PIER_END from each end).
 DECK_DEPTH = 1.2
 ABUTMENT_DROP = .02        # An abutment's wall stops this far under the road.
+RAMP_REACH = 12.0          # A ramp's route stays this near its lattice edges.
 VIADUCT_CLEARANCE = 4.5
 VIADUCT_SPAN = 20.0
 PIER_SPACING = 18.0
@@ -1281,7 +1282,8 @@ def viaduct_spans(plan, grading):
         reach = half + walk + 1.0
         runs, start, previous = [], None, None
         for along, (x, y), (tx, ty) in _walk_polyline(path['points'], 1.0):
-            high = min(_distance(x, y, r) for r in ramps) < 6.0
+            # (A ramp's wide turns run up to about 10 m off the lattice.)
+            high = min(_distance(x, y, r) for r in ramps) < RAMP_REACH
             if high:
                 soffit = grading.surface(x, y) - DECK_DEPTH
                 under = max(grading.natural(x - ty * o, y + tx * o) for o in (-reach, 0, reach))

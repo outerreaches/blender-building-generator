@@ -308,11 +308,8 @@ class CityMetadata:
         from .streets import stair_layout
         space = self.space
         ox, oy, oz = self.origin
-        regions = [{tuple(c) for c in region['cells']} |
-                   {tuple(c) for s in region.get('slopes', ()) for c in s['cells']} |
-                   {tuple(c['cell']) for c in region.get('corners', ())}
-                   for region in found['regions']]
-        from .streets import DECK_DEPTH, viaducts
+        regions = [{tuple(c) for c in region['cells']} for region in found['regions']]
+        from .streets import DECK_DEPTH, RAMP_REACH, viaducts
         terraces = [{'id': f'terrace_{k}', 'kind': region['kind'], 'rise': region['step'],
                      'blocks': _flat(sorted(tuple(c) for c in region['cells'])),
                      'slope_blocks': _flat(sorted(
@@ -331,7 +328,7 @@ class CityMetadata:
                     for a, b in zip(nodes, nodes[1:])]
 
             def on_ramp(x, y):
-                return min(_segment_distance(x, y, r) for r in rows) < 6.0
+                return min(_segment_distance(x, y, r) for r in rows) < RAMP_REACH
             spans = [d for d in decks
                      if on_ramp(*d['stations'][len(d['stations']) // 2][1])]
             ramps.append({'id': f'ramp_{k}', 'terrace': _terrace_of(regions, nodes[0]),
@@ -442,9 +439,10 @@ def _segment_distance(px, py, row):
 
 
 def _terrace_of(regions, node):
+    """The terrace whose top a junction is on (any corner of its blocks)."""
     x, y = node
     around = {(x - 1, y - 1), (x, y - 1), (x - 1, y), (x, y)}
-    return next((f'terrace_{k}' for k, cells in enumerate(regions) if around <= cells), None)
+    return next((f'terrace_{k}' for k, cells in enumerate(regions) if around & cells), None)
 
 
 def _plan_version():

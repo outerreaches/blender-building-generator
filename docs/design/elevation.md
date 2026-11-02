@@ -2,6 +2,12 @@
 
 Status: v0.21 (Rolling hills) and v0.22 (Terraced) done; the rest planned.
 
+**As built in v0.22.3:** every corner of a terrace's blocks is on top, so
+the streets round its edge run along the top with the wall beyond them;
+terraces stand in downtown and residential districts at the city's edge,
+fully built, with their natural sides facing out into the open ground
+beyond the city.
+
 **As built in v0.22.2:** slopes and the hills under a terraced city are
 flat facets (low-poly); ramps turn on wide chorded curves and climb at a
 steady grade along their route; viaduct abutments stay under the road; a

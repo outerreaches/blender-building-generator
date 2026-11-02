@@ -27,12 +27,12 @@ sized for the game's 2 m player capsule.
   tops keep the window grid. Every wall, slab, partition and stair is a
   closed solid: no holes, no flipped faces, no z-fighting.
 - **Cities.** Seeded district growth inside a square or an organic outline,
-  curved roads with filleted junctions and connected driving circuits,
-  footways and curbs, built-out suburbs with houses round their cul-de-sacs,
-  a dense downtown of party-walled towers and superblocks, and highways that
-  run out into the wasteland. A **Small Town** preset builds a rural town
-  instead: an old-town main street, low houses round it and only the sites a
-  town has.
+  on flat ground or rolling hills, curved roads with filleted junctions and
+  connected driving circuits, footways and curbs, built-out suburbs with
+  houses round their cul-de-sacs, a dense downtown of party-walled towers
+  and superblocks, and highways that run out into the wasteland. A **Small
+  Town** preset builds a rural town instead: an old-town main street, low
+  houses round it and only the sites a town has.
 - **Points of interest.** Eighteen kinds of site, each with two to four
   layouts: gas stations, fast food, auto repair, schools, hospitals, police
   and fire stations, transit stations, parks, parking lots and garages, strip
@@ -45,7 +45,8 @@ sized for the game's 2 m player capsule.
   stalls, counters, desks and cinema seats). Every building also lists its
   rooms to furnish (doors, windows, blank wall runs), its lifts (shaft,
   doors, car) and its railings, since furniture, railings and lift parts are
-  game assets. C# classes for `JsonUtility` are included.
+  game assets. A 16-bit heightmap of the graded ground can go with them. C#
+  classes for `JsonUtility` are included.
 - **Deterministic.** The same seed and settings give the same result. The
   generator is pure Python up to a thin Blender adapter.
 

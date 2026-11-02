@@ -157,11 +157,11 @@ class CityMetadata:
     # -- transforms ------------------------------------------------------
     def lot_transform(self, lot):
         ox, oy, oz = self.origin
-        return (ox + lot.center[0], oy + lot.center[1], oz + self.curb, lot.rotation)
+        return (ox + lot.center[0], oy + lot.center[1], oz + self.curb + lot.level, lot.rotation)
 
     def poi_transform(self, poi):
         ox, oy, oz = self.origin
-        return (ox + poi.center[0], oy + poi.center[1], oz + self.curb, poi.rotation)
+        return (ox + poi.center[0], oy + poi.center[1], oz + self.curb + poi.level, poi.rotation)
 
     def _building(self, transform, width, depth, entrances, interior=None, obj_name='',
                   site_id=''):
@@ -266,7 +266,8 @@ class CityMetadata:
 
     def add_shelter(self, shelter, obj_name):
         ox, oy, oz = self.origin
-        t = (ox + shelter.position[0], oy + shelter.position[1], oz + self.curb, shelter.rotation)
+        t = (ox + shelter.position[0], oy + shelter.position[1], oz + self.curb + shelter.level,
+             shelter.rotation)
         fx, fy = turn(t, 0.0, -1.0)
         entry = {'id': shelter.id, 'object': obj_name, 'variant': shelter.variant,
                  'road': _flat(shelter.road)}
@@ -304,9 +305,11 @@ class CityMetadata:
         settings = plan.settings
         size = settings.block_size
         ox, oy, oz = self.origin
+        surface = plan.surface()
 
-        def node_point(node, z=0.0):
-            return space.point((ox + node[0] * size, oy + node[1] * size, oz + z))
+        def node_point(node):
+            x, y = node[0] * size, node[1] * size
+            return space.point((ox + x, oy + y, oz + surface(x, y)))
         junctions = {}
         for road in plan.roads:
             for node in (road.a, road.b):
@@ -320,7 +323,8 @@ class CityMetadata:
             junctions.setdefault(tuple(bulb['node']), []).append(bulb['radius'])
         roads = [{'id': path['id'], 'tier': path['tier'], 'width': path['width'],
                   'nodes': _flat(path['nodes']),
-                  'points': _flat(space.point((ox + x, oy + y, oz)) for x, y in path['points'])}
+                  'points': _flat(space.point((ox + x, oy + y, oz + surface(x, y)))
+                                  for x, y in path['points'])}
                  for path in plan.paths]
         bulbs = {tuple(bulb['node']) for bulb in getattr(plan, 'culdesacs', ())}
         markers = sorted(self.markers, key=lambda m: m['type'])
@@ -338,7 +342,8 @@ class CityMetadata:
                      'wasteland': settings.wasteland, 'curb_height': settings.curb_height,
                      'sidewalk_width': settings.sidewalk_width,
                      'small_props_modelled': self.props_modelled,
-                     'interiors_listed': self.interiors, 'water_modelled': self.water},
+                     'interiors_listed': self.interiors, 'water_modelled': self.water,
+                     'terrain': settings.terrain, 'relief': settings.relief},
             'districts': [{'id': loc.id, 'role': loc.role, 'style': loc.style,
                            'position': node_point(loc.node)} for loc in plan.locations],
             'roads': roads,

@@ -20,6 +20,15 @@ GROUND_CELL = 12.0    # Metres per terrain cell; a multiple of SAMPLE.
 CURB_BOTTOM = -0.2
 GROUND_Z = -0.02
 FIELD_CELL = 40.0     # Metres per spatial-hash cell for centreline segments.
+# On terrain: a finer ground grid (its error against the smooth road-level
+# surface stays a few centimetres), set lower so it never shows through the
+# asphalt, cut back round every building pad and held up under the curbs.
+GROUND_CELL_TERRAIN = 3.0
+GROUND_Z_TERRAIN = -0.06
+CURB_BOTTOM_TERRAIN = -2.5   # Curb skirts on terrain: walls retaining the footway above lower pads.
+PAD_CLEAR = .1        # Ground stays this far under a pad's top.
+PAD_CUT_SLOPE = .6    # Cut slope back up from a pad to the natural ground.
+PAD_CELL = 24.0       # Metres per spatial-hash cell for pads.
 OUTER_STUB = 60.0     # Field segment past the map edge so a highway runs straight out.
 OUTER_CUT = 40.0      # The street mesh hands over to the outer road this far out.
 OUTER_RAMP = 2.0      # Footways ramp down to the shoulders over this length.
@@ -268,6 +277,7 @@ def build_street_mesh(plan):
     vertices, faces, materials = [], [], []
     ids = {}
     curbs = set()
+    surface = plan.surface() if getattr(plan, 'heights', None) else None
 
     def vertex(co):
         co = (round(co[0], 8), round(co[1], 8), round(co[2], 8))
@@ -286,8 +296,15 @@ def build_street_mesh(plan):
         polygon = _clean(polygon)
         if len(polygon) < 3:
             return
-        top = [(x, y, height(x, y) if material == 1 else 0.0)
-               for x, y, _ in polygon]
+        if surface is None:
+            top = [(x, y, height(x, y) if material == 1 else 0.0)
+                   for x, y, _ in polygon]
+            base = [0.0] * len(top)
+        else:
+            # On terrain everything rides on the road-level surface.
+            base = [surface(x, y) for x, y, _ in polygon]
+            top = [(x, y, z + (height(x, y) if material == 1 else 0.0))
+                   for (x, y, _), z in zip(polygon, base)]
         for index in range(1, len(top) - 1):
             face((top[0], top[index], top[index + 1]), material)
         if material != 1:
@@ -299,20 +316,24 @@ def build_street_mesh(plan):
         for index, current in enumerate(polygon):
             following = polygon[(index + 1) % len(polygon)]
             a, b = top[index], top[(index + 1) % len(top)]
+            za, zb = base[index], base[(index + 1) % len(top)]
             if current[2] <= 1e-9 and following[2] <= 1e-9:
                 bottom = 0.0
             elif current[2] >= walk - 1e-9 and following[2] >= walk - 1e-9:
                 bottom = CURB_BOTTOM
             else:
                 continue
-            if bottom == 0.0 and a[2] <= 1e-9 and b[2] <= 1e-9:
+            if bottom == 0.0 and a[2] - za <= 1e-9 and b[2] - zb <= 1e-9:
                 continue
             key = (tuple(sorted((vertex(b), vertex(a)))), bottom)
             if key in curbs:
                 continue
             curbs.add(key)
+            if surface is not None and bottom != 0.0:
+                bottom = CURB_BOTTOM_TERRAIN
             face(((b[0], b[1], b[2]), (a[0], a[1], a[2]),
-                  (a[0], a[1], bottom), (b[0], b[1], bottom)), 2)
+                  (a[0], a[1], za + bottom if surface is not None else bottom),
+                  (b[0], b[1], zb + bottom if surface is not None else bottom)), 2)
 
     def triangles(corners):
         """Split a cell into two triangles, refining one that lies flat on an iso-level.
@@ -354,6 +375,8 @@ def build_street_mesh(plan):
 
 def build_ground_mesh(plan):
     """Unpaved terrain under and around the city, out to the wasteland edge."""
+    if getattr(plan, 'heights', None):
+        return _terrain_ground_mesh(plan)
     settings = plan.settings
     extent = settings.radius * settings.block_size + 20
     far = extent + settings.wasteland
@@ -393,6 +416,181 @@ def build_ground_mesh(plan):
             for x0, y0, x1, y1 in _subtract(rect, holes):
                 faces.append((vertex(x0, y0), vertex(x1, y0), vertex(x1, y1), vertex(x0, y1)))
     return vertices, faces
+
+
+def _terrain_ground_mesh(plan):
+    """The graded ground (``Grading``) on a finer grid; the wasteland beyond the
+    map's edge stays level, as the edge of the graded city is."""
+    settings = plan.settings
+    extent = settings.radius * settings.block_size + 20
+    far = extent + settings.wasteland
+    grading = Grading(plan)
+    covered = grading.field.covered_cells()
+    per = int(round(GROUND_CELL_TERRAIN / SAMPLE))
+    vertices, faces, ids = [], [], {}
+    cell = GROUND_CELL_TERRAIN
+    # A cell that overlaps a pad keeps all four corners under the pad's top,
+    # so no triangle across the pad's edge lifts the ground into the building.
+    caps = {}
+    for polygon, top in grading.pads:
+        xs, ys = [p[0] for p in polygon], [p[1] for p in polygon]
+        for i in range(math.floor(min(xs) / cell), math.floor(max(xs) / cell) + 1):
+            for j in range(math.floor(min(ys) / cell), math.floor(max(ys) / cell) + 1):
+                caps[i, j] = min(caps.get((i, j), math.inf), top)
+
+    def vertex(x, y, z=None):
+        key = (round(x, 8), round(y, 8))
+        if key not in ids:
+            if z is None:
+                i, j = round(x / cell), round(y / cell)
+                cap = min(caps.get((i + di, j + dj), math.inf) for di in (-1, 0) for dj in (-1, 0))
+                z = grading.ground(x, y, cap)
+            ids[key] = len(vertices)
+            vertices.append(key + (round(z, 8),))
+        return ids[key]
+
+    for i in range(math.floor(-extent / cell), math.ceil(extent / cell)):
+        for j in range(math.floor(-extent / cell), math.ceil(extent / cell)):
+            if all((i * per + di, j * per + dj) in covered
+                   for di in range(per) for dj in range(per)):
+                continue
+            x0, y0 = max(-extent, i * cell), max(-extent, j * cell)
+            x1, y1 = min(extent, (i + 1) * cell), min(extent, (j + 1) * cell)
+            if x1 <= x0 or y1 <= y0:
+                continue
+            faces.append((vertex(x0, y0), vertex(x1, y0), vertex(x1, y1), vertex(x0, y1)))
+    if settings.wasteland > 0:
+        holes = []
+        for outer in outer_roads(plan):
+            a0 = extent if outer.sign > 0 else -extent
+            holes.append(outer.rect(a0))
+        for rect in ((-far, -far, -extent, far), (extent, -far, far, far),
+                     (-extent, extent, extent, far), (-extent, -far, extent, -extent)):
+            # The city's last 20 m are level (the surface is zero off the
+            # lattice), so the framing quads meet the city ground flush.
+            for x0, y0, x1, y1 in _subtract(rect, holes):
+                faces.append((vertex(x0, y0, GROUND_Z_TERRAIN), vertex(x1, y0, GROUND_Z_TERRAIN),
+                              vertex(x1, y1, GROUND_Z_TERRAIN), vertex(x0, y1, GROUND_Z_TERRAIN)))
+    return vertices, faces
+
+
+def footprint(center, width, depth, rotation):
+    """World corners (counter-clockwise) of a pad: width along its front."""
+    c, s = math.cos(rotation), math.sin(rotation)
+    return [(center[0] + x * c - y * s, center[1] + x * s + y * c)
+            for x, y in ((-width / 2, -depth / 2), (width / 2, -depth / 2),
+                         (width / 2, depth / 2), (-width / 2, depth / 2))]
+
+
+def _polygon_distance(polygon, x, y):
+    """Distance from (x, y) to a convex counter-clockwise polygon (0 inside)."""
+    inside = True
+    best = math.inf
+    for (ax, ay), (bx, by) in zip(polygon, polygon[1:] + polygon[:1]):
+        if (bx - ax) * (y - ay) - (by - ay) * (x - ax) < 0:
+            inside = False
+        dx, dy = bx - ax, by - ay
+        t = max(0.0, min(1.0, ((x - ax) * dx + (y - ay) * dy) / (dx * dx + dy * dy)))
+        best = min(best, math.hypot(x - ax - dx * t, y - ay - dy * t))
+    return 0.0 if inside else best
+
+
+class Grading:
+    """The graded ground of a terrain city: the road-level surface, cut back
+    round every building and site pad (the ground stays under the pad's top and
+    rises from it no steeper than PAD_CUT_SLOPE) and held up to the curbs'
+    skirts along every footway. Heights are relative to the city origin."""
+
+    def __init__(self, plan):
+        settings = plan.settings
+        self.surface = plan.surface()
+        self.offset = GROUND_Z_TERRAIN if plan.heights else GROUND_Z
+        self.walk = settings.sidewalk_width
+        self.field = Field(plan)
+        curb = settings.curb_height
+        self.pads = ([(footprint(lot.center, lot.width, lot.depth, lot.rotation),
+                       curb + lot.level) for lot in plan.lots] +
+                     [(site_footprint(poi), curb + poi.level) for poi in plan.pois])
+        self.hash = defaultdict(list)
+        for polygon, top in self.pads:
+            xs, ys = [p[0] for p in polygon], [p[1] for p in polygon]
+            margin = 12.0
+            for i in range(math.floor((min(xs) - margin) / PAD_CELL),
+                           math.floor((max(xs) + margin) / PAD_CELL) + 1):
+                for j in range(math.floor((min(ys) - margin) / PAD_CELL),
+                               math.floor((max(ys) + margin) / PAD_CELL) + 1):
+                    self.hash[i, j].append((polygon, top))
+
+    def natural(self, x, y):
+        return self.surface(x, y) + self.offset
+
+    def ground(self, x, y, cap=math.inf):
+        """Graded ground at (x, y); ``cap`` is a pad top it must also stay under."""
+        level = self.surface(x, y)
+        height = min(level + self.offset, cap - PAD_CLEAR)
+        for polygon, top in self.hash.get((math.floor(x / PAD_CELL), math.floor(y / PAD_CELL)), ()):
+            height = min(height, top - PAD_CLEAR + PAD_CUT_SLOPE * _polygon_distance(polygon, x, y))
+        if self.field.value(x, y) <= self.walk + .5:
+            height = max(height, level + CURB_BOTTOM_TERRAIN + .05)
+        return height
+
+    def lowest(self, polygon, step=2.0):
+        """Lowest ground over a convex polygon (sampled about ``step`` apart)."""
+        xs, ys = [p[0] for p in polygon], [p[1] for p in polygon]
+        nx = max(1, math.ceil((max(xs) - min(xs)) / step))
+        ny = max(1, math.ceil((max(ys) - min(ys)) / step))
+        low = math.inf
+        for i in range(nx + 1):
+            for j in range(ny + 1):
+                x = min(xs) + (max(xs) - min(xs)) * i / nx
+                y = min(ys) + (max(ys) - min(ys)) * j / ny
+                if _polygon_distance(polygon, x, y) <= 1e-6:
+                    low = min(low, self.ground(x, y))
+        for x, y in polygon:
+            low = min(low, self.ground(x, y))
+        return low
+
+
+def heightmap(plan, resolution, column_sign=1, row_sign=1):
+    """The graded ground with every building and site pad at its top (streets
+    at their road level, to within the ground's few centimetres) on a
+    ``resolution`` x ``resolution`` grid over the city ground. Returns
+    ``(rows, x0, y0, step)``: sample (row r, column c) lies at
+    (x0 + column_sign * c * step, y0 + row_sign * r * step) from the city
+    origin; columns run along x, rows along y."""
+    settings = plan.settings
+    extent = settings.radius * settings.block_size + 20
+    step = 2 * extent / (resolution - 1)
+    x0 = -extent if column_sign > 0 else extent
+    y0 = -extent if row_sign > 0 else extent
+    grading = Grading(plan)
+    surface, offset = grading.surface, grading.offset
+    rows = []
+    for r in range(resolution):
+        y = y0 + row_sign * r * step
+        row = []
+        for c in range(resolution):
+            x = x0 + column_sign * c * step
+            height = surface(x, y) + offset
+            for polygon, top in grading.hash.get((math.floor(x / PAD_CELL), math.floor(y / PAD_CELL)), ()):
+                distance = _polygon_distance(polygon, x, y)
+                if distance <= 0.0:
+                    height = top
+                    break
+                height = min(height, top - PAD_CLEAR + PAD_CUT_SLOPE * distance)
+            row.append(height)
+        rows.append(row)
+    return rows, x0, y0, step
+
+
+def site_footprint(poi):
+    """World corners of a site's pad, its approach to the footway included."""
+    width, depth = poi.width, poi.depth + poi.approach
+    c, s = math.cos(poi.rotation), math.sin(poi.rotation)
+    # The approach extends the pad toward the street (local -y).
+    cx, cy = 0.0, -poi.approach / 2
+    center = (poi.center[0] + cx * c - cy * s, poi.center[1] + cx * s + cy * c)
+    return footprint(center, width, depth, poi.rotation)
 
 
 def _subtract(rect, holes):

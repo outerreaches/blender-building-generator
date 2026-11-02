@@ -2,10 +2,12 @@
 """Export only a generated city's static meshes, preserving editable source objects."""
 import json
 import os
+import sys
 import zlib
+from array import array
 
 import bpy
-from bpy.props import BoolProperty, StringProperty
+from bpy.props import BoolProperty, EnumProperty, StringProperty
 from bpy_extras.io_utils import ExportHelper
 
 
@@ -18,6 +20,13 @@ class EXPORT_SCENE_OT_procedural_city(bpy.types.Operator, ExportHelper):
     write_metadata: BoolProperty(name='Write City Metadata (.city.json)', default=True,
                                  description='Roads, buildings and entrances, sites and markers '
                                              'for game-side placement, next to the FBX')
+    write_heightmap: BoolProperty(name='Write Heightmap (.heightmap.raw)', default=True,
+                                  description='The graded ground as a 16-bit RAW heightmap (with a '
+                                              '.heightmap.json describing it), next to the FBX')
+    heightmap_resolution: EnumProperty(name='Heightmap Resolution', default='1025',
+                                       items=[('513', '513', 'Samples per side'),
+                                              ('1025', '1025', 'Samples per side'),
+                                              ('2049', '2049', 'Samples per side')])
 
     def invoke(self, context, event):
         candidates = [c for c in bpy.data.collections if 'generator_version' in c]
@@ -31,6 +40,9 @@ class EXPORT_SCENE_OT_procedural_city(bpy.types.Operator, ExportHelper):
     def draw(self, context):
         self.layout.prop_search(self, 'city_collection', bpy.data, 'collections')
         self.layout.prop(self, 'write_metadata')
+        self.layout.prop(self, 'write_heightmap')
+        if self.write_heightmap:
+            self.layout.prop(self, 'heightmap_resolution')
         self.layout.label(text='Meshes only; metres; triangulated; materials and UVs.')
 
     def execute(self, context):
@@ -70,6 +82,14 @@ class EXPORT_SCENE_OT_procedural_city(bpy.types.Operator, ExportHelper):
                     message += f' and {os.path.basename(path)}'
                 else:
                     self.report({'WARNING'}, 'This city has no metadata; regenerate it to get one')
+            if self.write_heightmap:
+                path = write_city_heightmap(collection, bpy.path.ensure_ext(self.filepath, '.fbx'),
+                                            int(self.heightmap_resolution))
+                if path:
+                    message += f' and {os.path.basename(path)}'
+                else:
+                    self.report({'WARNING'}, 'No heightmap: this city was made by another version '
+                                             'of the add-on; regenerate it to get one')
             self.report({'INFO'}, message)
             return {'FINISHED'}
         except Exception as exc:
@@ -125,6 +145,70 @@ def write_city_metadata(collection, fbx_path):
     with open(path, 'w', encoding='utf-8') as handle:
         json.dump(data, handle, separators=(',', ':'))
     return path
+
+
+def city_plan(collection):
+    """The plan a city was made from, regenerated from its stored settings; None
+    when this version of the add-on would make a different plan."""
+    from .city_plan import CitySettings, generate_city
+    text = bpy.data.texts.get(collection.get('plan_text', ''))
+    if text is None:
+        return None
+    stored = json.loads(text.as_string())
+    try:
+        plan = generate_city(CitySettings(**stored['settings']))
+    except (TypeError, ValueError):
+        return None
+    return plan if json.loads(plan.to_json()) == stored else None
+
+
+def write_city_heightmap(collection, fbx_path, resolution=1025):
+    """Write the city's graded ground as ``<name>.heightmap.raw`` (16-bit,
+    little-endian, row by row) and ``<name>.heightmap.json`` beside the FBX.
+
+    Laid out like the city metadata: in Unity space the columns run along +X
+    and the rows along +Z, ready for a Unity Terrain (Import Raw, Windows byte
+    order, no flip). Returns the RAW path, or None if the plan cannot be
+    regenerated exactly.
+    """
+    from .metadata import Space
+    from .streets import heightmap
+    from . import version
+    plan = city_plan(collection)
+    if plan is None:
+        return None
+    data = city_metadata(collection) or {}
+    space = Space(data.get('space', {}).get('name', 'UNITY'))
+    unity = space.name == 'UNITY'
+    # Unity's +X and +Z are Blender's -x and -y.
+    sign = -1 if unity else 1
+    rows, x0, y0, step = heightmap(plan, resolution, sign, sign)
+    low = min(min(row) for row in rows)
+    high = max(max(row) for row in rows)
+    span = max(high - low, 1e-6)
+    samples = array('H', (int(round((h - low) / span * 65535)) for row in rows for h in row))
+    if sys.byteorder == 'big':
+        samples.byteswap()
+    base = os.path.splitext(fbx_path)[0]
+    with open(base + '.heightmap.raw', 'wb') as handle:
+        handle.write(samples.tobytes())
+    ox, oy, oz = collection.get('origin', (0.0, 0.0, 0.0))
+    origin = space.point((ox + x0, oy + y0, oz + low))
+    size = (resolution - 1) * step
+    info = {'format': 'ares.city.heightmap', 'schema': 1, 'addon_version': version(),
+            'collection': collection.name, 'file': os.path.basename(base + '.heightmap.raw'),
+            'space': space.name, 'resolution': resolution, 'spacing': step,
+            'size': [size, size], 'columns': '+x', 'rows': '+z' if unity else '+y',
+            'origin': origin, 'min_height': low, 'max_height': high,
+            'encoding': 'uint16 little-endian, row by row from row 0; height = min_height + '
+                        'value / 65535 * (max_height - min_height)',
+            'terrain': plan.settings.terrain}
+    if unity:
+        info['unity_terrain'] = {'position': origin, 'size': [size, high - low, size],
+                                 'heightmap_resolution': resolution}
+    with open(base + '.heightmap.json', 'w', encoding='utf-8') as handle:
+        json.dump(info, handle, indent=1)
+    return base + '.heightmap.raw'
 
 
 def menu_export(self, context):

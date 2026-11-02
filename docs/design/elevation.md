@@ -1,6 +1,17 @@
 # Design: elevation, infrastructure levels and the megacity
 
-Status: planned (v0.21 onwards). Flat cities stay exactly as they are: every
+Status: v0.21 done (Rolling hills); the rest planned.
+
+**As built in v0.21:**
+
+- **Level map edge.** The map's edge stays level with the flat wasteland and
+  the outgoing highways. That caps how high a small map's hills can rise,
+  about 12 m at radius 6. Carrying the terrain on into the wasteland comes
+  with the Terraced style in v0.22.
+- **Grade limits** are highway 4%, arterial 5%, collector 6%, local 8%, and
+  open ground 12%.
+- **Retaining curbs.** Curb skirts on terrain are 2.5 m deep, so a footway
+  above a lower pad shows as a retaining curb wall. Flat cities stay exactly as they are: every
 feature below is off until its setting is changed.
 
 ## Reference
@@ -265,8 +276,8 @@ The aim is the scale of Akira or Judge Dredd at a cost the game can run.
 
 | Version | Scope |
 | --- | --- |
-| v0.21 | Terrain field (Flat, Rolling, Terraced), road grading, pads and plinths, ground and street meshes on the terrain, metadata heights, heightmap export |
-| v0.22 | Cross-sections: ditches, embankments and cuttings, retaining walls, ramp and stair streets at escarpments, culverts |
+| v0.21 (done) | Terrain field (Flat, Rolling), road grading, pads and plinths, ground and street meshes on the terrain, metadata heights, heightmap export |
+| v0.22 | Terraced style; hills continued past the map's edge; cross-sections: ditches, embankments and cuttings, retaining walls, ramp and stair streets at escarpments, culverts |
 | v0.23 | Levels: structure types, raised highway with ramps, road tunnels at the map edge, rail with crossings and a freight siding, subway routes with station entrances, sewer network data with manholes |
 | v0.24 | Megacity preset: megablocks, stacked decks, skybridges, collapsed spans, instanced modules, skyline ring |
 | Later | Walkable subway tunnels and platforms; walkable sewers with collapsed sections and breaches into the subway |

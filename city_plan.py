@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Deterministic city growth, independent of Blender. Coordinates are metres."""
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from collections import deque
 from functools import lru_cache
 import hashlib
@@ -9,7 +9,7 @@ import json
 import math
 import random
 
-VERSION = 11
+VERSION = 12
 ROAD_WIDTHS = {"HIGHWAY": 20.0, "ARTERIAL": 12.0, "COLLECTOR": 8.0, "LOCAL": 6.0}
 ROAD_RANK = {name: i for i, name in enumerate(ROAD_WIDTHS)}
 # Corner radius at a route bend, before the curve_radius multiplier and clamping.
@@ -233,6 +233,8 @@ class CitySettings:
     preset: str = "CITY"               # CITY, or SMALL_TOWN: no towers, no big sites.
     shape: str = "SQUARE"              # SQUARE fills the map; ORGANIC has an irregular edge.
     irregularity: float = .6           # How far an organic edge wanders.
+    terrain: str = "FLAT"              # FLAT, or ROLLING: gentle hills (see TERRAINS).
+    relief: float = 30.0               # Rolling hills: metres from the lowest to the highest.
 
     def validate(self):
         for name, lo, hi in (("radius", 2, 25), ("primary_count", 1, 16),
@@ -249,7 +251,7 @@ class CitySettings:
                              ("damage", 0, 1), ("interior_ratio", 0, 1),
                              ("setback", 1, 8), ("wasteland", 0, 20000),
                              ("highway_reach", 0, 20000), ("downtown_superblocks", 0, 1),
-                             ("irregularity", 0, 1),
+                             ("irregularity", 0, 1), ("relief", 0, 40),
                              ("sidewalk_width", 1.2, 5), ("curb_height", 0, .25)):
             value = getattr(self, name)
             if not math.isfinite(value) or not lo <= value <= hi:
@@ -260,6 +262,8 @@ class CitySettings:
             raise ValueError("Unknown preset")
         if self.shape not in SHAPES:
             raise ValueError("Unknown city shape")
+        if self.terrain not in TERRAINS:
+            raise ValueError("Unknown terrain")
 
 
 @dataclass(frozen=True)
@@ -300,6 +304,7 @@ class Lot:
     party_walls: tuple = ()   # Sides (front/back/left/right) built against a neighbour.
     group: str = ''           # Buildings of one downtown block share a budget draw.
     bulb: tuple = ()          # Cul-de-sac node of the turning circle the house faces.
+    level: float = 0.0        # Pad height above the flat city (road level at its front).
 
 
 @dataclass(frozen=True)
@@ -319,6 +324,7 @@ class Poi:
     approach: float      # Pad front to the back of the footway.
     condition: str = 'INTACT'
     damage: float = 0.0
+    level: float = 0.0   # Pad height above the flat city (road level at its front).
 
 
 @dataclass(frozen=True)
@@ -329,6 +335,7 @@ class Shelter:
     rotation: float
     variant: str         # SHELTER or STOP.
     road: tuple
+    level: float = 0.0   # Road level where it stands, above the flat city.
 
 
 @dataclass
@@ -344,13 +351,133 @@ class CityPlan:
     shelters: list = field(default_factory=list)
     outer_roads: list = field(default_factory=list)
     culdesacs: list = field(default_factory=list)    # [{'node': [x, y], 'radius': m}]
+    heights: list = field(default_factory=list)      # [[x, y, z]] graded lattice nodes (z != 0)
 
     def to_json(self):
         return json.dumps({"version": VERSION, **asdict(self)}, sort_keys=True, indent=2)
 
+    def surface(self):
+        """The graded road-level surface (``Surface``) of this plan."""
+        return Surface(self.settings, {(x, y): z for x, y, z in self.heights})
+
 
 def edge(a, b):
     return tuple(sorted((a, b)))
+
+
+# Terrain. FLAT keeps every height at zero. ROLLING lifts the lattice nodes on
+# smooth seeded hills (``relief`` metres from the lowest to the highest), held
+# at zero along the map's edge so the wasteland and the highways leaving the
+# city stay level. The nodes are then graded: no street is steeper than its
+# tier allows and site blocks are level. Between the nodes the ground is a
+# smoothstep blend of the block's four corners (``Surface``), so a street's
+# profile eases out flat at both junctions and is at most SMOOTHSTEP_PEAK times
+# steeper than the straight grade between them.
+TERRAINS = ('FLAT', 'ROLLING')
+GRADE_LIMITS = {'HIGHWAY': .04, 'ARTERIAL': .05, 'COLLECTOR': .06, 'LOCAL': .08}
+OPEN_GRADE = .12         # Lattice edges without a street.
+SITE_DROP = .25          # Most a site block's corners may differ (m).
+TERRAIN_WAVE = 7.0       # Blocks per noise cell of the hills (first octave).
+TERRAIN_EDGE = 2.0       # Blocks over which the hills fade to the level edge.
+SMOOTHSTEP_PEAK = 1.5    # Steepest slope of a smoothstep over its mean slope.
+
+
+class Surface:
+    """Road-level height of the graded city above the flat city (metres):
+    the node heights blended across each block with smoothsteps; zero off the
+    lattice and everywhere on a flat city."""
+
+    def __init__(self, settings, heights):
+        self.size = settings.block_size
+        self.radius = settings.radius
+        self.heights = heights
+
+    def __call__(self, x, y):
+        if not self.heights:
+            return 0.0
+        u, v = x / self.size, y / self.size
+        i, j = math.floor(u), math.floor(v)
+        if i < -self.radius or j < -self.radius or i >= self.radius or j >= self.radius:
+            return 0.0
+        fu, fv = u - i, v - j
+        su, sv = fu * fu * (3 - 2 * fu), fv * fv * (3 - 2 * fv)
+        h = self.heights
+        return ((h.get((i, j), 0.0) * (1 - su) + h.get((i + 1, j), 0.0) * su) * (1 - sv) +
+                (h.get((i, j + 1), 0.0) * (1 - su) + h.get((i + 1, j + 1), 0.0) * su) * sv)
+
+
+def _terrain_heights(settings):
+    """Seeded hills on the lattice nodes, zero along the map's edge."""
+    radius = settings.radius
+    nodes = [(x, y) for x in range(-radius, radius + 1) for y in range(-radius, radius + 1)]
+    seed = settings.seed
+
+    def hills(x, y):
+        return (_noise(seed, x / TERRAIN_WAVE, y / TERRAIN_WAVE, "terrain") +
+                .35 * _noise(seed, x / (TERRAIN_WAVE / 2.3), y / (TERRAIN_WAVE / 2.3), "terrain2"))
+    raw = {node: hills(*node) for node in nodes}
+    low, high = min(raw.values()), max(raw.values())
+    spread = max(high - low, 1e-9)
+    heights = {}
+    for node in nodes:
+        edge_distance = min(radius - abs(node[0]), radius - abs(node[1])) / TERRAIN_EDGE
+        t = max(0.0, min(1.0, edge_distance))
+        fade = t * t * (3 - 2 * t)
+        heights[node] = ((raw[node] - low) / spread - .5) * settings.relief * fade
+    return heights
+
+
+def _grade(settings, roads, pois):
+    """Node heights graded so every lattice edge stays under its limit: a
+    street's tier, open ground, or a site block kept level. The map's edge
+    stays at zero."""
+    radius, size = settings.radius, settings.block_size
+    heights = _terrain_heights(settings)
+    limits = {}
+    for x in range(-radius, radius + 1):
+        for y in range(-radius, radius + 1):
+            for other in ((x + 1, y), (x, y + 1)):
+                if max(map(abs, other)) <= radius:
+                    key = edge((x, y), other)
+                    grade = GRADE_LIMITS.get(roads.get(key), OPEN_GRADE)
+                    limits[key] = grade * size / SMOOTHSTEP_PEAK
+    for poi in pois:
+        # Every pair of a site's corners, so the whole pad is level.
+        corners = sorted({(bx + dx, by + dy) for bx, by in poi.blocks
+                          for dx in (0, 1) for dy in (0, 1)})
+        for index, a in enumerate(corners):
+            for b in corners[index + 1:]:
+                limits[edge(a, b)] = min(limits.get(edge(a, b), math.inf), SITE_DROP)
+    pinned = {node for node in heights if max(map(abs, node)) == radius}
+    for node in pinned:
+        heights[node] = 0.0
+    order = sorted(limits.items())
+
+    def worst():
+        return max((abs(heights[a] - heights[b]) - most for (a, b), most in order), default=0.0)
+    for _ in range(4000):
+        moved = 0.0
+        for (a, b), most in order:
+            difference = heights[a] - heights[b]
+            excess = abs(difference) - most
+            if excess <= 1e-7:
+                continue
+            moved = max(moved, excess)
+            step = excess if difference > 0 else -excess
+            if a in pinned:
+                heights[b] += step
+            elif b in pinned:
+                heights[a] -= step
+            else:
+                heights[a] -= step / 2
+                heights[b] += step / 2
+        if moved < 1e-5:
+            break
+    # Never leave a limit broken: flatten towards zero until all hold.
+    while worst() > 1e-4:
+        for node in heights:
+            heights[node] *= .5
+    return {node: round(z, 3) for node, z in heights.items() if abs(round(z, 3)) > 0}
 
 
 # City shape. SQUARE fills the map. ORGANIC has an edge that wanders with the
@@ -385,21 +512,21 @@ def _outline_terms(settings):
     return harmonics, fingers
 
 
-def _noise(seed, x, y):
+def _noise(seed, x, y, key="fray"):
     """Smooth value noise in [0, 1] on a unit lattice."""
     ix, iy = math.floor(x), math.floor(y)
     fx, fy = x - ix, y - iy
     fx, fy = fx * fx * (3 - 2 * fx), fy * fy * (3 - 2 * fy)
     def corner(i, j):
-        return _fray(seed, ix + i, iy + j)
+        return _fray(seed, ix + i, iy + j, key)
     top = corner(0, 0) * (1 - fx) + corner(1, 0) * fx
     bottom = corner(0, 1) * (1 - fx) + corner(1, 1) * fx
     return top * (1 - fy) + bottom * fy
 
 
 @lru_cache(maxsize=65536)
-def _fray(seed, i, j):
-    return stream(seed, "fray", i, j).random()
+def _fray(seed, i, j, key="fray"):
+    return stream(seed, key, i, j).random()
 
 
 @lru_cache(maxsize=64)
@@ -834,8 +961,23 @@ def generate_city(settings=CitySettings()):
     eligible = len(lots)
     lots = sorted(lots[:settings.max_buildings], key=lambda lot: lot.id)
     shelters = _place_shelters(settings, roads, lots, pois) if settings.points_of_interest else []
+    heights = {}
+    if settings.terrain != 'FLAT':
+        heights = _grade(settings, roads, pois)
+        surface = Surface(settings, heights)
+
+        def front(item):
+            # Road level at the middle of the front (the pad's street side).
+            reach = item.depth / 2
+            return surface(item.center[0] + math.sin(item.rotation) * reach,
+                           item.center[1] - math.cos(item.rotation) * reach)
+        lots = [replace(lot, level=round(front(lot), 3)) for lot in lots]
+        pois = [replace(poi, level=round(front(poi), 3)) for poi in pois]
+        shelters = [replace(shelter, level=round(surface(*shelter.position), 3))
+                    for shelter in shelters]
     return CityPlan(settings, locations, road_list, paths, lots, eligible, driving_loops,
-                    pois, shelters, _outer_roads(settings, paths), culdesacs)
+                    pois, shelters, _outer_roads(settings, paths), culdesacs,
+                    [[x, y, z] for (x, y), z in sorted(heights.items())])
 
 
 # Suburban cul-de-sacs: a short street from the network to an inner lattice

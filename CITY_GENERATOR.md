@@ -26,6 +26,8 @@ The original single-building and bulk operators remain available. Architecture u
 | Radius / Block Size | Square extent in blocks/metres; 6 × 56 is about 672 m across |
 | City Shape | Square (default): the city fills the map. Organic: an [irregular edge](#city-shape) |
 | Irregularity | How far an organic edge wanders, 0 (round) to 1 (default 0.6) |
+| Terrain | Flat (default), or [Rolling Hills](#terrain) |
+| Relief | Rolling hills: metres from the lowest ground to the highest, 0–40 (default 30) |
 | Primary / Secondary Locations | District seeds (default 6: downtown core, three midtown styles, industrial and suburban edges) and smaller growth destinations |
 | Driving Circuits | Target count of distinct highway-to-district circuits, 0–8 |
 | Core Radius Fraction | Distance over which core density stays constant |
@@ -128,6 +130,41 @@ the radius by about 1.4× for a city of similar size. Shapes read best from
 radius 8 up; at radius 6 the 12-block lattice leaves little room for lobes.
 **Core Radius Fraction** is measured to the edge on each bearing. The plan's
 settings and the metadata's `city` record the `shape`.
+
+## Terrain
+
+With **Terrain: Rolling Hills** the city stands on gentle seeded hills.
+
+- **Hills.** Every lattice node (street corner) gets a height from smooth
+  noise, up to **Relief** metres from the lowest to the highest. The hills
+  fade to level over the outermost two blocks, so the wasteland and the
+  highways leaving the city stay level with the map's edge.
+- **Grades.** The node heights are then graded until no street is steeper
+  than its tier allows: highways 4%, arterials 5%, collectors 6%, local
+  streets 8%. Open ground without a street is held to 12%. A site's block
+  is level, with all its corners within 0.25 m.
+- **One surface.** Between the nodes the road-level surface is a smoothstep
+  blend of each block's four corners. Along a street that is the street's own
+  profile, flat at both junctions, and steepest mid-block at 1.5 times the
+  straight grade (the limits above already allow for it). Carriageways,
+  footways, curbs, lane paint and the ground all ride on it.
+- **Level pads.**
+  - Every building and site stands on a level pad at the height of the road
+    in front of its middle, so its front door is at street level.
+  - Downhill, the foundation reaches the ground as a plinth.
+  - Uphill, the ground is cut back: it stays 0.1 m under the pad and climbs
+    from it no steeper than 0.6.
+  - A building's paved approach slopes from the footway to its pad.
+- **Retaining curbs.** On terrain the curbs reach 2.5 m down. Where a lot
+  lies below its street, the curb shows as a concrete wall holding up the
+  footway.
+- **How high.** The map's level edge and the highway's 4% through the centre
+  hold small maps lower than the setting. At the default 30 m, typical hills
+  are about 12 m on a radius-6 map, 18 m at radius 8 and 24 m at radius 12.
+
+The plan records every node's height, and each lot, site and stop's
+`level`. The metadata's positions carry the heights, and the exporter can
+write the graded ground as a heightmap (see [Unity export](#unity-export)).
 
 ## Districts
 
@@ -401,7 +438,7 @@ the same way.
 
 | Field | Contents |
 | --- | --- |
-| `city` | Preset, shape, seed, origin, extent, block size, wasteland, curb height, sidewalk width, whether small props were modelled, interiors listed and water modelled |
+| `city` | Preset, shape, terrain and relief, seed, origin, extent, block size, wasteland, curb height, sidewalk width, whether small props were modelled, interiors listed and water modelled |
 | `districts` | District seeds: id, role, style, position |
 | `roads` | Every route: tier, width, lattice nodes, centreline points at carriageway level (footways run along both sides) |
 | `junctions` | Lattice nodes with roads: position, radius (widest half-width plus footway, or the turning circle plus footway), number of roads, `cul_de_sac` |
@@ -423,13 +460,31 @@ and `addon_version`.
 
 Use **File → Export → Generated City for Unity (.fbx)** and choose the root city collection. This exports only its mesh objects, triangulates them, preserves UV/material assignments, and uses metre scale with Y-up axis conversion. It restores selection and active object. Hidden/excluded city objects and non-unit scene scales are rejected instead of silently omitted/rescaled. Editable source objects are not joined or destructively triangulated.
 
+**Heightmap.** With **Write Heightmap** on (the default), the exporter
+also writes `<name>.heightmap.raw` and `<name>.heightmap.json`:
+
+- **What it holds:** the graded ground, with every building and site pad at
+  its top and the streets at road level. It covers the city ground (the map
+  plus 20 m) at 513, 1025 (the default) or 2049 samples a side.
+- **Format:** the RAW is 16-bit little-endian, row by row from row 0.
+- **Layout:** as in the metadata. In Unity space the columns run along +X
+  and the rows along +Z.
+- **The JSON gives:**
+  - the origin of sample (0, 0) at the lowest height;
+  - the spacing, size, and lowest and highest heights;
+  - for Unity, the Terrain's position and size, ready for **Import Raw**
+    (Windows byte order, no flip).
+- **When it is written:** the heightmap is computed from the city's plan,
+  regenerated from its stored settings. A city made by another version of
+  the add-on gets a warning instead.
+
 Output stays as separate meshes for culling and future chunk/LOD work. No texture baking, Unity materials, colliders, NavMesh or static flags are generated; the metadata's markers say where game assets go. `City_LanePaint` is tagged `decoration_no_collision`; exclude it from collision generation. Route guide curves are omitted from FBX.
 
 For scale: a radius-8 city with every building detailed has about 490 buildings and 1,070 mesh objects; its street mesh is about 345k polygons. A radius-14 metro is about 1.85M polygons in 1,700 objects, with ground spanning about 25.6 km.
 
 ## Plan data
 
-A JSON text datablock (`<collection>_plan.json`) stores the versioned plan. Coordinates are relative to the collection's stored `origin`; road nodes multiply by `block_size`, while lot positions/dimensions and path points are metres. Schema version 11 adds `shape` and `irregularity` to the settings. Version 10 added `bulb` to each lot: the cul-de-sac node a house round a turning circle faces (empty for the rest). Those houses are turned to face the circle, so a lot's `rotation` is no longer always a quarter turn. Version 9 added `preset` to the settings (`CITY` or `SMALL_TOWN`). Version 8 added `culdesacs` (turning-circle node and radius). Version 7 added `party_walls` and `group` to each lot (downtown towers built against neighbours). Version 6 added `outer_roads`. Version 5 added `pois` (kind, centre, width along the frontage, depth, rotation, frontage edge, blocks, seed, condition, damage, approach) and `shelters` (position, rotation, variant, road edge); a site's layout is chosen by `sites.compose` from its seed. Version 4 added `kind`, `condition`, `interiors` and `damage` to each lot alongside the version-3 `paths`: one entry per continuous same-tier route with its lattice `nodes`, flattened metre-space `points` and `width`. Locations and lots carry their district `style`; the per-style profile table is code (`STYLE_PROFILE`), not part of the file. No legacy-plan importer is included.
+A JSON text datablock (`<collection>_plan.json`) stores the versioned plan. Coordinates are relative to the collection's stored `origin`; road nodes multiply by `block_size`, while lot positions/dimensions and path points are metres. Schema version 12 adds `terrain` and `relief` to the settings, `heights` (each lattice node's graded height, where it is not zero) to the plan, and `level` (pad or road height) to every lot, site and stop. Version 11 added `shape` and `irregularity` to the settings. Version 10 added `bulb` to each lot: the cul-de-sac node a house round a turning circle faces (empty for the rest). Those houses are turned to face the circle, so a lot's `rotation` is no longer always a quarter turn. Version 9 added `preset` to the settings (`CITY` or `SMALL_TOWN`). Version 8 added `culdesacs` (turning-circle node and radius). Version 7 added `party_walls` and `group` to each lot (downtown towers built against neighbours). Version 6 added `outer_roads`. Version 5 added `pois` (kind, centre, width along the frontage, depth, rotation, frontage edge, blocks, seed, condition, damage, approach) and `shelters` (position, rotation, variant, road edge); a site's layout is chosen by `sites.compose` from its seed. Version 4 added `kind`, `condition`, `interiors` and `damage` to each lot alongside the version-3 `paths`: one entry per continuous same-tier route with its lattice `nodes`, flattened metre-space `points` and `width`. Locations and lots carry their district `style`; the per-style profile table is code (`STYLE_PROFILE`), not part of the file. No legacy-plan importer is included.
 
 ## Code and verification
 

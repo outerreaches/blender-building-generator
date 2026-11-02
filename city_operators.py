@@ -9,9 +9,10 @@ from .city_plan import (CONDITIONS, PRESET_SETTINGS, VERSION, CitySettings, gene
 from .dims import GROUND_SLAB
 from .metadata import SPACES as METADATA_SPACES, CityMetadata
 from .spec import BuildingSpec
-from .sites import KINDS as SITE_KINDS, VARIANTS as SITE_VARIANTS, compose as compose_site
-from .streets import (build_ground_mesh, build_outer_road_mesh, build_street_mesh, junctions,
-                      outer_road_dashes)
+from .sites import (KINDS as SITE_KINDS, PAD_THICKNESS, VARIANTS as SITE_VARIANTS,
+                    compose as compose_site)
+from .streets import (Grading, build_ground_mesh, build_outer_road_mesh, build_street_mesh,
+                      footprint, junctions, outer_road_dashes, pavement_height, site_footprint)
 from .styles import STYLE_ITEMS, STYLE_COLORS, building_recipe
 from .city_export import store_city_metadata
 from .building_assets import (addon_version, create_rubble, create_shell, create_shelter,
@@ -48,6 +49,15 @@ def box(name, width, depth, height, collection, mat):
     return mesh_object(name, vertices, faces, collection, mat)
 
 
+def box_between(name, low, high, collection, mat):
+    """A box from corner ``low`` (x, y, z) to corner ``high``."""
+    (x0, y0, z0), (x1, y1, z1) = low, high
+    vertices = [(x, y, z) for z in (z0, z1) for y in (y0, y1) for x in (x0, x1)]
+    faces = [(0, 2, 3, 1), (4, 5, 7, 6), (0, 1, 5, 4),
+             (1, 3, 7, 5), (3, 2, 6, 7), (2, 0, 4, 6)]
+    return mesh_object(name, vertices, faces, collection, mat)
+
+
 def build_roads(plan, collection):
     """City streets, plus the highways running on out into the wasteland."""
     vertices, faces, indices = build_street_mesh(plan)
@@ -76,41 +86,60 @@ def build_roads(plan, collection):
 BULB_PATH = 3.0   # Width of the path from a house round a turning circle to its footway.
 
 
-def build_frontage(lot, plan, collection, sunken=None):
+def build_frontage(lot, plan, collection, sunken=None, grading=None):
     """Level foundation and a clear concrete approach from sidewalk to entrance.
 
     ``sunken`` (x0, y0, x1, y1, centred on the lot) is the building's ground
     storey: the foundation drops there to the underside of its ground slab,
-    so the two never share the floor plane.
+    so the two never share the floor plane. On terrain (``grading``) the
+    foundation is the lot's level pad: a plinth down to the lowest graded
+    ground under it, and an approach sloping from the footway to the pad.
     """
-    h = plan.settings.curb_height
+    h = plan.settings.curb_height + lot.level
     vertices, faces = [], []
+    floor = -.2
+    if grading is not None:
+        floor = grading.lowest(footprint_with_approach(lot, plan)) - .2
+
     def slab(x0, y0, x1, y1, top=h):
         offset = len(vertices)
-        vertices.extend([(x, y, z) for z in (-.2, top)
+        vertices.extend([(x, y, z) for z in (floor, top)
                          for x, y in ((x0, y0), (x1, y0), (x1, y1), (x0, y1))])
         faces.extend(tuple(offset + i for i in f) for f in
                      ((0, 3, 2, 1), (4, 5, 6, 7), (0, 1, 5, 4),
                       (1, 2, 6, 5), (2, 3, 7, 6), (3, 0, 4, 7)))
+
+    def ramp(x0, y0, x1, y1, front):
+        """A slab whose top runs from the footway (front corners, y0) to the
+        pad (back corners, y1); the top is two triangles."""
+        offset = len(vertices)
+        vertices.extend([(x0, y0, floor), (x1, y0, floor), (x1, y1, floor), (x0, y1, floor),
+                         (x0, y0, front[0]), (x1, y0, front[1]), (x1, y1, h), (x0, y1, h)])
+        faces.extend(tuple(offset + i for i in f) for f in
+                     ((0, 3, 2, 1), (4, 5, 6), (4, 6, 7), (0, 1, 5, 4),
+                      (1, 2, 6, 5), (2, 3, 7, 6), (3, 0, 4, 7)))
+
+    def footway(x, y):
+        """Footway top at a lot-local point (relative to the city origin)."""
+        c, s = math.cos(lot.rotation), math.sin(lot.rotation)
+        wx, wy = lot.center[0] + x * c - y * s, lot.center[1] + x * s + y * c
+        return grading.surface(wx, wy) + pavement_height(plan, wx, wy)
     # Local building coordinates: door faces -Y.
     half_w, half_d = lot.width / 2, lot.depth / 2
     size = plan.settings.block_size
-    path = None
-    if lot.bulb:
-        # A house round a turning circle: a path to the circle's footway (a
-        # full-width approach would square off against its curve).
-        radius = next(b['radius'] for b in plan.culdesacs if tuple(b['node']) == tuple(lot.bulb))
-        centre = (lot.bulb[0] * size, lot.bulb[1] * size)
-        approach_end = math.dist(centre, lot.center) - radius - plan.settings.sidewalk_width
-        path = BULB_PATH / 2
-    else:
-        road = next(r for r in plan.roads if (r.a, r.b) == lot.frontage)
-        mid = ((road.a[0] + road.b[0]) * size / 2, (road.a[1] + road.b[1]) * size / 2)
-        facing = (math.sin(lot.rotation), -math.cos(lot.rotation))
-        distance = sum((mid[i] - lot.center[i]) * facing[i] for i in range(2))
-        approach_end = distance - road.width / 2 - plan.settings.sidewalk_width
+    # A house round a turning circle gets a path to the circle's footway (a
+    # full-width approach would square off against its curve).
+    path = BULB_PATH / 2 if lot.bulb else None
+    approach_end = lot_approach(lot, plan)
     front = half_d if path else approach_end
-    if path:
+    if grading is not None:
+        # The approach slopes from the footway's height to the pad's.
+        reach = path if path else half_w
+        if approach_end > half_d + .05:
+            ramp(-reach, -approach_end, reach, -half_d,
+                 (footway(-reach, -approach_end), footway(reach, -approach_end)))
+        front = half_d
+    elif path:
         slab(-path, -approach_end, path, -half_d)
     if sunken:
         xs = sorted({-half_w, half_w, sunken[0], sunken[2]})
@@ -131,6 +160,31 @@ def build_frontage(lot, plan, collection, sunken=None):
     return obj
 
 
+def lot_approach(lot, plan):
+    """Distance from a lot's centre, along its facing, to the back of the
+    footway it fronts (a turning circle's for a house round one)."""
+    size = plan.settings.block_size
+    if lot.bulb:
+        radius = next(b['radius'] for b in plan.culdesacs if tuple(b['node']) == tuple(lot.bulb))
+        centre = (lot.bulb[0] * size, lot.bulb[1] * size)
+        return math.dist(centre, lot.center) - radius - plan.settings.sidewalk_width
+    road = next(r for r in plan.roads if (r.a, r.b) == lot.frontage)
+    mid = ((road.a[0] + road.b[0]) * size / 2, (road.a[1] + road.b[1]) * size / 2)
+    facing = (math.sin(lot.rotation), -math.cos(lot.rotation))
+    distance = sum((mid[i] - lot.center[i]) * facing[i] for i in range(2))
+    return distance - road.width / 2 - plan.settings.sidewalk_width
+
+
+def footprint_with_approach(lot, plan):
+    """World corners of a lot's foundation: the building and its approach."""
+    end = lot_approach(lot, plan)
+    depth = lot.depth / 2 + end
+    c, s = math.cos(lot.rotation), math.sin(lot.rotation)
+    shift = (lot.depth / 2 - end) / 2          # Local y of the combined centre.
+    centre = (lot.center[0] - shift * s, lot.center[1] + shift * c)
+    return footprint(centre, lot.width, depth, lot.rotation)
+
+
 def polyline_sample(points, distance):
     """Point and unit tangent at an arc length along a polyline."""
     for a, b in zip(points, points[1:]):
@@ -148,6 +202,7 @@ def polyline_sample(points, distance):
 def build_markings(plan, collection):
     vertices, faces = [], []
     size = plan.settings.block_size
+    surface = plan.surface()
     halves = junctions(plan)
     for path in plan.paths:
         if path['tier'] == 'LOCAL':
@@ -173,8 +228,9 @@ def build_markings(plan, collection):
             for offset in offsets:
                 for point, normal, side in (((x0, y0), normal0, -1), ((x1, y1), normal1, -1),
                                             ((x1, y1), normal1, 1), ((x0, y0), normal0, 1)):
-                    vertices.append((point[0] + normal[0] * (offset + side * .06),
-                                     point[1] + normal[1] * (offset + side * .06), .004))
+                    x = point[0] + normal[0] * (offset + side * .06)
+                    y = point[1] + normal[1] * (offset + side * .06)
+                    vertices.append((x, y, surface(x, y) + .004 if plan.heights else .004))
                 faces.append(tuple(range(base, base + 4)))
                 base += 4
             start += 7
@@ -258,8 +314,9 @@ def build_route_guides(plan, collection, origin):
         curve.bevel_resolution = 0
         spline = curve.splines.new('POLY')
         spline.points.add(len(points) - 1)
+        surface = plan.surface()
         for point, (x, y) in zip(spline.points, points):
-            point.co = (x, y, .25 + index * .25, 1)
+            point.co = (x, y, surface(x, y) + .25 + index * .25, 1)
         obj = bpy.data.objects.new(route['id'], curve)
         collection.objects.link(obj)
         obj.location = origin
@@ -276,8 +333,10 @@ def _object_facts(obj):
             obj.get('enterable_floors'))
 
 
-def build_sites(plan, root, origin, detail, props=True, meta=None, water=False):
-    """Points of interest (one object tree per site) and transit stops."""
+def build_sites(plan, root, origin, detail, props=True, meta=None, water=False, grading=None):
+    """Points of interest (one object tree per site) and transit stops. On
+    terrain (``grading``) every site's pad stands on a plinth down to the
+    lowest graded ground under it."""
     collection = bpy.data.collections.new('Sites')
     root.children.link(collection)
     h = plan.settings.curb_height
@@ -289,8 +348,17 @@ def build_sites(plan, root, origin, detail, props=True, meta=None, water=False):
             obj = create_site(poi.id, site, collection, interiors)
         else:
             obj = create_site_preview(poi.id, site, collection)
-        obj.location = (origin.x + poi.center[0], origin.y + poi.center[1], origin.z + h)
+        obj.location = (origin.x + poi.center[0], origin.y + poi.center[1], origin.z + h + poi.level)
         obj.rotation_euler.z = poi.rotation
+        if grading is not None:
+            top = h + poi.level
+            bottom = grading.lowest(site_footprint(poi)) - .2 - top
+            x0, x1 = -poi.width / 2, poi.width / 2
+            y0, y1 = -poi.depth / 2 - poi.approach, poi.depth / 2
+            plinth = box_between(f'{poi.id}_Plinth', (x0, y0, bottom), (x1, y1, -PAD_THICKNESS),
+                                 collection, material('City_Pavement', (.42, .41, .38, 1)))
+            plinth.parent = obj
+            plinth['surface_role'] = 'site_plinth'
         obj['condition'], obj['district'], obj['city_style'] = poi.condition, poi.district, poi.style
         obj['asset_seed'] = poi.seed
         if meta is not None:
@@ -303,7 +371,8 @@ def build_sites(plan, root, origin, detail, props=True, meta=None, water=False):
     meshes = {}
     for shelter in plan.shelters:
         obj = create_shelter(shelter.id, shelter.variant, collection, meshes)
-        obj.location = (origin.x + shelter.position[0], origin.y + shelter.position[1], origin.z + h)
+        obj.location = (origin.x + shelter.position[0], origin.y + shelter.position[1],
+                        origin.z + h + shelter.level)
         obj.rotation_euler.z = shelter.rotation
         if meta is not None:
             meta.add_shelter(shelter, obj.name)
@@ -349,6 +418,14 @@ class MESH_OT_generate_city(bpy.types.Operator):
                                 'fingers along the roads; the city fills less of the map')])
     irregularity: FloatProperty(name='Irregularity', default=.6, min=0, max=1,
                                 description='How far an organic edge wanders (0: round)')
+    terrain: EnumProperty(name='Terrain', default='FLAT',
+                          items=[('FLAT', 'Flat', 'Everything on one level'),
+                                 ('ROLLING', 'Rolling Hills', 'Gentle seeded hills; streets are '
+                                  'graded to their limits and buildings stand on level pads')])
+    relief: FloatProperty(name='Relief (m)', default=30.0, min=0, max=40,
+                          description='Rolling hills: metres from the lowest ground to the '
+                                      'highest (the map\'s edge stays level, which holds small '
+                                      'maps lower)')
     block_size: FloatProperty(name='Block Size (m)', default=56, min=48, max=120)
     primary_count: IntProperty(name='Primary Locations', default=6, min=1, max=16)
     secondary_count: IntProperty(name='Secondary Locations', default=12, min=0, max=100)
@@ -411,6 +488,7 @@ class MESH_OT_generate_city(bpy.types.Operator):
         layout = self.layout
         for title, names in (
             ('City Growth', ('preset', 'seed', 'radius', 'shape', 'irregularity', 'block_size', 'primary_count', 'secondary_count', 'driving_loop_count')),
+            ('Terrain', ('terrain', 'relief')),
             ('Density and Access', ('curve_radius', 'core_radius', 'core_density', 'outskirts_density', 'road_density', 'setback', 'sidewalk_width', 'curb_height', 'wasteland', 'highway_reach')),
             ('Buildings', ('style', 'damage', 'max_buildings', 'downtown_superblocks',
                            'points_of_interest', 'small_props', 'water', 'detail')),
@@ -421,12 +499,14 @@ class MESH_OT_generate_city(bpy.types.Operator):
             for name in names:
                 if name == 'irregularity' and self.shape != 'ORGANIC':
                     continue
+                if name == 'relief' and self.terrain == 'FLAT':
+                    continue
                 group.prop(self, name)
         if self.detail == 'SHELLS':
             layout.prop(self, 'interior_ratio')
         layout.prop(self, 'lane_markings')
         layout.prop(self, 'route_guides')
-        layout.label(text='Flat terrain; at-grade road junctions.', icon='INFO')
+        layout.label(text='Roads meet at grade: no bridges or tunnels yet.', icon='INFO')
         layout.label(text='Preview first; large shell batches can take time.')
 
     def execute(self, context):
@@ -440,6 +520,7 @@ class MESH_OT_generate_city(bpy.types.Operator):
             root['city_seed'] = self.seed
             root['city_preset'] = self.preset
             root['city_shape'] = self.shape
+            root['city_terrain'] = self.terrain
             root['generator_version'] = VERSION
             root['addon_version'] = addon_version()
             root['output_detail'] = self.detail
@@ -473,6 +554,7 @@ class MESH_OT_generate_city(bpy.types.Operator):
                                  root, material('City_Ground', (.23, .21, .17, 1)))
             ground['surface_role'] = 'terrain'
             ground.location = origin
+            grading = Grading(plan) if plan.heights else None
             context.window_manager.progress_begin(0, max(1, len(plan.lots)))
             meta = CityMetadata(plan, tuple(origin), self.metadata_space, self.small_props,
                                 addon_version(), root.name, self.interior_metadata, self.water)
@@ -495,7 +577,8 @@ class MESH_OT_generate_city(bpy.types.Operator):
                               col, material(f'City_{lot.style}', STYLE_COLORS[lot.style]))
                 obj['condition'] = lot.condition
                 obj['interiors'] = lot.interiors
-                obj.location = (origin.x + lot.center[0], origin.y + lot.center[1], origin.z + self.curb_height)
+                obj.location = (origin.x + lot.center[0], origin.y + lot.center[1],
+                                origin.z + self.curb_height + lot.level)
                 obj.rotation_euler.z = lot.rotation
                 obj['city_style'], obj['asset_seed'], obj['district'] = lot.style, lot.seed, lot.district
                 if lot.party_walls:
@@ -505,7 +588,7 @@ class MESH_OT_generate_city(bpy.types.Operator):
                     x0, y0, x1, y1 = BuildingSpec(params).levels[0].rect
                     sunken = (x0 - lot.width / 2, y0 - lot.depth / 2,
                               x1 - lot.width / 2, y1 - lot.depth / 2)
-                foundation = build_frontage(lot, plan, col, sunken)
+                foundation = build_frontage(lot, plan, col, sunken, grading)
                 foundation.location = (origin.x + lot.center[0], origin.y + lot.center[1], origin.z)
                 entrances, height, floors = _object_facts(obj)
                 if height is None:
@@ -514,7 +597,8 @@ class MESH_OT_generate_city(bpy.types.Operator):
                 meta.add_lot(lot, obj.name, entrances, height, floors, facts.get('interior'))
                 context.window_manager.progress_update(index + 1)
             if plan.pois or plan.shelters:
-                build_sites(plan, root, origin, self.detail, self.small_props, meta, self.water)
+                build_sites(plan, root, origin, self.detail, self.small_props, meta, self.water,
+                            grading)
             store_city_metadata(root, meta.as_dict())
             root['small_props'] = self.small_props
             root['water'] = self.water

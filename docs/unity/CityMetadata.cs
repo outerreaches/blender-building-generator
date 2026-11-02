@@ -69,6 +69,8 @@ namespace Ares.CityGen
         public bool small_props_modelled;
         public bool interiors_listed;   // False: rooms, lifts and railings left out.
         public bool water_modelled;     // False: basins are dry; fill them from "water" markers.
+        public string terrain;          // FLAT or ROLLING; heights are in every position.
+        public float relief;            // Rolling hills: the setting, metres low to high.
     }
 
     [Serializable]

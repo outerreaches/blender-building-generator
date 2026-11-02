@@ -1,5 +1,35 @@
 # Changelog
 
+## v0.21.0: Rolling hills and a heightmap export
+
+- **Terrain: Rolling Hills** in Generate City puts the city on gentle seeded
+  hills. **Relief** sets the height from the lowest ground to the highest:
+  up to 40 m, default 30.
+  - The hills fade to level at the map's edge, so the wasteland and the
+    highways leaving the city stay level. On small maps that holds them
+    lower: typically about 12 m at radius 6, 18 m at radius 8 and 24 m at
+    radius 12.
+  - **Flat**, the default, is unchanged.
+- **Graded streets.** No street is steeper than its tier allows: highways
+  4%, arterials 5%, collectors 6%, local streets 8%. Between junctions a
+  street eases out flat at both ends. Carriageways, footways, curbs, lane
+  paint and route guides follow the surface. Site blocks are level.
+- **Level pads.**
+  - Every building and site stands on a level pad at the height of the road
+    in front of its middle, so front doors are at street level.
+  - Downhill, the foundation (or a site's plinth) reaches down to the ground.
+  - Uphill, the ground is cut back from the pad.
+  - Paved approaches slope from the footway to the pad.
+  - On terrain the curbs reach 2.5 m down, so a footway above a lower lot is
+    held up by a concrete curb wall.
+- **Heights in the metadata.** Buildings, sites, stops, road points and
+  junctions carry their heights, and `city` records `terrain` and `relief`.
+- **Heightmap export.** The FBX exporter can also write the graded ground as
+  a 16-bit RAW heightmap, at 513, 1025 or 2049 samples a side. A JSON beside
+  it gives the layout and, for Unity, the Terrain's position and size.
+- Plan schema 12: `terrain` and `relief` settings, node `heights`, and
+  `level` on lots, sites and stops.
+
 ## v0.20.0: Cinemas with stadium seating; cul-de-sacs among houses only
 
 - **Stadium seating.** Every cinema auditorium has a stepped floor: flat for

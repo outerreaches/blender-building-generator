@@ -17,6 +17,7 @@
 | v0.18 | Small-town preset: an old-town main street, low buildings, only a town's sites; suburbs built out, houses round cul-de-sacs (v0.18.1) |
 | v0.19 | Organic city shape: an irregular edge with lobes, notches and fingers |
 | v0.20 | Cinemas: palace, twin and multiplex filling their pads, stadium seating with seat markers; cul-de-sacs only among houses; one drive-in per city |
+| v0.21 | Rolling hills: streets graded to their tier's limit, level pads with plinths and cut slopes, retaining curbs, heights in the metadata, a heightmap export |
 
 See [CHANGELOG.md](CHANGELOG.md) for the details.
 
@@ -49,8 +50,7 @@ stay as they are; every feature below is off until its setting is changed.
 
 | Version | Scope |
 | --- | --- |
-| v0.21 | Terrain (Flat, Rolling, Terraced benches with a plateau), roads graded to per-tier limits, level pads with plinths, ground and streets on the terrain, metadata heights, a separate heightmap export for Unity |
-| v0.22 | Cross-sections: roadside ditches outside the dense districts, embankments and cuttings, retaining walls, ramp and stair streets at escarpments, culverts |
+| v0.22 | Terraced terrain (benches and a plateau, with escarpments), and the hills carried on into the wasteland so small maps reach their relief. Cross-sections: roadside ditches outside the dense districts, embankments and cuttings, retaining walls, ramp and stair streets at escarpments, culverts |
 | v0.23 | Levels: elevated, at-grade and below-grade structures; a raised highway with ramps; road tunnels at the map edge; rail with level crossings and a freight siding; subway routes with station entrances; the sewer network as data, with manholes |
 | v0.24 | Megacity preset: megablocks, stacked highway decks, skybridges and collapsed spans, built from instanced modules with a low-poly skyline ring |
 

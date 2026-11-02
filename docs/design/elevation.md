@@ -2,6 +2,16 @@
 
 Status: v0.21 (Rolling hills) and v0.22 (Terraced) done; the rest planned.
 
+**As built in v0.22.4:** a terraced city's lattice is extended by 20
+blocks of wild land, graded with it (noise hills scaled as the city's,
+fading to level over the last four blocks; the highway's rows pinned level
+beyond the map). Each terrace's hill is a grading target on the open ground
+beyond its natural sides (its full rise at the top's edge, falling to
+nothing over six blocks); the edges down a slope are free of limits, since
+the terrace's rise is not in the base heights. The wild land is meshed as
+facets on the same snapped lines; a few centimetres separate it from the
+city ground where the fine grid crosses facet creases.
+
 **As built in v0.22.3:** every corner of a terrace's blocks is on top, so
 the streets round its edge run along the top with the wall beyond them;
 terraces stand in downtown and residential districts at the city's edge,

@@ -860,15 +860,44 @@ def _terraced_ground(plan):
         wall(a, b, z_of(a, level, part), z_of(a, other, other_part),
              z_of(b, level, part), z_of(b, other, other_part), True)
 
+    # The wild land round the city, out to where it levels off: its own
+    # facets (each block two triangles), outside the city ground.
+    wild = grading.wild
+    edge_line = grading.line(radius + wild) if wild else extent
+    if wild and settings.wasteland > 0:
+        for i in range(-radius - wild, radius + wild):
+            for j in range(-radius - wild, radius + wild):
+                x0, x1 = grading.line(i), grading.line(i + 1)
+                y0, y1 = grading.line(j), grading.line(j + 1)
+                if max(abs(x0), abs(x1)) <= extent and max(abs(y0), abs(y1)) <= extent:
+                    continue
+                for triangle in ([(x0, y0, FAR), (x1, y0, FAR), (x1, y1, FAR)],
+                                 [(x0, y0, FAR), (x1, y1, FAR), (x0, y1, FAR)]):
+                    # Outside the city ground: four pieces round its square.
+                    for piece in (_halfplane(triangle, 0, -extent, True),
+                                  _halfplane(triangle, 0, extent, False),
+                                  _halfplane(_halfplane(_halfplane(triangle, 0, -extent, False),
+                                                        0, extent, True), 1, -extent, True),
+                                  _halfplane(_halfplane(_halfplane(triangle, 0, -extent, False),
+                                                        0, extent, True), 1, extent, False)):
+                        piece = _clean(piece) if piece else piece
+                        if piece and len(piece) >= 3:
+                            face_ids = list(dict.fromkeys(
+                                vertex(x, y, 0, 'wild', FAR,
+                                       grading.natural(x, y, 0)) for x, y, _ in piece))
+                            if len(face_ids) >= 3:
+                                faces.append(tuple(face_ids))
     if settings.wasteland > 0:
         holes = []
         for outer in outer_roads(plan):
-            a0 = extent if outer.sign > 0 else -extent
+            a0 = edge_line if outer.sign > 0 else -edge_line
             holes.append(outer.rect(a0))
-        for rect in ((-far, -far, -extent, far), (extent, -far, far, far),
-                     (-extent, extent, extent, far), (-extent, -far, extent, -extent)):
+        far = max(far, edge_line + 1.0)
+        for rect in ((-far, -far, -edge_line, far), (edge_line, -far, far, far),
+                     (-edge_line, edge_line, edge_line, far),
+                     (-edge_line, -far, edge_line, -edge_line)):
             for x0, y0, x1, y1 in _subtract(rect, holes):
-                faces.append(tuple(vertex(x, y, 0, 'ground', FAR, GROUND_Z_TERRAIN)
+                faces.append(tuple(vertex(x, y, 0, 'wild', FAR, GROUND_Z_TERRAIN)
                                    for x, y in ((x0, y0), (x1, y0), (x1, y1), (x0, y1))))
     result = ((vertices, faces), (walls, wall_faces))
     plan.__dict__['_terraced_ground'] = result
@@ -1032,8 +1061,10 @@ class Grading:
         self.streets = Field(plan)
         self.field = self.streets
         self.stairs, self.spans = [], {}
+        self.wild = 0
         if self.terraces:
-            self.base = _Facets(settings.radius,
+            self.wild = self.terraces.get('wild', 0)
+            self.base = _Facets(settings.radius + self.wild,
                                 {(x, y): z for x, y, z in self.terraces.get('ground', ())},
                                 self.line, self._index)
             # Levels: 0 off the terraces; a terrace's top, and each of its

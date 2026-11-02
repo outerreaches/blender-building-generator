@@ -9,7 +9,7 @@ import json
 import math
 import random
 
-VERSION = 16
+VERSION = 17
 ROAD_WIDTHS = {"HIGHWAY": 20.0, "ARTERIAL": 12.0, "COLLECTOR": 8.0, "LOCAL": 6.0}
 ROAD_RANK = {name: i for i, name in enumerate(ROAD_WIDTHS)}
 # Corner radius at a route bend, before the curve_radius multiplier and clamping.
@@ -395,6 +395,14 @@ OPEN_GRADE = .12         # Lattice edges without a street.
 SITE_DROP = .25          # Most a site block's corners may differ (m).
 TERRAIN_WAVE = 7.0       # Blocks per noise cell of the hills (first octave).
 TERRAIN_EDGE = 2.0       # Blocks over which the hills fade to the level edge.
+# Terraced cities stand in hilly wild land: WILD_CELLS blocks of it round the
+# map, fading to level over its last WILD_FADE blocks (then the flat far
+# wasteland). A terrace's natural sides are the top of a hill that falls
+# away across it over HILL_REACH blocks; a highway leaves along a level
+# valley floor.
+WILD_CELLS = 20
+WILD_FADE = 4.0
+HILL_REACH = 6.0
 SMOOTHSTEP_PEAK = 1.5    # Steepest slope of a smoothstep over its mean slope.
 
 
@@ -422,45 +430,62 @@ class Surface:
                 (h.get((i, j + 1), 0.0) * (1 - su) + h.get((i + 1, j + 1), 0.0) * su) * sv)
 
 
-def _terrain_heights(settings):
-    """Seeded hills on the lattice nodes, zero along the map's edge."""
+def _terrain_heights(settings, extra=0):
+    """Seeded hills on the lattice nodes, zero along the map's edge; with
+    ``extra`` blocks of wild land round the map (scaled as the city's hills),
+    zero along that land's edge instead."""
     radius = settings.radius
-    nodes = [(x, y) for x in range(-radius, radius + 1) for y in range(-radius, radius + 1)]
+    reach = radius + extra
+    nodes = [(x, y) for x in range(-reach, reach + 1) for y in range(-reach, reach + 1)]
     seed = settings.seed
 
     def hills(x, y):
         return (_noise(seed, x / TERRAIN_WAVE, y / TERRAIN_WAVE, "terrain") +
                 .35 * _noise(seed, x / (TERRAIN_WAVE / 2.3), y / (TERRAIN_WAVE / 2.3), "terrain2"))
     raw = {node: hills(*node) for node in nodes}
-    low, high = min(raw.values()), max(raw.values())
+    city = [raw[n] for n in nodes if max(map(abs, n)) <= radius]
+    low, high = min(city), max(city)
     spread = max(high - low, 1e-9)
     heights = {}
+    fade_over = TERRAIN_EDGE if not extra else WILD_FADE
     for node in nodes:
-        edge_distance = min(radius - abs(node[0]), radius - abs(node[1])) / TERRAIN_EDGE
+        edge_distance = min(reach - abs(node[0]), reach - abs(node[1])) / fade_over
         t = max(0.0, min(1.0, edge_distance))
         fade = t * t * (3 - 2 * t)
         heights[node] = ((raw[node] - low) / spread - .5) * settings.relief * fade
     return heights
 
 
-def _grade(settings, roads, pois, flat=(), benches=()):
+def _grade(settings, roads, pois, flat=(), benches=(), extra=0, targets=None, pins=(),
+           free=()):
     """Node heights graded so every lattice edge stays under its limit: a
     street's tier, open ground, or a site block kept level. The map's edge
-    stays at zero."""
+    stays at zero; with ``extra`` blocks of wild land round it, that land's
+    edge does instead, and so do the ``pins`` (``targets`` lift the hills
+    before grading; ``free`` edges have no limit: down a terrace's slope,
+    where the terrace's rise is not in these heights)."""
     radius, size = settings.radius, settings.block_size
-    heights = _terrain_heights(settings)
+    reach = radius + extra
+    heights = _terrain_heights(settings, extra)
+    for node, z in (targets or {}).items():
+        # A target lifts the hills to it (never into a valley's floor).
+        if node in heights:
+            heights[node] = max(heights[node], z)
     limits = {}
-    for x in range(-radius, radius + 1):
-        for y in range(-radius, radius + 1):
+    for x in range(-reach, reach + 1):
+        for y in range(-reach, reach + 1):
             for other in ((x + 1, y), (x, y + 1)):
-                if max(map(abs, other)) <= radius:
+                if max(map(abs, other)) <= reach:
                     key = edge((x, y), other)
                     grade = GRADE_LIMITS.get(roads.get(key), OPEN_GRADE)
                     limits[key] = grade * size / SMOOTHSTEP_PEAK
+    for key in set(free) - set(flat):
+        limits.pop(key, None)
     for key in flat:
         limits[key] = min(limits[key], RAMP_FLAT)
     for key in benches:
-        limits[key] = min(limits[key], TERRACE_BENCH)
+        if key in limits:
+            limits[key] = min(limits[key], TERRACE_BENCH)
     for poi in pois:
         # Every pair of a site's corners, so the whole pad is level.
         corners = sorted({(bx + dx, by + dy) for bx, by in poi.blocks
@@ -468,7 +493,7 @@ def _grade(settings, roads, pois, flat=(), benches=()):
         for index, a in enumerate(corners):
             for b in corners[index + 1:]:
                 limits[edge(a, b)] = min(limits.get(edge(a, b), math.inf), SITE_DROP)
-    pinned = {node for node in heights if max(map(abs, node)) == radius}
+    pinned = {node for node in heights if max(map(abs, node)) == reach} | (set(pins) & set(heights))
     for node in pinned:
         heights[node] = 0.0
     order = sorted(limits.items())
@@ -1190,14 +1215,53 @@ def _terrace_benches(terraces):
     graded nearly level, so it stands its full height all round."""
     keys = set()
     for region in terraces.get('regions', ()):
-        corners = {n for c in terrace_footprint(region) for n in _cell_corners(c)}
-        keys |= {key for n in corners for key in _node_edges(n)
-                 if key[0] in corners and key[1] in corners}
-        # And out to the junctions round its top, so a stair or a wall there
-        # drops the terrace's full height.
-        keys |= {key for c in region['cells'] for n in _cell_corners(tuple(c))
-                 for key in _node_edges(n)}
+        tops = {n for c in region['cells'] for n in _cell_corners(tuple(c))}
+        slope = {n for c in slope_cells(region) for n in _cell_corners(c)} - tops
+        # Out to the junctions round its top too, so a stair or a wall there
+        # drops the terrace's full height; but not down its natural sides,
+        # which the hill beyond holds up.
+        keys |= {key for n in tops for key in _node_edges(n)
+                 if not set(key) & slope}
     return sorted(keys)
+
+
+def _wild_land(settings, terraces):
+    """(targets, pins, free) for grading a terraced city's wild land: each
+    terrace's hill (its full rise at its top's edge, falling to nothing over
+    HILL_REACH blocks) on the open ground beyond the city and its slopes'
+    foot; the highway's level valley floor out of the map; and the edges
+    down a terrace's slopes, left free of limits."""
+    radius, size = settings.radius, settings.block_size
+    reach = radius + WILD_CELLS
+    targets = {}
+    for region in terraces.get('regions', ()):
+        tops = [tuple(c) for c in region['cells']]
+        corners = {n for c in tops for n in _cell_corners(c)}
+        foot = {n for c in slope_cells(region) for n in _cell_corners(c)} - corners
+        for x in range(-reach, reach + 1):
+            for y in range(-reach, reach + 1):
+                node = (x, y)
+                if node in corners:
+                    continue
+                outside = (max(abs(x), abs(y)) > radius or
+                           not in_city(settings, x * size, y * size))
+                if not outside and node not in foot:
+                    continue
+                distance = min(math.hypot(max(cx - x, 0, x - cx - 1), max(cy - y, 0, y - cy - 1))
+                               for cx, cy in tops)
+                rise = region['step'] * max(0.0, 1 - distance / HILL_REACH)
+                if rise > targets.get(node, 0.0):
+                    targets[node] = rise
+    pins = {(x, y) for x in range(-reach, reach + 1) for y in (-1, 0, 1) if abs(x) >= radius}
+    free = set()
+    for region in terraces.get('regions', ()):
+        tops = {n for c in region['cells'] for n in _cell_corners(tuple(c))}
+        for cell in slope_cells(region):
+            for node in _cell_corners(cell):
+                for key in _node_edges(node):
+                    if (key[0] in tops) != (key[1] in tops):
+                        free.add(key)
+    return targets, pins, free
 
 
 def _terrace_raises(terraces):
@@ -1395,8 +1459,8 @@ class Facets:
     rising diagonal, through its corners' heights (zero off the lattice).
     ``line`` maps a lattice line to the coordinate it stands at."""
 
-    def __init__(self, settings, heights, line=None):
-        self.radius = settings.radius
+    def __init__(self, settings, heights, line=None, extra=0):
+        self.radius = settings.radius + extra
         self.size = settings.block_size
         self.heights = heights
         self.line = line or (lambda k: k * self.size)
@@ -1431,7 +1495,8 @@ class TerraceGround:
     its slopes)."""
 
     def __init__(self, settings, terraces):
-        self.base = Facets(settings, {(x, y): z for x, y, z in terraces.get('ground', ())})
+        self.base = Facets(settings, {(x, y): z for x, y, z in terraces.get('ground', ())},
+                           extra=terraces.get('wild', 0))
         self.size = settings.block_size
         self.rise = terrace_cells(terraces)
         self.slopes = {}
@@ -1959,7 +2024,11 @@ def generate_city(settings=CitySettings()):
     if settings.terrain != 'FLAT':
         ramps = [edge(tuple(a), tuple(b)) for ramp in terraces.get('ramps', ())
                  for a, b in zip(ramp['nodes'], ramp['nodes'][1:])]
-        heights = _grade(settings, roads, pois, ramps, _terrace_benches(terraces))
+        wild = {}
+        if terraces:
+            targets, pins, free = _wild_land(settings, terraces)
+            wild = dict(extra=WILD_CELLS, targets=targets, pins=pins, free=free)
+        heights = _grade(settings, roads, pois, ramps, _terrace_benches(terraces), **wild)
         surface = Surface(settings, heights)
 
         def front_point(item):
@@ -1971,6 +2040,7 @@ def generate_city(settings=CitySettings()):
         def front(item):
             return surface(*front_point(item))
         if terraces:
+            terraces['wild'] = WILD_CELLS
             terraces['ground'] = [[x, y, z] for (x, y), z in sorted(heights.items())]
             raised = _terrace_raises(terraces)
             heights = {node: round(heights.get(node, 0.0) + raised.get(node, 0.0), 3)
@@ -1981,7 +2051,8 @@ def generate_city(settings=CitySettings()):
                                 heights.get(nodes[-1], 0.0))
                 for node in nodes[1:-1]:
                     heights[node] = round(line(node[0] * size, node[1] * size), 3)
-            heights = {node: z for node, z in heights.items() if z}
+            heights = {node: z for node, z in heights.items()
+                       if z and max(map(abs, node)) <= settings.radius}
             surface = RoadSurface(settings, heights, roads, terraces)
 
             def front(item):

@@ -1,5 +1,18 @@
 # Changelog
 
+## v0.22.4: Terraced cities in hilly wild land
+
+- **Wild land.** A terraced city now stands in hilly wild land instead of
+  on a flat plain. The hills and valleys carry on for about 1.1 km past the
+  map's edge, as low-poly facets, then level off to the flat far wasteland.
+  Each highway leaves along a level valley floor.
+- **Terraces in their landscape.** A terrace's natural sides are now the
+  top of a hill in the land round the city, falling away beyond it over
+  about six blocks, instead of a slope down to a flat plain. Where the hill
+  wraps round a corner, the terrace's walls fade into it.
+- Flat and Rolling Hills cities are unchanged.
+- Plan schema 17: `terraces.wild` and the wild land's node heights.
+
 ## v0.22.3: Built-up terraces with edge streets, natural sides at the city's edge
 
 - **Edge streets on top.** The streets round a terrace's edge now run

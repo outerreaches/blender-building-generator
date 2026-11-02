@@ -453,7 +453,7 @@ class MESH_OT_generate_city(bpy.types.Operator):
                           description='Hills: metres from the lowest ground to the '
                                       'highest (the map\'s edge stays level, which holds small '
                                       'maps lower)')
-    plateau_height: FloatProperty(name='Plateau Height (m)', default=18.0, min=0, max=30,
+    plateau_height: FloatProperty(name='Plateau Height (m)', default=9.0, min=0, max=30,
                                   description='Terraced: how far the plateau rises above the '
                                               'streets round it (0: no plateau)')
     podiums: IntProperty(name='Podiums', default=1, min=0, max=3,

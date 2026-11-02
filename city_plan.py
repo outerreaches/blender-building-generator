@@ -235,7 +235,7 @@ class CitySettings:
     irregularity: float = .6           # How far an organic edge wanders.
     terrain: str = "FLAT"              # FLAT, ROLLING hills, or TERRACED (see TERRAINS).
     relief: float = 30.0               # Hills: metres from the lowest to the highest.
-    plateau_height: float = 18.0       # Terraced: the plateau's rise (0: none).
+    plateau_height: float = 9.0        # Terraced: the plateau's rise (0: none).
     podiums: int = 1                   # Terraced: low podiums of a few blocks.
 
     def validate(self):
@@ -397,12 +397,21 @@ TERRAIN_WAVE = 7.0       # Blocks per noise cell of the hills (first octave).
 TERRAIN_EDGE = 2.0       # Blocks over which the hills fade to the level edge.
 # Terraced cities stand in hilly wild land: WILD_CELLS blocks of it round the
 # map, fading to level over its last WILD_FADE blocks (then the flat far
-# wasteland). A terrace's natural sides are the top of a hill that falls
-# away across it over HILL_REACH blocks; a highway leaves along a level
-# valley floor.
+# wasteland); a highway leaves along a level valley floor. A terrace is a
+# bench on the lower flank of a hill: beyond its natural sides the land
+# rises on past the terrace's top to a crest, then falls away. HILL_KNOTS:
+# (blocks from the terrace's top, share of its rise), straight between.
 WILD_CELLS = 20
 WILD_FADE = 4.0
-HILL_REACH = 6.0
+HILL_KNOTS = ((0.0, 1.0), (1.0, 1.2), (3.0, 1.6), (8.0, 0.0))
+
+
+def hill_rise(blocks):
+    """Share of a terrace's rise its hill stands at ``blocks`` beyond its top."""
+    for (b0, h0), (b1, h1) in zip(HILL_KNOTS, HILL_KNOTS[1:]):
+        if blocks <= b1:
+            return h0 + (h1 - h0) * (max(blocks, b0) - b0) / (b1 - b0)
+    return 0.0
 SMOOTHSTEP_PEAK = 1.5    # Steepest slope of a smoothstep over its mean slope.
 
 
@@ -1227,10 +1236,10 @@ def _terrace_benches(terraces):
 
 def _wild_land(settings, terraces):
     """(targets, pins, free) for grading a terraced city's wild land: each
-    terrace's hill (its full rise at its top's edge, falling to nothing over
-    HILL_REACH blocks) on the open ground beyond the city and its slopes'
-    foot; the highway's level valley floor out of the map; and the edges
-    down a terrace's slopes, left free of limits."""
+    terrace's hillside (``hill_rise``: up past its top, then away) on the
+    open ground beyond the city and its slopes' foot; the highway's level
+    valley floor out of the map; and the edges across a terrace's slopes,
+    left free of limits."""
     radius, size = settings.radius, settings.block_size
     reach = radius + WILD_CELLS
     targets = {}
@@ -1249,7 +1258,7 @@ def _wild_land(settings, terraces):
                     continue
                 distance = min(math.hypot(max(cx - x, 0, x - cx - 1), max(cy - y, 0, y - cy - 1))
                                for cx, cy in tops)
-                rise = region['step'] * max(0.0, 1 - distance / HILL_REACH)
+                rise = region['step'] * hill_rise(distance)
                 if rise > targets.get(node, 0.0):
                     targets[node] = rise
     pins = {(x, y) for x in range(-reach, reach + 1) for y in (-1, 0, 1) if abs(x) >= radius}

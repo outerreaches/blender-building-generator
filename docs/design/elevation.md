@@ -2,6 +2,11 @@
 
 Status: v0.21 (Rolling hills) and v0.22 (Terraced) done; the rest planned.
 
+**As built in v0.22.5:** the plateau defaults to 9 m, and a terrace's
+hill target climbs past its top (`HILL_KNOTS`: 1.2 times the rise a block
+out, 1.6 three blocks out, nothing at eight), so the terrace is a bench in
+a hillside rather than a hilltop.
+
 **As built in v0.22.4:** a terraced city's lattice is extended by 20
 blocks of wild land, graded with it (noise hills scaled as the city's,
 fading to level over the last four blocks; the highway's rows pinned level

@@ -28,7 +28,7 @@ The original single-building and bulk operators remain available. Architecture u
 | Irregularity | How far an organic edge wanders, 0 (round) to 1 (default 0.6) |
 | Terrain | Flat (default), [Rolling Hills](#terrain) or [Terraced](#terraced) |
 | Relief | Hills: metres from the lowest ground to the highest, 0–40 (default 30) |
-| Plateau Height | Terraced: how far the plateau rises above the streets round it, 0–30 m (default 18; 0: none) |
+| Plateau Height | Terraced: how far the plateau rises above the streets round it, 0–30 m (default 9; 0: none) |
 | Podiums | Terraced: low raised compounds of a few blocks, 0–3 (default 1) |
 | Primary / Secondary Locations | District seeds (default 6: downtown core, three midtown styles, industrial and suburban edges) and smaller growth destinations |
 | Driving Circuits | Target count of distinct highway-to-district circuits, 0–8 |
@@ -173,18 +173,19 @@ write the graded ground as a heightmap (see [Unity export](#unity-export)).
 **Terrain: Terraced** puts the same hills under raised terraces of whole
 blocks, walled on some sides and falling naturally to the hills on others:
 
-- **The plateau** rises **Plateau Height** metres (default 18), over about
+- **The plateau** rises **Plateau Height** metres (default 9), over about
   15% of the city's blocks (6 to 40).
 - **Podiums** rise 4.2 m (one storey), over three to six blocks each.
 - **Where.** Terraces stand only in the downtown and residential districts,
   at the city's edge, preferring the built-up blocks there.
 - **Built up.** A terrace's top is a full district: every street across it
   is laid and every block is built on.
-- **Natural sides.** Each terrace falls on one to three of its sides,
-  chosen at random among those facing out of the city. Those sides are the
-  top of a hill in the land round the city: one block of open hillside (no
-  buildings) leads from the terrace's edge to the hill, which falls away
-  beyond the city over about six blocks. Where two natural sides meet at a
+- **Natural sides.** Each terrace meets the land round the city on one to
+  three of its sides, chosen at random among those facing out of the city.
+  A terrace is a bench on the lower flank of a hill there: one block of
+  open hillside (no buildings) leads from the terrace's edge up into the
+  hill, which climbs on past the terrace's top (to 1.6 times its rise,
+  three blocks out) and then falls away over about five more. Where two natural sides meet at a
   corner, a faceted (octagonal) slope joins them. The other sides are
   retaining walls; they fade into the hill where it wraps round a corner.
 - **Wild land.** A terraced city stands in hilly wild land rather than on a
@@ -207,7 +208,7 @@ blocks, walled on some sides and falling naturally to the hills on others:
   climbs at a steady grade of no more than 10% along its route, easing flat
   where it meets the streets at either end. A ramp is one road class all
   the way. Its top always meets a street on the terrace: where none would,
-  a street is laid across the top, or (none there) the ramp goes. An 18 m plateau's ramps run four blocks; the side streets
+  a street is laid across the top, or (none there) the ramp goes. A 9 m plateau's ramps run three blocks; the side streets
   along them are closed, and no building faces them. Where the lattice has
   no street, the ramp is a new one. Ramps keep raised footways (with curbs)
   on both sides all the way up.

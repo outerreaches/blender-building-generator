@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.22.5: Terraces set into the hillside
+
+- **Lower plateau.** The plateau's default height is halved, to 9 m.
+- **A bench on a hillside.** Beyond a terrace's natural sides the land now
+  keeps rising, to 1.6 times the terrace's rise three blocks out, before it
+  falls away. The terrace reads as a level bench cut into the lower flank
+  of a hill, walled only on its city side, instead of a block standing up
+  out of the landscape.
+
 ## v0.22.4: Terraced cities in hilly wild land
 
 - **Wild land.** A terraced city now stands in hilly wild land instead of

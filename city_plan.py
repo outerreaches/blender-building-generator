@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Deterministic city growth, independent of Blender. Coordinates are metres."""
 from dataclasses import asdict, dataclass, field, replace
-from collections import deque
+from collections import defaultdict, deque
 from functools import lru_cache
 import hashlib
 import heapq
@@ -9,7 +9,7 @@ import json
 import math
 import random
 
-VERSION = 12
+VERSION = 13
 ROAD_WIDTHS = {"HIGHWAY": 20.0, "ARTERIAL": 12.0, "COLLECTOR": 8.0, "LOCAL": 6.0}
 ROAD_RANK = {name: i for i, name in enumerate(ROAD_WIDTHS)}
 # Corner radius at a route bend, before the curve_radius multiplier and clamping.
@@ -233,13 +233,15 @@ class CitySettings:
     preset: str = "CITY"               # CITY, or SMALL_TOWN: no towers, no big sites.
     shape: str = "SQUARE"              # SQUARE fills the map; ORGANIC has an irregular edge.
     irregularity: float = .6           # How far an organic edge wanders.
-    terrain: str = "FLAT"              # FLAT, or ROLLING: gentle hills (see TERRAINS).
-    relief: float = 30.0               # Rolling hills: metres from the lowest to the highest.
+    terrain: str = "FLAT"              # FLAT, ROLLING hills, or TERRACED (see TERRAINS).
+    relief: float = 30.0               # Hills: metres from the lowest to the highest.
+    plateau_height: float = 18.0       # Terraced: the plateau's rise (0: none).
+    podiums: int = 1                   # Terraced: low podiums of a few blocks.
 
     def validate(self):
         for name, lo, hi in (("radius", 2, 25), ("primary_count", 1, 16),
                              ("secondary_count", 0, 100), ("max_buildings", 1, 10000),
-                             ("driving_loop_count", 0, 8)):
+                             ("driving_loop_count", 0, 8), ("podiums", 0, 3)):
             value = getattr(self, name)
             if type(value) is not int or not lo <= value <= hi:
                 raise ValueError(f"{name} must be an integer in [{lo}, {hi}]")
@@ -251,7 +253,7 @@ class CitySettings:
                              ("damage", 0, 1), ("interior_ratio", 0, 1),
                              ("setback", 1, 8), ("wasteland", 0, 20000),
                              ("highway_reach", 0, 20000), ("downtown_superblocks", 0, 1),
-                             ("irregularity", 0, 1), ("relief", 0, 40),
+                             ("irregularity", 0, 1), ("relief", 0, 40), ("plateau_height", 0, 30),
                              ("sidewalk_width", 1.2, 5), ("curb_height", 0, .25)):
             value = getattr(self, name)
             if not math.isfinite(value) or not lo <= value <= hi:
@@ -352,13 +354,27 @@ class CityPlan:
     outer_roads: list = field(default_factory=list)
     culdesacs: list = field(default_factory=list)    # [{'node': [x, y], 'radius': m}]
     heights: list = field(default_factory=list)      # [[x, y, z]] graded lattice nodes (z != 0)
+    # Terraced terrain: {'regions': [{'cells', 'step'}], 'ramps': [{'nodes', 'raises'}],
+    # 'stairs': [{'low', 'high', 'width'}], 'ground': [[x, y, z]] base node heights}.
+    terraces: dict = field(default_factory=dict)
 
     def to_json(self):
         return json.dumps({"version": VERSION, **asdict(self)}, sort_keys=True, indent=2)
 
     def surface(self):
-        """The graded road-level surface (``Surface``) of this plan."""
-        return Surface(self.settings, {(x, y): z for x, y, z in self.heights})
+        """Road level anywhere on the street network (``Surface`` on hills,
+        ``RoadSurface`` on terraces)."""
+        heights = {(x, y): z for x, y, z in self.heights}
+        if self.terraces:
+            return RoadSurface(self.settings, heights, self.roads, self.terraces)
+        return Surface(self.settings, heights)
+
+    def ground_surface(self):
+        """Natural ground level (before pads): the road-level surface on hills;
+        on terraces the base hills plus each terrace's rise over its blocks."""
+        if self.terraces:
+            return TerraceGround(self.settings, self.terraces)
+        return self.surface()
 
 
 def edge(a, b):
@@ -373,7 +389,7 @@ def edge(a, b):
 # smoothstep blend of the block's four corners (``Surface``), so a street's
 # profile eases out flat at both junctions and is at most SMOOTHSTEP_PEAK times
 # steeper than the straight grade between them.
-TERRAINS = ('FLAT', 'ROLLING')
+TERRAINS = ('FLAT', 'ROLLING', 'TERRACED')
 GRADE_LIMITS = {'HIGHWAY': .04, 'ARTERIAL': .05, 'COLLECTOR': .06, 'LOCAL': .08}
 OPEN_GRADE = .12         # Lattice edges without a street.
 SITE_DROP = .25          # Most a site block's corners may differ (m).
@@ -427,7 +443,7 @@ def _terrain_heights(settings):
     return heights
 
 
-def _grade(settings, roads, pois):
+def _grade(settings, roads, pois, flat=(), benches=()):
     """Node heights graded so every lattice edge stays under its limit: a
     street's tier, open ground, or a site block kept level. The map's edge
     stays at zero."""
@@ -441,6 +457,10 @@ def _grade(settings, roads, pois):
                     key = edge((x, y), other)
                     grade = GRADE_LIMITS.get(roads.get(key), OPEN_GRADE)
                     limits[key] = grade * size / SMOOTHSTEP_PEAK
+    for key in flat:
+        limits[key] = min(limits[key], RAMP_FLAT)
+    for key in benches:
+        limits[key] = min(limits[key], TERRACE_BENCH)
     for poi in pois:
         # Every pair of a site's corners, so the whole pad is level.
         corners = sorted({(bx + dx, by + dy) for bx, by in poi.blocks
@@ -478,6 +498,583 @@ def _grade(settings, roads, pois):
         for node in heights:
             heights[node] *= .5
     return {node: round(z, 3) for node, z in heights.items() if abs(round(z, 3)) > 0}
+
+
+# Terraced terrain (TERRACED): the base hills (``relief``) carry raised
+# terraces of whole blocks behind retaining walls: one plateau
+# (``plateau_height``) and a few low podiums. The streets inside a terrace
+# rise with it; the streets round its foot stay below. A street crossing into
+# a terrace becomes a ramp, straight out from the wall at no more than
+# RAMP_GRADE (a podium's ramp fits one block; a plateau's reaches several,
+# with the side streets along it closed), or a pedestrian stair.
+PODIUM_STEP = 4.2
+RAMP_GRADE = .10
+RAMP_EASE = .15          # Share of a ramp edge eased flat at each end.
+MAX_RAMPS = 2            # Vehicle ramps up to a plateau.
+RAMP_FLAT = .05          # Most the base hills may change along a ramp edge (m).
+TERRACE_BENCH = .4       # ...or along a lattice edge under a terrace.
+STAIR_WIDTH = 6.0
+PLATEAU_SHARE = .15      # Of the city's blocks.
+PLATEAU_CELLS = (6, 40)
+PODIUM_CELLS = (3, 6)
+TERRACE_TRIES = 40
+TERRACE_STREETS = .7     # Least chance of a local street across a terrace's top.
+
+
+def ramp_profile(t):
+    """Eased linear rise from 0 to 1 (flat at both ends; steepest at
+    1 / (1 - RAMP_EASE) times the mean slope)."""
+    e = RAMP_EASE
+    if t <= 0:
+        return 0.0
+    if t >= 1:
+        return 1.0
+    if t < e:
+        return t * t / (2 * e * (1 - e))
+    if t > 1 - e:
+        return 1 - (1 - t) * (1 - t) / (2 * e * (1 - e))
+    return (t - e / 2) / (1 - e)
+
+
+def ramp_shape(t, ease_a=True, ease_b=True):
+    """Rise from 0 to 1 along one ramp edge, eased flat at the ends that meet
+    a street (``ease_a`` at t = 0, ``ease_b`` at t = 1) and straight through
+    the ramp's own junctions."""
+    if ease_a and ease_b:
+        return ramp_profile(t)
+    if not ease_a and not ease_b:
+        return max(0.0, min(1.0, t))
+    if ease_b:
+        return 1 - ramp_shape(1 - t, True, False)
+    e = RAMP_EASE
+    t = max(0.0, min(1.0, t))
+    if t < e:
+        return t * t / (2 * e * (1 - e / 2))
+    return (t - e / 2) / (1 - e / 2)
+
+
+def ramp_ends(terraces):
+    """{lattice edge: (eased at its first node, eased at its second)} for
+    every ramp edge."""
+    ends = {}
+    for ramp in terraces.get('ramps', ()):
+        nodes = [tuple(n) for n in ramp['nodes']]
+        # Eased at its ends and where it turns; straight on through the rest.
+        eased = {0, len(nodes) - 1} | {
+            j for j in range(1, len(nodes) - 1)
+            if (nodes[j][0] - nodes[j - 1][0], nodes[j][1] - nodes[j - 1][1]) !=
+            (nodes[j + 1][0] - nodes[j][0], nodes[j + 1][1] - nodes[j][1])}
+        for j, (a, b) in enumerate(zip(nodes, nodes[1:])):
+            flags = (j in eased, j + 1 in eased)
+            ends[edge(a, b)] = flags if edge(a, b)[0] == a else flags[::-1]
+    return ends
+
+
+def _cell_corners(cell):
+    x, y = cell
+    return [(x, y), (x + 1, y), (x, y + 1), (x + 1, y + 1)]
+
+
+def ramp_reach(step, size):
+    """Lattice edges a ramp needs beyond the terrace's edge block to climb
+    ``step``, every edge eased at both ends (where it turns, too)."""
+    for extra in range(12):
+        if (step / (extra + 1) + RAMP_FLAT) / size / (1 - RAMP_EASE) <= RAMP_GRADE:
+            return extra
+    return 12
+
+
+def _terraces(settings, locations, roads):
+    """Choose the terraces and edit the street network for them: a ramp is a
+    straight street out from the terrace (added where the lattice has none);
+    stairs, the side streets along a ramp and streets through a terrace at its
+    foot level leave ``roads``. Returns {'regions', 'ramps', 'stairs'}, or {}
+    for other terrain or when no terrace fits."""
+    if settings.terrain != 'TERRACED':
+        return {}
+    radius, size = settings.radius, settings.block_size
+    highway = {n for key, tier in roads.items() if tier == 'HIGHWAY' for n in key}
+    bulbs, looped = set(), set()
+    city_cells = [(x, y) for x in range(-radius, radius) for y in range(-radius, radius)
+                  if in_city(settings, (x + .5) * size, (y + .5) * size)]
+    specs = []
+    if settings.plateau_height > 0:
+        specs.append(('plateau', settings.plateau_height))
+    specs += [('podium', PODIUM_STEP)] * settings.podiums
+    taken = set()          # Cells of earlier terraces and their ramps, with a ring round them.
+    result = {'regions': [], 'ramps': [], 'stairs': []}
+    for index, (kind, step) in enumerate(specs):
+        rng = stream(settings.seed, 'terrace', index)
+        reach = ramp_reach(step, size)
+
+        def allowed(cell):
+            corners = _cell_corners(cell)
+            return (cell not in taken and
+                    all(max(map(abs, c)) <= radius - 1 for c in corners) and
+                    in_city(settings, (cell[0] + .5) * size, (cell[1] + .5) * size) and
+                    not set(corners) & (highway | bulbs))
+        if kind == 'plateau':
+            target = max(PLATEAU_CELLS[0], min(PLATEAU_CELLS[1],
+                                               round(PLATEAU_SHARE * len(city_cells))))
+            prefer = {'DOWNTOWN': 3.0, 'OLD_TOWN': 2.0, 'BRUTALIST': 2.0, 'RESIDENTIAL': 1.0}
+        else:
+            target = rng.randint(*PODIUM_CELLS)
+            prefer = {'OLD_TOWN': 3.0, 'RESIDENTIAL': 2.0, 'DOWNTOWN': 1.5, 'BRUTALIST': 1.0}
+        seeds = []
+        for cell in city_cells:
+            if allowed(cell):
+                style = district_at(settings, (cell[0] + .5) * size, (cell[1] + .5) * size,
+                                    locations).style
+                # Built-up districts first: the terrace is a district of its own.
+                weight = prefer.get(style, .3) * density_at(
+                    settings, (cell[0] + .5) * size, (cell[1] + .5) * size) ** 2
+                seeds.append((rng.random() ** (1 / max(weight, .01)), cell))
+        seeds.sort(reverse=True)
+        for _, seed_cell in seeds[:TERRACE_TRIES]:
+            cells = _grow_terrace(seed_cell, target, allowed, rng)
+            if len(cells) < min(target, 4):
+                continue
+            found = _check_terrace(settings, roads, cells, step, reach, kind, highway, bulbs,
+                                   looped, taken)
+            if found is None:
+                continue
+            ramps, stairs, cuts, added = found
+            for key in cuts:
+                roads.pop(key, None)
+            roads.update(added)
+            result['regions'].append({'cells': sorted([list(c) for c in cells]), 'step': step,
+                                      'kind': kind})
+            result['ramps'] += ramps
+            result['stairs'] += stairs
+            ring = set()
+            for x, y in cells | {tuple(n) for ramp in ramps for n in ramp['nodes']}:
+                for dx in (-2, -1, 0, 1):
+                    for dy in (-2, -1, 0, 1):
+                        ring.add((x + dx, y + dy))
+            taken |= ring
+            break
+    return result if result['regions'] else {}
+
+
+def _grow_terrace(seed_cell, target, allowed, rng):
+    """A compact blob of allowed cells grown from ``seed_cell`` (each step
+    takes the outside cell with the most neighbours already in), holes filled."""
+    cells = {seed_cell}
+
+    def neighbours(cell):
+        x, y = cell
+        return ((x + 1, y), (x - 1, y), (x, y + 1), (x, y - 1))
+    while len(cells) < target:
+        options = sorted({n for c in cells for n in neighbours(c)
+                          if n not in cells and allowed(n)})
+        if not options:
+            break
+        cells.add(max(options, key=lambda n: sum(m in cells for m in neighbours(n)) +
+                      1.5 * rng.random()))
+    for cell in sorted({n for c in cells for n in neighbours(c)}):
+        if cell not in cells and allowed(cell) and all(n in cells for n in neighbours(cell)):
+            cells.add(cell)
+    return cells
+
+
+def _check_terrace(settings, roads, cells, step, reach, kind, highway, bulbs, looped, taken):
+    """Ramps, stairs, street cuts and added ramp streets for a terrace over
+    ``cells``, or None when it would cut a highway, a driving circuit or a
+    cul-de-sac, leave the network in pieces, or have no ramp."""
+    radius = settings.radius
+    corners = {c for cell in cells for c in _cell_corners(cell)}
+    inner = {n for n in corners if all(c in cells for c in _node_cells(n))}
+    if not inner:
+        return None
+    rim = corners - inner
+    # A street between two terrace blocks with both ends at the foot would run
+    # in a trench through the terrace: it goes.
+    cuts = []
+    for a, b in roads:
+        if a in rim and b in rim:
+            if a[1] == b[1]:
+                beside = ((min(a[0], b[0]), a[1] - 1), (min(a[0], b[0]), a[1]))
+            else:
+                beside = ((a[0] - 1, min(a[1], b[1])), (a[0], min(a[1], b[1])))
+            if all(c in cells for c in beside):
+                cuts.append(edge(a, b))
+    crossing = sorted((a, b) if a in inner else (b, a) for (a, b) in roads
+                      if (a in inner) != (b in inner))
+    if any(roads[edge(a, b)] == 'HIGHWAY' for a, b in crossing):
+        return None
+    network = {n for key in roads for n in key}
+    # A ramp may also climb where no street crosses yet (a new street).
+    faces = sorted({(n, m) for n in inner for m in
+                    ((n[0] + 1, n[1]), (n[0] - 1, n[1]), (n[0], n[1] + 1), (n[0], n[1] - 1))
+                    if m in rim})
+    options = []
+
+    def free(n):
+        return (max(map(abs, n)) <= radius - 1 and n not in highway and n not in bulbs and
+                n not in corners and not any(c in taken for c in _node_cells(n)))
+    for high, low in faces:
+        tier = roads.get(edge(high, low), 'COLLECTOR')
+        if any(c in taken for c in _node_cells(low)):
+            continue
+        for turns, chain in _ramp_chains(high, low, reach, free):
+            nodes = [high] + chain
+            keys = [edge(a, b) for a, b in zip(nodes, nodes[1:])]
+            if any(roads.get(key) == 'HIGHWAY' for key in keys):
+                continue
+            # The ramp runs above the side streets at its raised junctions.
+            these = sorted({key for n in chain[:-1] for key in _node_edges(n)
+                            if key in roads and key not in keys})
+            if any(roads[key] == 'HIGHWAY' or key in looped or set(key) & bulbs
+                   for key in these):
+                continue
+            new = [key for key in keys if key not in roads]
+            rank = {'ARTERIAL': 0, 'COLLECTOR': 1, 'LOCAL': 2}[tier]
+            options.append((edge(high, low) not in roads, chain[-1] not in network, bool(new),
+                            turns, rank, len(new), len(these), high, low, nodes, these,
+                            {key: tier for key in new}))
+    options.sort(key=lambda o: o[:9])
+    ramps, used, added, ramp_keys = [], set(), {}, set()
+    limit = len(crossing) if kind == 'podium' else MAX_RAMPS
+    for *_, nodes, these, new in options:
+        if len(ramps) >= limit:
+            break
+        keys = {edge(a, b) for a, b in zip(nodes, nodes[1:])}
+        if set(nodes) & used or set(these) & ramp_keys or keys & set(cuts):
+            continue
+        span = len(nodes) - 1
+        ramps.append({'nodes': [list(n) for n in nodes],
+                      'raises': [round(step * (span - j) / span, 3) for j in range(len(nodes))]})
+        cuts += these
+        added.update(new)
+        ramp_keys |= keys
+        used |= set(nodes)
+    if not ramps:
+        return None
+    stairs = []
+    for high, low in crossing:
+        key = edge(high, low)
+        if key in ramp_keys or key in cuts:
+            continue
+        if key in looped:
+            return None
+        stairs.append({'low': list(low), 'high': list(high), 'width': STAIR_WIDTH})
+    if any(key in looped or set(key) & bulbs for key in cuts):
+        return None
+    removed = set(cuts) | {edge(tuple(s['low']), tuple(s['high'])) for s in stairs}
+    # Streets the cuts leave apart (and a ramp's foot off the network) are
+    # joined back on with new streets clear of the terrace and its ramps.
+    raised = inner | {tuple(n) for r in ramps for n in r['nodes'][1:-1]} | {
+        n for c in taken for n in _cell_corners(c)}
+    outside = {(x, y) for x in range(-radius, radius + 1)
+               for y in range(-radius, radius + 1)} - inner
+    main = (-radius, 0)
+    for _ in range(12):
+        keys = [key for key in roads if key not in removed] + list(added)
+        pieces = _pieces(keys)
+        home = next((piece for piece in pieces if main in piece), None)
+        if home is None:
+            return None
+        islands = [piece for piece in pieces if piece is not home]
+        # A ramp's foot with no other street: joined on like an island.
+        degree = defaultdict(int)
+        for a, b in keys:
+            degree[a] += 1
+            degree[b] += 1
+        loose = [tuple(r['nodes'][-1]) for r in ramps if degree[tuple(r['nodes'][-1])] < 2]
+        if not islands and not loose:
+            break
+        if islands:
+            island = min(islands, key=lambda piece: (len(piece), min(piece)))
+        else:
+            island = {loose[0]}
+            home = home - {tuple(n) for r in ramps for n in r['nodes']}
+        # On the terrace through its own top, else at the foot.
+        if island & inner and home & inner:
+            starts, targets, blocked = island & inner, home & inner, outside
+        else:
+            starts, targets, blocked = island - raised, home - raised, corners | raised
+        if not starts or not targets:
+            return None
+        start, target = min(((a, b) for a in sorted(starts) for b in sorted(targets)),
+                            key=lambda pair: (math.dist(*pair), pair))
+        merged = dict(roads)
+        merged.update(added)
+        path = _route(start, target, merged, settings, blocked - {start, target},
+                      confine=True, closed=removed)
+        if path is None:
+            return None
+        for a, b in zip(path, path[1:]):
+            key = edge(a, b)
+            if key not in roads and key not in added:
+                added[key] = 'LOCAL'
+            removed.discard(key)
+    else:
+        return None
+    graph = {n for key in roads if key not in removed for n in key} | {n for key in added
+                                                                        for n in key}
+    # A stair needs a street at both ends.
+    if any(tuple(s['high']) not in graph or tuple(s['low']) not in graph for s in stairs):
+        return None
+    return ramps, stairs, sorted(set(cuts)) + sorted(removed - set(cuts)), added
+
+
+def _pieces(keys):
+    """The connected pieces (node sets) of a street network."""
+    graph = {}
+    for a, b in keys:
+        graph.setdefault(a, []).append(b)
+        graph.setdefault(b, []).append(a)
+    pieces, seen = [], set()
+    for start in sorted(graph):
+        if start in seen:
+            continue
+        piece, pending = {start}, [start]
+        while pending:
+            node = pending.pop()
+            for other in graph[node]:
+                if other not in piece:
+                    piece.add(other)
+                    pending.append(other)
+        seen |= piece
+        pieces.append(piece)
+    return pieces
+
+
+def _ramp_chains(high, low, reach, free):
+    """(turns, nodes) for every way a ramp can run ``reach`` edges on from
+    ``low`` (away from ``high``) over ``free`` nodes, turning at most twice."""
+    found = []
+
+    def walk(path, direction, turns):
+        if len(path) == reach + 1:
+            found.append((turns, path))
+            return
+        x, y = path[-1]
+        for d in (direction, (direction[1], -direction[0]), (-direction[1], direction[0])):
+            n = (x + d[0], y + d[1])
+            bend = turns + (d != direction)
+            if bend <= 2 and n not in path and free(n):
+                walk(path + [n], d, bend)
+    walk([low], (low[0] - high[0], low[1] - high[1]), 0)
+    return found
+
+
+def _node_cells(node):
+    x, y = node
+    return ((x - 1, y - 1), (x, y - 1), (x - 1, y), (x, y))
+
+
+def _node_edges(node):
+    x, y = node
+    return [edge(node, other) for other in ((x + 1, y), (x - 1, y), (x, y + 1), (x, y - 1))]
+
+
+def _terrace_guard(terraces):
+    """What the later street passes must leave alone: ``nodes`` a driving
+    circuit may not pass (terrace tops and ramps), ``edges`` no street may
+    take (beside a raised ramp junction, or through a terrace at its foot),
+    ``stairs`` the lattice edges up a terrace's face (a street there is a
+    stair) and ``keep`` the ramps."""
+    guard = {'nodes': set(), 'edges': set(), 'stairs': set(), 'keep': set(), 'avoid': set(),
+             'top': set()}
+    for region in terraces.get('regions', ()):
+        cells = {tuple(c) for c in region['cells']}
+        corners = {n for c in cells for n in _cell_corners(c)}
+        inner = {n for n in corners if all(c in cells for c in _node_cells(n))}
+        guard['nodes'] |= inner
+        guard['avoid'] |= corners
+        for node in corners:
+            for key in _node_edges(node):
+                a, b = key
+                if (a in inner) != (b in inner):
+                    guard['stairs'].add(key)
+                elif a in inner and b in inner:
+                    guard['top'].add(key)
+                elif a in corners and b in corners and a not in inner and b not in inner:
+                    beside = (((min(a[0], b[0]), a[1] - 1), (min(a[0], b[0]), a[1]))
+                              if a[1] == b[1] else
+                              ((a[0] - 1, min(a[1], b[1])), (a[0], min(a[1], b[1]))))
+                    if all(c in cells for c in beside):
+                        guard['edges'].add(key)
+    for ramp in terraces.get('ramps', ()):
+        nodes = [tuple(n) for n in ramp['nodes']]
+        keys = {edge(a, b) for a, b in zip(nodes, nodes[1:])}
+        guard['keep'] |= keys
+        guard['stairs'] -= keys
+        for node in nodes[1:-1]:
+            guard['nodes'].add(node)
+            guard['avoid'].add(node)
+            guard['edges'] |= set(_node_edges(node)) - keys
+    guard['stairs'] -= guard['edges']
+    guard['top'] -= guard['edges']
+    return guard
+
+
+def _finish_terraces(terraces, roads, stairs):
+    """Add the stairs the local streets asked for, where both ends have a street."""
+    if not terraces:
+        return
+    have = {n for key in roads for n in key}
+    known = {edge(tuple(s['low']), tuple(s['high'])) for s in terraces['stairs']}
+    inner = set(_terrace_raises(terraces))
+    for a, b in sorted(stairs - known):
+        if a in have and b in have:
+            high, low = (a, b) if a in inner else (b, a)
+            terraces['stairs'].append({'low': list(low), 'high': list(high),
+                                       'width': STAIR_WIDTH})
+    terraces['stairs'].sort(key=lambda s: (s['low'], s['high']))
+
+
+def _terrace_benches(terraces):
+    """Lattice edges among a terrace's corners: the hills under it are
+    graded nearly level, so it stands its full height all round."""
+    keys = set()
+    for region in terraces.get('regions', ()):
+        corners = {n for c in region['cells'] for n in _cell_corners(tuple(c))}
+        keys |= {key for n in corners for key in _node_edges(n)
+                 if key[0] in corners and key[1] in corners}
+    return sorted(keys)
+
+
+def _terrace_raises(terraces):
+    """{node: metres above the base hills}: a terrace's inner junctions rise
+    by its step; a ramp's junctions part of the way."""
+    raised = {}
+    for region in terraces['regions']:
+        cells = {tuple(c) for c in region['cells']}
+        for cell in cells:
+            for node in _cell_corners(cell):
+                x, y = node
+                if all(c in cells for c in ((x - 1, y - 1), (x, y - 1), (x - 1, y), (x, y))):
+                    raised[node] = region['step']
+    for ramp in terraces['ramps']:
+        for node, rise in zip(ramp['nodes'], ramp['raises']):
+            raised[tuple(node)] = max(raised.get(tuple(node), 0.0), rise)
+    return {node: z for node, z in raised.items() if z}
+
+
+def terrace_obstacles(terraces):
+    """What placement needs to know of the terraces: the walled frontages
+    (``terrace_walls``), each block's terrace (None off them), the stair
+    edges, and the stairs as carriageway rows (as ``_path_rows``)."""
+    terraces = terraces or {}
+    region = {tuple(c): index for index, r in enumerate(terraces.get('regions', ()))
+              for c in r['cells']}
+    stairs = {edge(tuple(s['low']), tuple(s['high'])): s for s in terraces.get('stairs', ())}
+    rows = [(s['low'], s['high'], s['width'] / 2) for s in stairs.values()]
+    return terrace_walls(terraces), region, set(stairs), rows
+
+
+def _stair_rows(settings, stairs):
+    size = settings.block_size
+    return [(a[0] * size, a[1] * size, b[0] * size, b[1] * size, half) for a, b, half in stairs]
+
+
+def terrace_walls(terraces):
+    """{cell: lattice edges its buildings may not face}: a terrace's foot
+    streets for its own blocks, and every ramp for all."""
+    walls = {}
+    ramp_edges = {edge(tuple(a), tuple(b)) for ramp in terraces.get('ramps', ())
+                  for a, b in zip(ramp['nodes'], ramp['nodes'][1:])}
+    for region in terraces.get('regions', ()):
+        cells = {tuple(c) for c in region['cells']}
+        for x, y in cells:
+            sides = {((x, y), (x + 1, y)): (x, y - 1), ((x, y + 1), (x + 1, y + 1)): (x, y + 1),
+                     ((x, y), (x, y + 1)): (x - 1, y), ((x + 1, y), (x + 1, y + 1)): (x + 1, y)}
+            for (a, b), neighbour in sides.items():
+                if neighbour not in cells:
+                    walls.setdefault((x, y), set()).add(edge(a, b))
+    blocked = defaultdict(set, {cell: set(edges) for cell, edges in walls.items()})
+    for key in ramp_edges:
+        (ax, ay), (bx, by) = key
+        if ay == by:
+            beside = [(min(ax, bx), ay - 1), (min(ax, bx), ay)]
+        else:
+            beside = [(ax - 1, min(ay, by)), (ax, min(ay, by))]
+        for cell in beside:
+            blocked[cell].add(key)
+    return dict(blocked)
+
+
+def terrace_cells(terraces):
+    """{cell: rise} over every terrace's blocks."""
+    return {tuple(c): region['step'] for region in terraces.get('regions', ())
+            for c in region['cells']}
+
+
+class RoadSurface:
+    """Road level on a terraced city: each street's own profile between its
+    junction heights (smoothstep, or an eased ramp), blended only where two
+    streets are about as near (junctions)."""
+    BLEND = 3.0
+
+    def __init__(self, settings, heights, roads, terraces):
+        self.size = settings.block_size
+        self.heights = heights
+        self.ramps = ramp_ends(terraces)
+        self.adjacent = defaultdict(list)
+        for road in roads:
+            a, b = (road.a, road.b) if hasattr(road, 'a') else road
+            self.adjacent[tuple(a)].append((tuple(a), tuple(b)))
+            self.adjacent[tuple(b)].append((tuple(b), tuple(a)))
+        self.ground = TerraceGround(settings, terraces)
+
+    def __call__(self, x, y):
+        size = self.size
+        node = (round(x / size), round(y / size))
+        found, beyond = [], []
+        for a, b in self.adjacent.get(node, ()):
+            ax, ay, bx, by = a[0] * size, a[1] * size, b[0] * size, b[1] * size
+            dx, dy = bx - ax, by - ay
+            raw = ((x - ax) * dx + (y - ay) * dy) / (dx * dx + dy * dy)
+            t = max(0.0, min(1.0, raw))
+            distance = math.hypot(x - ax - dx * t, y - ay - dy * t)
+            # A street the point is not abreast of (it lies past the street's
+            # end) only counts when no street is abreast of it.
+            (found if t == raw else beyond).append((distance, self._level(a, b, t)))
+        found = found or beyond
+        if not found:
+            return self.ground(x, y)
+        nearest = min(d for d, _ in found)
+        weights = [(max(0.0, self.BLEND - (d - nearest)), z) for d, z in found]
+        total = sum(w for w, _ in weights)
+        return sum(w * z for w, z in weights) / total
+
+    def along(self, key, x, y):
+        """Level of one street (lattice edge ``key``) abreast of (x, y)."""
+        size = self.size
+        a, b = (tuple(n) for n in key)
+        ax, ay, bx, by = a[0] * size, a[1] * size, b[0] * size, b[1] * size
+        dx, dy = bx - ax, by - ay
+        t = max(0.0, min(1.0, ((x - ax) * dx + (y - ay) * dy) / (dx * dx + dy * dy)))
+        return self._level(a, b, t)
+
+    def _level(self, a, b, t):
+        za, zb = self.heights.get(a, 0.0), self.heights.get(b, 0.0)
+        key = edge(a, b)
+        if key in self.ramps:
+            ease = self.ramps[key] if key[0] == a else self.ramps[key][::-1]
+            shape = ramp_shape(t, *ease)
+        else:
+            shape = t * t * (3 - 2 * t)
+        return za + (zb - za) * shape
+
+
+class TerraceGround:
+    """Natural ground on a terraced city: the base hills blended across each
+    block, plus the rise of the terrace the block belongs to."""
+
+    def __init__(self, settings, terraces):
+        self.base = Surface(settings, {(x, y): z for x, y, z in terraces.get('ground', ())})
+        self.size = settings.block_size
+        self.rise = terrace_cells(terraces)
+
+    def __call__(self, x, y):
+        cell = (math.floor(x / self.size), math.floor(y / self.size))
+        return self.base(x, y) + self.rise.get(cell, 0.0)
+
+    def rise_at(self, x, y):
+        return self.rise.get((math.floor(x / self.size), math.floor(y / self.size)), 0.0)
 
 
 # City shape. SQUARE fills the map. ORGANIC has an edge that wanders with the
@@ -638,7 +1235,7 @@ def _route(start, target, roads, settings, blocked=frozenset(), confine=False,
     if confine and settings.shape == 'ORGANIC':
         nodes, edges = _outside(settings)
         path = _route(start, target, roads, settings, set(blocked) | (nodes - {start, target}),
-                      closed=edges)
+                      closed=set(edges) | set(closed))
         if path is not None or confine == 'strict':
             return path
     queue = [(0.0, start)]
@@ -690,7 +1287,7 @@ def _network_path(start, target, roads):
     return None
 
 
-def _add_driving_loops(settings, locations, roads):
+def _add_driving_loops(settings, locations, roads, blocked=frozenset(), closed=frozenset()):
     """Connect highway entry/exit pairs through districts without retracing a road.
 
     These are explicit multi-tier circuits, not merely a count of tiny grid cells.
@@ -712,10 +1309,12 @@ def _add_driving_loops(settings, locations, roads):
         high += 1
     spine = spine[low:high + 1]
     highway_nodes = {node for key in highway for node in key}
-    anchors = [loc.node for loc in locations if loc.node not in highway_nodes]
+    anchors = [loc.node for loc in locations if loc.node not in highway_nodes and
+               loc.node not in blocked]
     fallback = [(x, y) for x in range(-settings.radius + 1, settings.radius)
                 for y in range(-settings.radius + 1, settings.radius)
                 if (x, y) not in highway_nodes and (x, y) not in anchors and
+                (x, y) not in blocked and
                 in_city(settings, x * settings.block_size, y * settings.block_size)]
     stream(settings.seed, 'loop_anchors').shuffle(fallback)
     anchors.extend(fallback)
@@ -728,12 +1327,13 @@ def _add_driving_loops(settings, locations, roads):
             continue
         start, end = spine[left], spine[right]
         # Keep the outward leg from touching any other highway node or the exit.
-        outward = _route(start, anchor, roads, settings, highway_nodes - {start},
-                         confine='strict')
+        outward = _route(start, anchor, roads, settings, (highway_nodes - {start}) | blocked,
+                         confine='strict', closed=closed)
         if outward is None:
             continue
         returning = _route(anchor, end, roads, settings,
-                           (highway_nodes - {end}) | set(outward[:-1]), confine='strict')
+                           (highway_nodes - {end}) | set(outward[:-1]) | blocked,
+                           confine='strict', closed=closed)
         if returning is None:
             continue
         street_path = outward + returning[1:]
@@ -921,12 +1521,18 @@ def generate_city(settings=CitySettings()):
         # A node already on a road needs no extra edge.
         locations.append(Location(f"secondary_{index}", node, "SECONDARY", district.style))
 
-    driving_loops = _add_driving_loops(settings, locations, roads)
+    # Terraces are laid out on the main streets, before the circuits and the
+    # local streets, which then keep to them (``guard``).
+    terraces = _terraces(settings, locations, roads)
+    guard = _terrace_guard(terraces)
+    driving_loops = _add_driving_loops(settings, locations, roads, guard['nodes'],
+                                       guard['edges'] | guard['stairs'])
 
     # Local growth starts from connected nodes only; loops naturally meet old streets.
     reached = {n for road in roads for n in road}
     frontier = sorted(reached, key=lambda p: (math.hypot(*p), p))
     tested = set(roads)
+    stairs = set()
     for node in frontier:
         for dx, dy in ((1, 0), (0, 1), (-1, 0), (0, -1)):
             other = (node[0] + dx, node[1] + dy)
@@ -934,27 +1540,37 @@ def generate_city(settings=CitySettings()):
             if key in tested or max(map(abs, other)) > settings.radius:
                 continue
             tested.add(key)
+            if key in guard['edges']:
+                continue
             x, y = ((node[i] + other[i]) * settings.block_size / 2 for i in range(2))
             if not in_city(settings, x, y):
                 continue
             profile = STYLE_PROFILE[district_at(settings, x, y, locations).style]
             chance = (settings.road_density * profile['road'] *
                       (.2 + .8 * density_at(settings, x, y)))
+            if key in guard['top']:
+                chance = max(chance, TERRACE_STREETS)
             if stream(settings.seed, "local", key).random() <= chance:
+                if key in guard['stairs']:
+                    # A street up a terrace's face is a stair.
+                    stairs.add(key)
+                    continue
                 roads[key] = "LOCAL"
                 if other not in reached:
                     reached.add(other)
                     frontier.append(other)
 
-    _close_downtown_streets(settings, locations, roads)
-    culdesacs = _add_culdesacs(settings, locations, roads)
+    _close_downtown_streets(settings, locations, roads, guard['keep'])
+    culdesacs = _add_culdesacs(settings, locations, roads, guard)
+    _finish_terraces(terraces, roads, stairs)
     road_list = [Road(a, b, tier) for (a, b), tier in sorted(roads.items())]
     paths = _build_paths(settings, roads, locations)
-    pois = (_place_pois(settings, locations, roads, paths, culdesacs)
+    pois = (_place_pois(settings, locations, roads, paths, culdesacs, terraces)
             if settings.points_of_interest else [])
     reserved = {block for poi in pois for block in poi.blocks}
-    downtown, dense = _place_downtown(settings, locations, roads, paths, reserved)
-    lots = downtown + _place_lots(settings, locations, roads, reserved | dense, culdesacs)
+    downtown, dense = _place_downtown(settings, locations, roads, paths, reserved, terraces)
+    lots = downtown + _place_lots(settings, locations, roads, reserved | dense, culdesacs,
+                                  terraces)
     # Stable priority sampling avoids truncating one geographical side of the
     # city; the buildings of one downtown block are kept or dropped together.
     lots.sort(key=lambda lot: (stream(settings.seed, "budget", lot.group or lot.id).random(), lot.id))
@@ -963,21 +1579,53 @@ def generate_city(settings=CitySettings()):
     shelters = _place_shelters(settings, roads, lots, pois) if settings.points_of_interest else []
     heights = {}
     if settings.terrain != 'FLAT':
-        heights = _grade(settings, roads, pois)
+        ramps = [edge(tuple(a), tuple(b)) for ramp in terraces.get('ramps', ())
+                 for a, b in zip(ramp['nodes'], ramp['nodes'][1:])]
+        heights = _grade(settings, roads, pois, ramps, _terrace_benches(terraces))
         surface = Surface(settings, heights)
 
-        def front(item):
-            # Road level at the middle of the front (the pad's street side).
+        def front_point(item):
+            # The middle of the front (the pad's street side).
             reach = item.depth / 2
-            return surface(item.center[0] + math.sin(item.rotation) * reach,
-                           item.center[1] - math.cos(item.rotation) * reach)
+            return (item.center[0] + math.sin(item.rotation) * reach,
+                    item.center[1] - math.cos(item.rotation) * reach)
+
+        def front(item):
+            return surface(*front_point(item))
+        if terraces:
+            terraces['ground'] = [[x, y, z] for (x, y), z in sorted(heights.items())]
+            raised = _terrace_raises(terraces)
+            heights = {node: round(heights.get(node, 0.0) + raised.get(node, 0.0), 3)
+                       for node in sorted(set(heights) | set(raised))}
+            heights = {node: z for node, z in heights.items() if z}
+            surface = RoadSurface(settings, heights, roads, terraces)
+
+            def front(item):
+                # Level with the street the item faces (a ring house: the
+                # circle), where it faces it: a superblock's frontage names
+                # one edge of a longer side.
+                point = front_point(item)
+                if getattr(item, 'bulb', ()):
+                    return surface(*point)
+                (ax, ay), (bx, by) = item.frontage
+                if ay == by:
+                    k = math.floor(point[0] / size)
+                    key = edge((k, ay), (k + 1, ay))
+                else:
+                    k = math.floor(point[1] / size)
+                    key = edge((ax, k), (ax, k + 1))
+                if key in roads:
+                    return surface.along(key, *point)
+                # Abreast of a gap in the street: on its own block's ground.
+                return surface.ground.base(*point) + surface.ground.rise_at(*item.center)
         lots = [replace(lot, level=round(front(lot), 3)) for lot in lots]
         pois = [replace(poi, level=round(front(poi), 3)) for poi in pois]
-        shelters = [replace(shelter, level=round(surface(*shelter.position), 3))
-                    for shelter in shelters]
+        shelters = [replace(shelter, level=round(
+            surface.along(shelter.road, *shelter.position) if terraces else
+            surface(*shelter.position), 3)) for shelter in shelters]
     return CityPlan(settings, locations, road_list, paths, lots, eligible, driving_loops,
                     pois, shelters, _outer_roads(settings, paths), culdesacs,
-                    [[x, y, z] for (x, y), z in sorted(heights.items())])
+                    [[x, y, z] for (x, y), z in sorted(heights.items())], terraces)
 
 
 # Suburban cul-de-sacs: a short street from the network to an inner lattice
@@ -999,7 +1647,7 @@ TRACT_GAP = 3.0
 TRACT_DEPTH = 11.0
 
 
-def _add_culdesacs(settings, locations, roads):
+def _add_culdesacs(settings, locations, roads, guard=None):
     """Dead-end stubs into suburban blocks. A node no street reaches, with
     suburban blocks on all four sides, gets one local street from a
     neighbouring road node; the houses either side face it and its end is a
@@ -1016,6 +1664,8 @@ def _add_culdesacs(settings, locations, roads):
             node = (x, y)
             if degree.get(node) or any(math.dist(node, end) < 1.5 for end in added):
                 continue
+            if guard and node in guard['avoid']:
+                continue
             cells = [(x - 1, y - 1), (x, y - 1), (x - 1, y), (x, y)]
             centres = [((cx + .5) * size, (cy + .5) * size) for cx, cy in cells]
             # Only houses stand round a turning circle: all four blocks are
@@ -1031,6 +1681,8 @@ def _add_culdesacs(settings, locations, roads):
             neighbours = [n for n in neighbours if all(
                 roads.get(edge(n, m)) != 'HIGHWAY' for m in
                 ((n[0] + 1, n[1]), (n[0] - 1, n[1]), (n[0], n[1] + 1), (n[0], n[1] - 1)))]
+            if guard:
+                neighbours = [n for n in neighbours if edge(node, n) not in guard['edges']]
             rng = stream(settings.seed, 'culdesac', node)
             if not neighbours or rng.random() > CULDESAC_CHANCE:
                 continue
@@ -1207,7 +1859,8 @@ def _tract_rows(streets, low_x, high_x, low_y, high_y, profile, rng):
     return houses
 
 
-def _place_lots(settings, locations, roads, reserved=frozenset(), culdesacs=()):
+def _place_lots(settings, locations, roads, reserved=frozenset(), culdesacs=(), terraces=None):
+    walls = terrace_obstacles(terraces)[0]
     rings = _bulb_lots(settings, locations, roads, reserved, culdesacs)
     ring_corners = [_corners(lot.center, lot.width, lot.depth, lot.rotation) for lot in rings]
     lots = list(rings)
@@ -1243,9 +1896,10 @@ def _place_lots(settings, locations, roads, reserved=frozenset(), culdesacs=()):
             high_x = (x + 1) * size - margins["E"]
             low_y = y * size + margins["S"]
             high_y = (y + 1) * size - margins["N"]
+            walled = walls.get((x, y), ())
             if tract:
                 streets = [side for side in "SNWE" if borders[side] in roads and
-                           roads[borders[side]] != "HIGHWAY"]
+                           roads[borders[side]] != "HIGHWAY" and borders[side] not in walled]
                 for side, index, center, width, depth in _tract_rows(
                         streets, low_x, high_x, low_y, high_y, profile,
                         stream(settings.seed, "tract_rows", x, y)):
@@ -1272,7 +1926,8 @@ def _place_lots(settings, locations, roads, reserved=frozenset(), culdesacs=()):
                     sides = []
                     for side, available in (("W", ix == 0), ("E", ix == cells - 1),
                                             ("S", iy == 0), ("N", iy == cells - 1)):
-                        if available and borders[side] in roads and roads[borders[side]] != "HIGHWAY":
+                        if (available and borders[side] in roads and
+                                roads[borders[side]] != "HIGHWAY" and borders[side] not in walled):
                             sides.append(side)
                     if not sides:
                         continue
@@ -1335,14 +1990,15 @@ def _inner_edges(x, y, wx, wy):
     return inner
 
 
-def _best_front(rule, sides, roads, along):
-    """The side a site faces: best road tier, most road along it, required length."""
+def _best_front(rule, sides, roads, along, blocked=frozenset()):
+    """The side a site faces: best road tier, most road along it, required
+    length; never a ``blocked`` edge (a terrace wall or a ramp)."""
     best = None
     for side, edges in sides.items():
         if len(edges) != along:
             continue
         tiers = [roads.get(e) for e in edges]
-        if "HIGHWAY" in tiers:
+        if "HIGHWAY" in tiers or any(e in blocked for e in edges):
             continue
         allowed = [e for e, t in zip(edges, tiers)
                    if t is not None and (rule['front'] is None or t in rule['front'])]
@@ -1412,13 +2068,14 @@ def _poi_pad(settings, x, y, wx, wy, nodes, rows, verge=POI_VERGE):
     return None
 
 
-def _place_pois(settings, locations, roads, paths, culdesacs=()):
+def _place_pois(settings, locations, roads, paths, culdesacs=(), terraces=None):
     size = settings.block_size
+    walls, region, stairs, stair_rows = terrace_obstacles(terraces)
     nodes = {}
     for (a, b), tier in roads.items():
         for node in (a, b):
             nodes[node] = max(nodes.get(node, 0), ROAD_WIDTHS[tier] / 2)
-    rows = _path_rows(paths)
+    rows = _path_rows(paths) + _stair_rows(settings, stair_rows)
     # Turning circles keep pads clear like any carriageway.
     rows += [(c['node'][0] * size, c['node'][1] * size, c['node'][0] * size, c['node'][1] * size,
               c['radius']) for c in culdesacs]
@@ -1458,10 +2115,14 @@ def _place_pois(settings, locations, roads, paths, culdesacs=()):
                         group = tuple((x + i, y + j) for i in range(wx) for j in range(wy))
                         if any(b in taken for b in group):
                             continue
-                        if any(e in roads for e in _inner_edges(x, y, wx, wy)):
+                        if any(e in roads or e in stairs for e in _inner_edges(x, y, wx, wy)):
+                            continue
+                        # A site stands on one level.
+                        if len({region.get(b) for b in group}) > 1:
                             continue
                         sides = {k: v for k, v in _side_edges(x, y, wx, wy).items() if k in fronts}
-                        front = _best_front(rule, sides, roads, along)
+                        front = _best_front(rule, sides, roads, along,
+                                            {e for b in group for e in walls.get(b, ())})
                         if front is None:
                             continue
                         cx, cy = (x + wx / 2) * size, (y + wy / 2) * size
@@ -1640,7 +2301,7 @@ def _edge_blocks(key):
     return (x, ay - 1), (x, ay)
 
 
-def _close_downtown_streets(settings, locations, roads):
+def _close_downtown_streets(settings, locations, roads, keep=frozenset()):
     """Close some downtown local streets so blocks join into superblocks.
 
     A street closes only between two downtown blocks, only if the road network
@@ -1671,8 +2332,8 @@ def _close_downtown_streets(settings, locations, roads):
                         _downtown(settings, locations, b):
                     parent[find(a)] = find(b)
     candidates = [key for key, tier in sorted(roads.items())
-                  if tier == "LOCAL" and all(_downtown(settings, locations, b)
-                                             for b in _edge_blocks(key))]
+                  if tier == "LOCAL" and key not in keep and
+                  all(_downtown(settings, locations, b) for b in _edge_blocks(key))]
     rng = stream(settings.seed, "superblocks")
     rng.shuffle(candidates)
     budget = int(round(len(candidates) * share))
@@ -1712,7 +2373,7 @@ def _connected(roads, start, goal):
     return False
 
 
-def _place_downtown(settings, locations, roads, paths, reserved):
+def _place_downtown(settings, locations, roads, paths, reserved, terraces=None):
     """Downtown blocks built out to the footway, split into party-walled towers.
 
     Blocks joined across streetless edges (natural or closed) are laid out as
@@ -1725,7 +2386,8 @@ def _place_downtown(settings, locations, roads, paths, reserved):
     for (a, b), tier in roads.items():
         for node in (a, b):
             nodes[node] = max(nodes.get(node, 0), ROAD_WIDTHS[tier] / 2)
-    rows = _path_rows(paths)
+    walls, region, stairs, stair_rows = terrace_obstacles(terraces)
+    rows = _path_rows(paths) + _stair_rows(settings, stair_rows)
     verge = max(DOWNTOWN_VERGE, settings.setback - settings.sidewalk_width + .1)
     owned = {(x, y) for x in range(-radius, radius) for y in range(-radius, radius)
              if (x, y) not in reserved and _downtown(settings, locations, (x, y))}
@@ -1735,7 +2397,9 @@ def _place_downtown(settings, locations, roads, paths, reserved):
             group = tuple((x + i, y + j) for i in range(wx) for j in range(wy))
             if any(b not in owned for b in group):
                 continue
-            if any(e in roads for e in _inner_edges(x, y, wx, wy)):
+            if any(e in roads or e in stairs for e in _inner_edges(x, y, wx, wy)):
+                continue
+            if len({region.get(b) for b in group}) > 1:
                 continue
             key = stream(settings.seed, "downtown", x, y, wx, wy).random()
             candidates.append((-wx * wy, key, x, y, wx, wy, group))
@@ -1747,9 +2411,11 @@ def _place_downtown(settings, locations, roads, paths, reserved):
         if any(b in taken for b in group):
             continue
         sides = {}
+        walled = {e for b in group for e in walls.get(b, ())}
         for side, edges in _side_edges(x, y, wx, wy).items():
             usable = [e for e in edges if roads.get(e) not in (None, "HIGHWAY")]
-            if usable:
+            # Towers line the whole side: none faces a terrace wall or ramp.
+            if usable and not walled & set(edges):
                 sides[side] = usable
         if not sides:
             continue

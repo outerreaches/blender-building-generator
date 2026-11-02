@@ -299,6 +299,35 @@ class CityMetadata:
                 entry[key] = value
         return entry
 
+    def _terraces(self, node_point):
+        """Terraces (their blocks and rise), ramps (their junctions, top
+        first) and stairs (top and foot, at the footways' edge)."""
+        found = getattr(self.plan, 'terraces', None) or {}
+        if not found:
+            return [], [], []
+        from .streets import stair_layout
+        space = self.space
+        ox, oy, oz = self.origin
+        regions = [{tuple(c) for c in region['cells']} for region in found['regions']]
+        terraces = [{'id': f'terrace_{k}', 'kind': region['kind'], 'rise': region['step'],
+                     'blocks': _flat(sorted(regions[k]))}
+                    for k, region in enumerate(found['regions'])]
+        ramps = [{'id': f'ramp_{k}', 'terrace': _terrace_of(regions, tuple(ramp['nodes'][0])),
+                  'nodes': _flat(ramp['nodes']),
+                  'points': _flat(node_point(n) for n in ramp['nodes'])}
+                 for k, ramp in enumerate(found['ramps'])]
+        stairs = []
+        for k, (stair, layout) in enumerate(zip(found['stairs'], stair_layout(self.plan))):
+            (hx, hy), (ux, uy) = layout['origin'], layout['direction']
+            top = (hx + ux * layout['top'], hy + uy * layout['top'], layout['z_top'])
+            foot = (hx + ux * layout['bottom'], hy + uy * layout['bottom'], layout['z_bottom'])
+            stairs.append({'id': f'stair_{k}', 'terrace': _terrace_of(regions, tuple(stair['high'])),
+                           'top': space.point((ox + top[0], oy + top[1], oz + top[2])),
+                           'bottom': space.point((ox + foot[0], oy + foot[1], oz + foot[2])),
+                           'width': stair['width'], 'steps': layout['steps'],
+                           'riser': _r(layout['riser'])})
+        return terraces, ramps, stairs
+
     # -- output ----------------------------------------------------------
     def as_dict(self):
         plan, space = self.plan, self.space
@@ -327,6 +356,7 @@ class CityMetadata:
                                   for x, y in path['points'])}
                  for path in plan.paths]
         bulbs = {tuple(bulb['node']) for bulb in getattr(plan, 'culdesacs', ())}
+        terraces, ramps, stairs = self._terraces(node_point)
         markers = sorted(self.markers, key=lambda m: m['type'])
         counts = {}
         for marker in markers:
@@ -343,7 +373,8 @@ class CityMetadata:
                      'sidewalk_width': settings.sidewalk_width,
                      'small_props_modelled': self.props_modelled,
                      'interiors_listed': self.interiors, 'water_modelled': self.water,
-                     'terrain': settings.terrain, 'relief': settings.relief},
+                     'terrain': settings.terrain, 'relief': settings.relief,
+                     'plateau_height': settings.plateau_height, 'podiums': settings.podiums},
             'districts': [{'id': loc.id, 'role': loc.role, 'style': loc.style,
                            'position': node_point(loc.node)} for loc in plan.locations],
             'roads': roads,
@@ -361,6 +392,9 @@ class CityMetadata:
                              'forward': space.direction(*road['direction']),
                              'length': road['length'], 'fade': road['fade']}
                             for road in getattr(plan, 'outer_roads', ())],
+            'terraces': terraces,
+            'ramps': ramps,
+            'stairs': stairs,
             'buildings': self.buildings,
             'sites': self.sites,
             'transit_stops': self.stops,
@@ -370,6 +404,12 @@ class CityMetadata:
                        'markers': [{'type': kind, 'count': count}
                                    for kind, count in sorted(counts.items())]},
         }
+
+
+def _terrace_of(regions, node):
+    x, y = node
+    around = {(x - 1, y - 1), (x, y - 1), (x - 1, y), (x, y)}
+    return next((f'terrace_{k}' for k, cells in enumerate(regions) if around <= cells), None)
 
 
 def _plan_version():

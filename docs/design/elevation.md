@@ -1,6 +1,26 @@
 # Design: elevation, infrastructure levels and the megacity
 
-Status: v0.21 done (Rolling hills); the rest planned.
+Status: v0.21 (Rolling hills) and v0.22 (Terraced) done; the rest planned.
+
+**As built in v0.22:**
+
+- **Terraced = hills + terraces.** The Rolling base (relief) carries one
+  plateau (default 18 m) and a few 4.2 m podiums of whole blocks, rather
+  than quantising all the ground into benches. The hills under a terrace are
+  graded nearly level (0.4 m per block edge), so it stands its full height
+  all round.
+- **Laid out first.** Terraces are chosen on the main streets, before the
+  driving circuits and the local streets, which then keep to them: circuits
+  never climb a terrace, a local street up its face becomes a stair, and no
+  street runs through a terrace at its foot level.
+- **Ramps** run out from the terrace (two for the plateau, every crossing
+  for a podium) at no more than 10%, easing flat where they meet streets or
+  turn; the side streets along a ramp's raised junctions are closed. Where
+  the cuts leave streets apart, short new streets join them back on.
+- **Walls from the ground's own edges.** On a terraced city the ground is
+  cut at the footways' iso-line on the street mesh's sample grid; walls
+  join each ground edge to the footway (or stair) above or below it, and
+  terrace edges are snapped to that grid (within 0.75 m of the block line).
 
 **As built in v0.21:**
 
@@ -186,6 +206,30 @@ Piers go in medians or inside blocks.
   - The metadata lists each route and its station positions, so walkable
     tunnels and platforms can be added later without moving anything.
 
+## 4b. Freeway (North American practice)
+
+Today's highway follows the street lattice, with filleted right-angle turns.
+A proper freeway replaces it:
+
+- **Alignment.** A free-flowing alignment that ignores the lattice: tangents
+  joined by circular curves (with spiral transitions where they help).
+  - The curve radius suits the design speed: about 440 m at 100 km/h with
+    8% superelevation, so curves are gentle and there are no right-angle
+    turns.
+  - Grades stay at 3–4%.
+- **Grade separation.** The freeway runs on embankment, on a viaduct or in a
+  cutting (the levels of §4). Every street it meets passes over or under it.
+- **Interchanges** at the arterials it crosses, spaced as far apart as the
+  map allows:
+  - diamonds, or partial cloverleafs where space allows;
+  - on-ramps with acceleration lanes and off-ramps with deceleration lanes,
+    tapered into the through lanes;
+  - ramp grades and curve radii for ramp speeds.
+- **Cross-section.** Lane, shoulder and median widths per AASHTO practice,
+  with a median barrier.
+
+The megacity's stacked decks (§7) build on it.
+
 ## 5. Underground (later, groundwork now)
 
 **Subway (later).** Walkable tunnels and platforms are built inside the
@@ -277,7 +321,9 @@ The aim is the scale of Akira or Judge Dredd at a cost the game can run.
 | Version | Scope |
 | --- | --- |
 | v0.21 (done) | Terrain field (Flat, Rolling), road grading, pads and plinths, ground and street meshes on the terrain, metadata heights, heightmap export |
-| v0.22 | Terraced style; hills continued past the map's edge; cross-sections: ditches, embankments and cuttings, retaining walls, ramp and stair streets at escarpments, culverts |
-| v0.23 | Levels: structure types, raised highway with ramps, road tunnels at the map edge, rail with crossings and a freight siding, subway routes with station entrances, sewer network data with manholes |
-| v0.24 | Megacity preset: megablocks, stacked decks, skybridges, collapsed spans, instanced modules, skyline ring |
+| v0.22 (done) | Terraced style: plateau and podiums behind retaining walls, ramp streets and stairs, exact walls where ground meets a street |
+| v0.23 | Cross-sections: ditches, embankments and cuttings, culverts; hills continued past the map's edge |
+| v0.24 | Levels: structure types, raised highway with ramps, road tunnels at the map edge, rail with crossings and a freight siding, subway routes with station entrances, sewer network data with manholes |
+| v0.25 | Freeway (§4b): free-flowing alignment with gentle curves, grade-separated, interchanges with on- and off-ramps |
+| v0.26 | Megacity preset: megablocks, stacked decks, skybridges, collapsed spans, instanced modules, skyline ring |
 | Later | Walkable subway tunnels and platforms; walkable sewers with collapsed sections and breaches into the subway |

@@ -29,6 +29,15 @@ CURB_BOTTOM_TERRAIN = -2.5   # Curb skirts on terrain: walls retaining the footw
 PAD_CLEAR = .1        # Ground stays this far under a pad's top.
 PAD_CUT_SLOPE = .6    # Cut slope back up from a pad to the natural ground.
 PAD_CELL = 24.0       # Metres per spatial-hash cell for pads.
+# Terraced cities: stairs up a terrace's face, and the walls.
+STAIR_RISE = .17      # Most a step rises.
+STAIR_LANDING = 3.0   # Landing under each street's footway.
+STAIR_INSET = .02     # Steps stand this far inside the stair's walls.
+STAIR_BASE = .5       # Steps are solid this far below the stair's foot.
+# Ground meeting a footway: at least this far below its top (a curb's face)
+# unless it stands more than the second figure above it; fully retained
+# above the third.
+EDGE_CURB = (.1, .2, .5)
 OUTER_STUB = 60.0     # Field segment past the map edge so a highway runs straight out.
 OUTER_CUT = 40.0      # The street mesh hands over to the outer road this far out.
 OUTER_RAMP = 2.0      # Footways ramp down to the shoulders over this length.
@@ -186,8 +195,8 @@ def _distance(px, py, segment):
 class Field:
     """Distance to the carriageway, indexed so sample points touch few segments."""
 
-    def __init__(self, plan):
-        self.segments = _segments(plan)
+    def __init__(self, plan, extra=()):
+        self.segments = _segments(plan) + list(extra)
         self.walk = plan.settings.sidewalk_width
         self.grid = defaultdict(list)
         for segment in self.segments:
@@ -269,6 +278,30 @@ def _clean(polygon):
     return result
 
 
+def _cell_triangles(corners, field, walk):
+    """Split a sample cell into two triangles, refining one that lies flat on
+    an iso-level.
+
+    Three corners of equal value cannot distinguish the region inside the
+    triangle: a triangle whose corners all sit exactly on the carriageway
+    edge is empty asphalt, but linear interpolation would fill it. A centre
+    sample (and three sub-triangles) resolves it; this only happens where a
+    road edge coincides with the sample grid.
+    """
+    for selection in ((0, 1, 2), (0, 2, 3)):
+        triangle = [corners[index] for index in selection]
+        values = [point[2] for point in triangle]
+        flat = max(values) - min(values) <= 1e-9
+        if flat and (abs(values[0]) <= 1e-9 or abs(values[0] - walk) <= 1e-9):
+            x = sum(point[0] for point in triangle) / 3
+            y = sum(point[1] for point in triangle) / 3
+            triangle.append((x, y, field.value(x, y)))
+            for index in range(3):
+                yield [triangle[index], triangle[(index + 1) % 3], triangle[3]]
+        else:
+            yield triangle
+
+
 def build_street_mesh(plan):
     """Return vertices, faces, material indices for road/footway/curb (0/1/2)."""
     walk = plan.settings.sidewalk_width
@@ -278,6 +311,10 @@ def build_street_mesh(plan):
     ids = {}
     curbs = set()
     surface = plan.surface() if getattr(plan, 'heights', None) else None
+    # On terraces the walls (``build_wall_mesh``) close the footways' outer
+    # edges inside the city ground; past it the skirts stay.
+    walled = (plan.settings.radius * plan.settings.block_size + 20
+              if getattr(plan, 'terraces', None) else None)
 
     def vertex(co):
         co = (round(co[0], 8), round(co[1], 8), round(co[2], 8))
@@ -325,6 +362,9 @@ def build_street_mesh(plan):
                 continue
             if bottom == 0.0 and a[2] - za <= 1e-9 and b[2] - zb <= 1e-9:
                 continue
+            if bottom == CURB_BOTTOM and walled is not None and max(
+                    abs(a[0]), abs(a[1]), abs(b[0]), abs(b[1])) < walled - 1e-6:
+                continue
             key = (tuple(sorted((vertex(b), vertex(a)))), bottom)
             if key in curbs:
                 continue
@@ -335,28 +375,6 @@ def build_street_mesh(plan):
                   (a[0], a[1], za + bottom if surface is not None else bottom),
                   (b[0], b[1], zb + bottom if surface is not None else bottom)), 2)
 
-    def triangles(corners):
-        """Split a cell into two triangles, refining one that lies flat on an iso-level.
-
-        Three corners of equal value cannot distinguish the region inside the
-        triangle: a triangle whose corners all sit exactly on the carriageway
-        edge is empty asphalt, but linear interpolation would fill it. A centre
-        sample (and three sub-triangles) resolves it; this only happens where a
-        road edge coincides with the sample grid.
-        """
-        for selection in ((0, 1, 2), (0, 2, 3)):
-            triangle = [corners[index] for index in selection]
-            values = [point[2] for point in triangle]
-            flat = max(values) - min(values) <= 1e-9
-            if flat and (abs(values[0]) <= 1e-9 or abs(values[0] - walk) <= 1e-9):
-                x = sum(point[0] for point in triangle) / 3
-                y = sum(point[1] for point in triangle) / 3
-                triangle.append((x, y, field.value(x, y)))
-                for index in range(3):
-                    yield [triangle[index], triangle[(index + 1) % 3], triangle[3]]
-            else:
-                yield triangle
-
     outers = outer_roads(plan)
     for i, j in sorted(field.active_cells()):
         x0, y0 = i * SAMPLE, j * SAMPLE
@@ -366,7 +384,7 @@ def build_street_mesh(plan):
                    (x0 + SAMPLE, y0, field.value(x0 + SAMPLE, y0)),
                    (x0 + SAMPLE, y0 + SAMPLE, field.value(x0 + SAMPLE, y0 + SAMPLE)),
                    (x0, y0 + SAMPLE, field.value(x0, y0 + SAMPLE)))
-        for polygon in triangles(corners):
+        for polygon in _cell_triangles(corners, field, walk):
             emit(_clip(polygon, 0.0, True), 0, None)
             emit(_clip(_clip(polygon, walk, True), 0.0, False), 1,
                  lambda x, y: pavement_height(plan, x, y, nodes))
@@ -375,6 +393,8 @@ def build_street_mesh(plan):
 
 def build_ground_mesh(plan):
     """Unpaved terrain under and around the city, out to the wasteland edge."""
+    if getattr(plan, 'terraces', None):
+        return _terraced_ground(plan)[0]
     if getattr(plan, 'heights', None):
         return _terrain_ground_mesh(plan)
     settings = plan.settings
@@ -474,6 +494,234 @@ def _terrain_ground_mesh(plan):
     return vertices, faces
 
 
+def build_wall_mesh(plan):
+    """Retaining walls of a terraced city: along the terraces' edges, and
+    wherever the ground meets a footway or a stair at another height (a ramp
+    on its embankment, a street at a terrace's foot)."""
+    if not getattr(plan, 'terraces', None):
+        return [], []
+    return _terraced_ground(plan)[1]
+
+
+def _halfplane(polygon, axis, value, keep_below):
+    """Clip a convex polygon of (x, y, field) points at x or y = ``value``."""
+    result = []
+    for index, current in enumerate(polygon):
+        following = polygon[(index + 1) % len(polygon)]
+        inside = current[axis] <= value if keep_below else current[axis] >= value
+        next_inside = following[axis] <= value if keep_below else following[axis] >= value
+        if inside:
+            result.append(current)
+        if inside != next_inside:
+            factor = (value - current[axis]) / (following[axis] - current[axis])
+            point = [current[k] + (following[k] - current[k]) * factor for k in range(3)]
+            point[axis] = value
+            result.append(tuple(point))
+    return result
+
+
+def _terraced_ground(plan):
+    """Ground and retaining walls of a terraced city, built together so the
+    walls use the ground's own edge vertices.
+
+    Near the streets the ground is cut at the footways' outer edge on the
+    street mesh's sample grid (so it shares those vertices' positions) and
+    round each stair; elsewhere it is a coarser grid, whose cells take the
+    finer grid's vertices along their shared sides (no T-junctions). The
+    ground splits along the terraces' edges into one sheet per level.
+    Returns ((vertices, faces), (wall vertices, wall faces)).
+    """
+    cached = plan.__dict__.get('_terraced_ground')
+    if cached is not None:
+        return cached
+    settings = plan.settings
+    walk = settings.sidewalk_width
+    extent = settings.radius * settings.block_size + 20
+    far = extent + settings.wasteland
+    grading = Grading(plan)
+    field = grading.field
+    cell = 2 * SAMPLE
+    FAR = 1e9            # Field value of the coarse cells, far from any street.
+    fine = {(i // 2, j // 2) for i, j in field.active_cells()}
+    radius = settings.radius
+    lines = {round(grading.line(k), 8) for k in range(-radius, radius + 1)}
+    middles = {v for v in lines if round(v / SAMPLE) % 2}
+    caps = defaultdict(list)
+    for polygon, top in grading.pads:
+        xs, ys = [p[0] for p in polygon], [p[1] for p in polygon]
+        rise = grading.rise_at(sum(xs) / len(xs), sum(ys) / len(ys))
+        for i in range(math.floor(min(xs) / cell), math.floor(max(xs) / cell) + 1):
+            for j in range(math.floor(min(ys) / cell), math.floor(max(ys) / cell) + 1):
+                caps[i, j].append((top, rise))
+    vertices, faces, ids = [], [], {}
+    iso_edges, line_edges = [], defaultdict(list)
+
+    def cap_at(x, y, rise):
+        cells = {(math.floor((x + dx) / cell), math.floor((y + dy) / cell))
+                 for dx in (-1e-7, 1e-7) for dy in (-1e-7, 1e-7)}
+        return min((top for c in cells for top, level in caps.get(c, ()) if level == rise),
+                   default=math.inf)
+
+    def vertex(x, y, rise, z=None, edge=False):
+        key = (round(x, 8), round(y, 8), rise)
+        if key not in ids:
+            if z is None:
+                z = grading.ground(x, y, cap_at(x, y, rise), rise)
+                if edge:
+                    # Ground about level with the footway steps down to it
+                    # by a curb's face; only ground well above it is retained.
+                    foot = grading.wall_foot(x, y)
+                    share = max(0.0, min(1.0, (z - foot - EDGE_CURB[1]) /
+                                         (EDGE_CURB[2] - EDGE_CURB[1])))
+                    z = (1 - share) * min(z, foot - EDGE_CURB[0]) + share * z
+            ids[key] = len(vertices)
+            vertices.append((key[0], key[1], round(z, 8)))
+        return ids[key]
+
+    def on_line(a, b):
+        for axis in (0, 1):
+            value = round(a[axis], 8)
+            if value == round(b[axis], 8) and value in lines:
+                return axis, value
+        return None
+
+    def emit(polygon):
+        polygon = _clean(polygon)
+        for axis in (0, 1):
+            polygon = _halfplane(polygon, axis, -extent, False) if polygon else polygon
+            polygon = _halfplane(polygon, axis, extent, True) if polygon else polygon
+        polygon = _clean(polygon) if polygon else polygon
+        if len(polygon) < 3:
+            return
+        cx = sum(p[0] for p in polygon) / len(polygon)
+        cy = sum(p[1] for p in polygon) / len(polygon)
+        rise = grading.rise_at(cx, cy)
+        face_ids = list(dict.fromkeys(vertex(x, y, rise, edge=abs(f - walk) <= 1e-6)
+                                      for x, y, f in polygon))
+        if len(face_ids) < 3:
+            return
+        faces.append(tuple(face_ids))
+        for index, a in enumerate(polygon):
+            b = polygon[(index + 1) % len(polygon)]
+            if abs(a[2] - walk) <= 1e-6 and abs(b[2] - walk) <= 1e-6:
+                iso_edges.append((a, b, rise))
+            line = on_line(a, b)
+            if line is not None:
+                along = 1 - line[0]
+                span = tuple(sorted((round(a[along], 8), round(b[along], 8))))
+                line_edges[line + span].append((rise, a, b))
+
+    count = math.ceil(extent / cell)
+    for i in range(-count, count):
+        for j in range(-count, count):
+            if (i, j) in fine:
+                for fi in (2 * i, 2 * i + 1):
+                    for fj in (2 * j, 2 * j + 1):
+                        x0, y0 = fi * SAMPLE, fj * SAMPLE
+                        corners = ((x0, y0, field.value(x0, y0)),
+                                   (x0 + SAMPLE, y0, field.value(x0 + SAMPLE, y0)),
+                                   (x0 + SAMPLE, y0 + SAMPLE,
+                                    field.value(x0 + SAMPLE, y0 + SAMPLE)),
+                                   (x0, y0 + SAMPLE, field.value(x0, y0 + SAMPLE)))
+                        if all(c[2] <= walk for c in corners):
+                            continue
+                        for triangle in _cell_triangles(corners, field, walk):
+                            emit(_clip(triangle, walk, False))
+                continue
+            x0, y0 = i * cell, j * cell
+            x1, y1, xm, ym = x0 + cell, y0 + cell, x0 + SAMPLE, y0 + SAMPLE
+            split_x, split_y = round(xm, 8) in middles, round(ym, 8) in middles
+            polygon = [(x0, y0, FAR)]
+            if (i, j - 1) in fine or split_x:
+                polygon.append((xm, y0, FAR))
+            polygon.append((x1, y0, FAR))
+            if (i + 1, j) in fine or split_y:
+                polygon.append((x1, ym, FAR))
+            polygon.append((x1, y1, FAR))
+            if (i, j + 1) in fine or split_x:
+                polygon.append((xm, y1, FAR))
+            polygon.append((x0, y1, FAR))
+            if (i - 1, j) in fine or split_y:
+                polygon.append((x0, ym, FAR))
+            pieces = [polygon]
+            if split_x:
+                pieces = [_halfplane(q, 0, xm, keep) for q in pieces for keep in (True, False)]
+            if split_y:
+                pieces = [_halfplane(q, 1, ym, keep) for q in pieces for keep in (True, False)]
+            for piece in pieces:
+                emit(piece)
+
+    walls, wall_faces, wall_ids = [], [], {}
+
+    def wall_vertex(co):
+        co = (round(co[0], 8), round(co[1], 8), round(co[2], 8))
+        if co not in wall_ids:
+            wall_ids[co] = len(walls)
+            walls.append(co)
+        return wall_ids[co]
+
+    def wall(a, b, a_low, a_high, b_low, b_high, toward_left):
+        """A wall over edge a-b of a ground sheet between two height profiles,
+        facing the sheet's side (left of a-b) or the other."""
+        da, db = a_high - a_low, b_high - b_low
+        if abs(da) < 1e-6 and abs(db) < 1e-6:
+            return
+        if da < -1e-9 or db < -1e-9:
+            if da * db < 0:
+                # The profiles cross: two triangles either side.
+                t = da / (da - db)
+                m = (a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t)
+                zm = a_low + (b_low - a_low) * t
+                wall(a, m, a_low, a_high, zm, zm, toward_left)
+                wall(m, b, zm, zm, b_low, b_high, toward_left)
+                return
+            a_low, a_high, b_low, b_high = a_high, a_low, b_high, b_low
+            toward_left = not toward_left
+        points = [(a[0], a[1], a_high), (b[0], b[1], b_high), (b[0], b[1], b_low),
+                  (a[0], a[1], a_low)]
+        if not toward_left:
+            points = [points[1], points[0], points[3], points[2]]
+        face_ids = list(dict.fromkeys(wall_vertex(point) for point in points))
+        if len(face_ids) >= 3:
+            wall_faces.append(tuple(face_ids))
+
+    def z_of(point, rise):
+        return vertices[ids[(round(point[0], 8), round(point[1], 8), rise)]][2]
+
+    # Ground against the paving: the wall faces the street where the ground
+    # is higher, the ground where the paving is.
+    for a, b, rise in iso_edges:
+        ga, gb = z_of(a, rise), z_of(b, rise)
+        pa, pb = grading.wall_foot(a[0], a[1]), grading.wall_foot(b[0], b[1])
+        # Low profile: the paving's foot; high: the ground (a negative height
+        # turns the wall to face the ground).
+        wall(a, b, pa, ga, pb, gb, False)
+    # Ground against ground along a terrace's edge, facing the lower side.
+    for key in sorted(line_edges):
+        entries = line_edges[key]
+        levels = {rise for rise, _, _ in entries}
+        if len(levels) < 2:
+            continue
+        low = min(entries, key=lambda e: e[0])
+        high = max(entries, key=lambda e: e[0])
+        _, a, b = low
+        wall(a, b, z_of(a, low[0]), z_of(a, high[0]), z_of(b, low[0]), z_of(b, high[0]), True)
+
+    if settings.wasteland > 0:
+        holes = []
+        for outer in outer_roads(plan):
+            a0 = extent if outer.sign > 0 else -extent
+            holes.append(outer.rect(a0))
+        for rect in ((-far, -far, -extent, far), (extent, -far, far, far),
+                     (-extent, extent, extent, far), (-extent, -far, extent, -extent)):
+            for x0, y0, x1, y1 in _subtract(rect, holes):
+                faces.append(tuple(vertex(x, y, 0.0, GROUND_Z_TERRAIN)
+                                   for x, y in ((x0, y0), (x1, y0), (x1, y1), (x0, y1))))
+    result = ((vertices, faces), (walls, wall_faces))
+    plan.__dict__['_terraced_ground'] = result
+    return result
+
+
 def footprint(center, width, depth, rotation):
     """World corners (counter-clockwise) of a pad: width along its front."""
     c, s = math.cos(rotation), math.sin(rotation)
@@ -496,17 +744,34 @@ def _polygon_distance(polygon, x, y):
 
 
 class Grading:
-    """The graded ground of a terrain city: the road-level surface, cut back
-    round every building and site pad (the ground stays under the pad's top and
-    rises from it no steeper than PAD_CUT_SLOPE) and held up to the curbs'
-    skirts along every footway. Heights are relative to the city origin."""
+    """The graded ground of a terrain city: the natural ground, cut back round
+    every building and site pad (the ground stays under the pad's top and
+    rises from it no steeper than PAD_CUT_SLOPE) and, on hills, held up to the
+    curbs' skirts along every footway. Heights are relative to the city origin.
+
+    On terraces the natural ground is the base hills plus the rise of the
+    terrace a point is on; the terraces' edges are snapped to the ground's
+    sample grid (``line``), where the retaining walls stand. A pad shapes only
+    the ground on its own level, and the stairs are holes in the ground.
+    """
 
     def __init__(self, plan):
         settings = plan.settings
         self.surface = plan.surface()
         self.offset = GROUND_Z_TERRAIN if plan.heights else GROUND_Z
         self.walk = settings.sidewalk_width
-        self.field = Field(plan)
+        self.size = settings.block_size
+        self.terraces = getattr(plan, 'terraces', None) or {}
+        self.stairs = stair_layout(plan) if self.terraces else []
+        self.streets = Field(plan)
+        self.field = (Field(plan, [stair['segment'] for stair in self.stairs])
+                      if self.stairs else self.streets)
+        self.nodes = junctions(plan)
+        self.plan = plan
+        if self.terraces:
+            self.base = plan.ground_surface().base
+            self.rises = {tuple(c): region['step'] for region in self.terraces['regions']
+                          for c in region['cells']}
         curb = settings.curb_height
         self.pads = ([(footprint(lot.center, lot.width, lot.depth, lot.rotation),
                        curb + lot.level) for lot in plan.lots] +
@@ -514,21 +779,55 @@ class Grading:
         self.hash = defaultdict(list)
         for polygon, top in self.pads:
             xs, ys = [p[0] for p in polygon], [p[1] for p in polygon]
+            rise = self.rise_at(sum(xs) / len(xs), sum(ys) / len(ys))
             margin = 12.0
             for i in range(math.floor((min(xs) - margin) / PAD_CELL),
                            math.floor((max(xs) + margin) / PAD_CELL) + 1):
                 for j in range(math.floor((min(ys) - margin) / PAD_CELL),
                                math.floor((max(ys) + margin) / PAD_CELL) + 1):
-                    self.hash[i, j].append((polygon, top))
+                    self.hash[i, j].append((polygon, top, rise))
 
-    def natural(self, x, y):
-        return self.surface(x, y) + self.offset
+    def line(self, k):
+        """The ground's line for lattice line ``k`` (a terrace's edge)."""
+        return round(k * self.size / SAMPLE) * SAMPLE
 
-    def ground(self, x, y, cap=math.inf):
-        """Graded ground at (x, y); ``cap`` is a pad top it must also stay under."""
+    def _index(self, value):
+        k = math.floor(value / self.size)
+        while value < self.line(k):
+            k -= 1
+        while value >= self.line(k + 1):
+            k += 1
+        return k
+
+    def rise_at(self, x, y):
+        """Rise of the terrace the ground at (x, y) belongs to (0 off them)."""
+        if not self.terraces:
+            return 0.0
+        return self.rises.get((self._index(x), self._index(y)), 0.0)
+
+    def natural(self, x, y, rise=None):
+        if not self.terraces:
+            return self.surface(x, y) + self.offset
+        if rise is None:
+            rise = self.rise_at(x, y)
+        return self.base(x, y) + rise + self.offset
+
+    def ground(self, x, y, cap=math.inf, rise=None):
+        """Graded ground at (x, y); ``cap`` is a pad top it must also stay
+        under; ``rise`` the terrace level (on a terrace's edge, which side)."""
+        if self.terraces:
+            if rise is None:
+                rise = self.rise_at(x, y)
+            height = min(self.natural(x, y, rise), cap - PAD_CLEAR)
+            for polygon, top, level in self.hash.get(
+                    (math.floor(x / PAD_CELL), math.floor(y / PAD_CELL)), ()):
+                if level == rise:
+                    height = min(height, top - PAD_CLEAR +
+                                 PAD_CUT_SLOPE * _polygon_distance(polygon, x, y))
+            return height
         level = self.surface(x, y)
         height = min(level + self.offset, cap - PAD_CLEAR)
-        for polygon, top in self.hash.get((math.floor(x / PAD_CELL), math.floor(y / PAD_CELL)), ()):
+        for polygon, top, _ in self.hash.get((math.floor(x / PAD_CELL), math.floor(y / PAD_CELL)), ()):
             height = min(height, top - PAD_CLEAR + PAD_CUT_SLOPE * _polygon_distance(polygon, x, y))
         if self.field.value(x, y) <= self.walk + .5:
             height = max(height, level + CURB_BOTTOM_TERRAIN + .05)
@@ -550,6 +849,114 @@ class Grading:
             low = min(low, self.ground(x, y))
         return low
 
+    def stair_at(self, x, y):
+        """The stair whose hole (x, y) is in, if a stair is nearer than any street."""
+        best, value = None, self.streets.value(x, y)
+        for stair in self.stairs:
+            candidate = _distance(x, y, stair['segment']) - stair['segment'][4]
+            if candidate < value:
+                best, value = stair, candidate
+        return best
+
+    def paved(self, x, y):
+        """The walking surface at a point of the street network or a stair:
+        the carriageway, the footway's top, or a stair's pitch line."""
+        stair = self.stair_at(x, y)
+        if stair is not None:
+            return stair_pitch(stair, x, y)
+        level = self.surface(x, y)
+        if self.streets.value(x, y) <= 0:
+            return level
+        return level + pavement_height(self.plan, x, y, self.nodes)
+
+    def wall_foot(self, x, y):
+        """Where a wall at the edge of the paving meets it: the footway's top,
+        or a riser below a stair's pitch line (under every step)."""
+        stair = self.stair_at(x, y)
+        if stair is not None:
+            return stair_pitch(stair, x, y) - stair['riser']
+        return self.surface(x, y) + pavement_height(self.plan, x, y, self.nodes)
+
+
+def stair_layout(plan):
+    """Each stair as built: from the upper street's footway (``top`` metres
+    along from the upper junction, at ``z_top``) down to the lower street's
+    (``bottom``, ``z_bottom``) in equal steps; ``segment`` is its hole in the
+    ground, as a field row (``STAIR_WIDTH`` wide at the footways' edge)."""
+    terraces = getattr(plan, 'terraces', None) or {}
+    if not terraces.get('stairs'):
+        return []
+    settings = plan.settings
+    size, walk = settings.block_size, settings.sidewalk_width
+    field = Field(plan)
+    surface = plan.surface()
+    nodes = junctions(plan)
+    stairs = []
+    for stair in terraces['stairs']:
+        hx, hy = stair['high'][0] * size, stair['high'][1] * size
+        lx, ly = stair['low'][0] * size, stair['low'][1] * size
+        length = math.hypot(lx - hx, ly - hy)
+        ux, uy = (lx - hx) / length, (ly - hy) / length
+
+        def clear(sign):
+            # The first point out from a junction past its street's footway.
+            for k in range(int(length * 10)):
+                along = k / 10 if sign > 0 else length - k / 10
+                if field.value(hx + ux * along, hy + uy * along) > walk:
+                    return along
+            return length / 2
+        top, bottom = clear(1), clear(-1)
+
+        def level(along):
+            x, y = hx + ux * along, hy + uy * along
+            return surface(x, y) + pavement_height(plan, x, y, nodes)
+        z_top, z_bottom = level(top), level(bottom)
+        steps = max(1, math.ceil((z_top - z_bottom) / STAIR_RISE))
+        half = stair['width'] / 2
+        stairs.append({'origin': (hx, hy), 'direction': (ux, uy), 'length': length,
+                       'top': top, 'bottom': bottom, 'z_top': z_top, 'z_bottom': z_bottom,
+                       'steps': steps, 'riser': (z_top - z_bottom) / steps, 'half': half,
+                       'segment': (hx, hy, lx, ly, half - walk)})
+    return stairs
+
+
+def stair_pitch(stair, x, y):
+    """Height of a stair's pitch line (its step nosings) abreast of (x, y)."""
+    (hx, hy), (ux, uy) = stair['origin'], stair['direction']
+    along = (x - hx) * ux + (y - hy) * uy
+    run = stair['bottom'] - stair['top']
+    t = max(0.0, min(1.0, (along - stair['top']) / run)) if run > 0 else 0.0
+    return stair['z_top'] + (stair['z_bottom'] - stair['z_top']) * t
+
+
+def build_stair_mesh(plan):
+    """Stairs up the terraces' faces: closed solid steps between the walls,
+    with a landing under each street's footway."""
+    vertices, faces = [], []
+    for stair in stair_layout(plan):
+        (hx, hy), (ux, uy) = stair['origin'], stair['direction']
+        px, py = -uy, ux
+        half = stair['half'] - STAIR_INSET
+        base = stair['z_bottom'] - STAIR_BASE
+        run = (stair['bottom'] - stair['top']) / stair['steps']
+        pieces = [(stair['top'] - STAIR_LANDING, stair['top'], stair['z_top'] - .02)]
+        for index in range(stair['steps']):
+            top = stair['z_top'] - (index + 1) * stair['riser']
+            pieces.append((stair['top'] + index * run, stair['top'] + (index + 1) * run,
+                           top - (.02 if index == stair['steps'] - 1 else 0.0)))
+        pieces.append((stair['bottom'], stair['bottom'] + STAIR_LANDING, stair['z_bottom'] - .02))
+        for a0, a1, top in pieces:
+            offset = len(vertices)
+            for z in (base, top):
+                for along, across in ((a0, -half), (a1, -half), (a1, half), (a0, half)):
+                    vertices.append((round(hx + ux * along + px * across, 8),
+                                     round(hy + uy * along + py * across, 8), round(z, 8)))
+            # Counter-clockwise seen from outside (the frame is right-handed).
+            faces.extend(tuple(offset + i for i in f) for f in
+                         ((0, 3, 2, 1), (4, 5, 6, 7), (0, 1, 5, 4),
+                          (1, 2, 6, 5), (2, 3, 7, 6), (3, 0, 4, 7)))
+    return vertices, faces
+
 
 def heightmap(plan, resolution, column_sign=1, row_sign=1):
     """The graded ground with every building and site pad at its top (streets
@@ -565,14 +972,23 @@ def heightmap(plan, resolution, column_sign=1, row_sign=1):
     y0 = -extent if row_sign > 0 else extent
     grading = Grading(plan)
     surface, offset = grading.surface, grading.offset
+    terraced = bool(grading.terraces)
     rows = []
     for r in range(resolution):
         y = y0 + row_sign * r * step
         row = []
         for c in range(resolution):
             x = x0 + column_sign * c * step
-            height = surface(x, y) + offset
-            for polygon, top in grading.hash.get((math.floor(x / PAD_CELL), math.floor(y / PAD_CELL)), ()):
+            if terraced and grading.field.value(x, y) <= grading.walk:
+                # Streets, ramps and stairs at their walking surface.
+                row.append(grading.paved(x, y))
+                continue
+            rise = grading.rise_at(x, y)
+            height = grading.natural(x, y, rise) if terraced else surface(x, y) + offset
+            for polygon, top, level in grading.hash.get(
+                    (math.floor(x / PAD_CELL), math.floor(y / PAD_CELL)), ()):
+                if level != rise:
+                    continue
                 distance = _polygon_distance(polygon, x, y)
                 if distance <= 0.0:
                     height = top

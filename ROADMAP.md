@@ -18,6 +18,7 @@
 | v0.19 | Organic city shape: an irregular edge with lobes, notches and fingers |
 | v0.20 | Cinemas: palace, twin and multiplex filling their pads, stadium seating with seat markers; cul-de-sacs only among houses; one drive-in per city |
 | v0.21 | Rolling hills: streets graded to their tier's limit, level pads with plinths and cut slopes, retaining curbs, heights in the metadata, a heightmap export |
+| v0.22 | Terraced terrain: a plateau and podiums of whole blocks behind retaining walls, ramps and stairs up to them, exact walls wherever ground meets a footway |
 
 See [CHANGELOG.md](CHANGELOG.md) for the details.
 
@@ -50,9 +51,10 @@ stay as they are; every feature below is off until its setting is changed.
 
 | Version | Scope |
 | --- | --- |
-| v0.22 | Terraced terrain (benches and a plateau, with escarpments), and the hills carried on into the wasteland so small maps reach their relief. Cross-sections: roadside ditches outside the dense districts, embankments and cuttings, retaining walls, ramp and stair streets at escarpments, culverts |
-| v0.23 | Levels: elevated, at-grade and below-grade structures; a raised highway with ramps; road tunnels at the map edge; rail with level crossings and a freight siding; subway routes with station entrances; the sewer network as data, with manholes |
-| v0.24 | Megacity preset: megablocks, stacked highway decks, skybridges and collapsed spans, built from instanced modules with a low-poly skyline ring |
+| v0.23 | Cross-sections: roadside ditches outside the dense districts, embankments and cuttings, culverts; the hills carried on into the wasteland so small maps reach their relief |
+| v0.24 | Levels: elevated, at-grade and below-grade structures; a raised highway with ramps; road tunnels at the map edge; rail with level crossings and a freight siding; subway routes with station entrances; the sewer network as data, with manholes |
+| v0.25 | Freeway to North American practice: a free-flowing alignment with gentle curves (no right-angle turns; curve radii and grades for its design speed), grade-separated from the street grid, with interchanges (diamond, partial cloverleaf) whose on- and off-ramps have acceleration and deceleration lanes |
+| v0.26 | Megacity preset: megablocks, stacked highway decks, skybridges and collapsed spans, built from instanced modules with a low-poly skyline ring |
 
 ## Later
 

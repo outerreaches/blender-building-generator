@@ -11,8 +11,9 @@ from .metadata import SPACES as METADATA_SPACES, CityMetadata
 from .spec import BuildingSpec
 from .sites import (KINDS as SITE_KINDS, PAD_THICKNESS, VARIANTS as SITE_VARIANTS,
                     compose as compose_site)
-from .streets import (Grading, build_ground_mesh, build_outer_road_mesh, build_street_mesh,
-                      footprint, junctions, outer_road_dashes, pavement_height, site_footprint)
+from .streets import (Grading, build_ground_mesh, build_outer_road_mesh, build_stair_mesh,
+                      build_street_mesh, build_wall_mesh, footprint, junctions,
+                      outer_road_dashes, pavement_height, site_footprint)
 from .styles import STYLE_ITEMS, STYLE_COLORS, building_recipe
 from .city_export import store_city_metadata
 from .building_assets import (addon_version, create_rubble, create_shell, create_shelter,
@@ -81,6 +82,23 @@ def build_roads(plan, collection):
         outer['reach_m'] = [road['length'] for road in plan.outer_roads]
         outer.parent = obj
     return obj
+
+
+def build_terrace_works(plan, collection, origin):
+    """Retaining walls and stairs of a terraced city."""
+    concrete = material('City_Retaining_Wall', (.46, .45, .42, 1))
+    vertices, faces = build_wall_mesh(plan)
+    if faces:
+        walls = mesh_object('City_Retaining_Walls', vertices, faces, collection, concrete)
+        walls['surface_role'] = 'retaining_walls'
+        walls.location = origin
+    vertices, faces = build_stair_mesh(plan)
+    if faces:
+        stairs = mesh_object('City_Stairs', vertices, faces, collection,
+                             material('City_Pavement', (.42, .41, .38, 1)))
+        stairs['surface_role'] = 'stairs'
+        stairs['stair_count'] = len(plan.terraces['stairs'])
+        stairs.location = origin
 
 
 BULB_PATH = 3.0   # Width of the path from a house round a turning circle to its footway.
@@ -421,11 +439,20 @@ class MESH_OT_generate_city(bpy.types.Operator):
     terrain: EnumProperty(name='Terrain', default='FLAT',
                           items=[('FLAT', 'Flat', 'Everything on one level'),
                                  ('ROLLING', 'Rolling Hills', 'Gentle seeded hills; streets are '
-                                  'graded to their limits and buildings stand on level pads')])
+                                  'graded to their limits and buildings stand on level pads'),
+                                 ('TERRACED', 'Terraced', 'Rolling hills carrying a plateau and '
+                                  'low podiums of whole blocks behind retaining walls, reached '
+                                  'by ramps and stairs')])
     relief: FloatProperty(name='Relief (m)', default=30.0, min=0, max=40,
-                          description='Rolling hills: metres from the lowest ground to the '
+                          description='Hills: metres from the lowest ground to the '
                                       'highest (the map\'s edge stays level, which holds small '
                                       'maps lower)')
+    plateau_height: FloatProperty(name='Plateau Height (m)', default=18.0, min=0, max=30,
+                                  description='Terraced: how far the plateau rises above the '
+                                              'streets round it (0: no plateau)')
+    podiums: IntProperty(name='Podiums', default=1, min=0, max=3,
+                         description='Terraced: low raised compounds of a few blocks, '
+                                     'one storey up')
     block_size: FloatProperty(name='Block Size (m)', default=56, min=48, max=120)
     primary_count: IntProperty(name='Primary Locations', default=6, min=1, max=16)
     secondary_count: IntProperty(name='Secondary Locations', default=12, min=0, max=100)
@@ -488,7 +515,7 @@ class MESH_OT_generate_city(bpy.types.Operator):
         layout = self.layout
         for title, names in (
             ('City Growth', ('preset', 'seed', 'radius', 'shape', 'irregularity', 'block_size', 'primary_count', 'secondary_count', 'driving_loop_count')),
-            ('Terrain', ('terrain', 'relief')),
+            ('Terrain', ('terrain', 'relief', 'plateau_height', 'podiums')),
             ('Density and Access', ('curve_radius', 'core_radius', 'core_density', 'outskirts_density', 'road_density', 'setback', 'sidewalk_width', 'curb_height', 'wasteland', 'highway_reach')),
             ('Buildings', ('style', 'damage', 'max_buildings', 'downtown_superblocks',
                            'points_of_interest', 'small_props', 'water', 'detail')),
@@ -500,6 +527,8 @@ class MESH_OT_generate_city(bpy.types.Operator):
                 if name == 'irregularity' and self.shape != 'ORGANIC':
                     continue
                 if name == 'relief' and self.terrain == 'FLAT':
+                    continue
+                if name in ('plateau_height', 'podiums') and self.terrain != 'TERRACED':
                     continue
                 group.prop(self, name)
         if self.detail == 'SHELLS':
@@ -554,6 +583,8 @@ class MESH_OT_generate_city(bpy.types.Operator):
                                  root, material('City_Ground', (.23, .21, .17, 1)))
             ground['surface_role'] = 'terrain'
             ground.location = origin
+            if plan.terraces:
+                build_terrace_works(plan, root, origin)
             grading = Grading(plan) if plan.heights else None
             context.window_manager.progress_begin(0, max(1, len(plan.lots)))
             meta = CityMetadata(plan, tuple(origin), self.metadata_space, self.small_props,

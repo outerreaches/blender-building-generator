@@ -27,7 +27,8 @@ sized for the game's 2 m player capsule.
   tops keep the window grid. Every wall, slab, partition and stair is a
   closed solid: no holes, no flipped faces, no z-fighting.
 - **Cities.** Seeded district growth inside a square or an organic outline,
-  on flat ground or rolling hills, curved roads with filleted junctions and
+  on flat ground, rolling hills or terraces (a plateau and podiums behind
+  retaining walls, reached by ramps and stairs), curved roads with filleted junctions and
   connected driving circuits, footways and curbs, built-out suburbs with
   houses round their cul-de-sacs, a dense downtown of party-walled towers
   and superblocks, and highways that run out into the wasteland. A **Small

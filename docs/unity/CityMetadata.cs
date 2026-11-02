@@ -35,6 +35,9 @@ namespace Ares.CityGen
         public Junction[] junctions;
         public DrivingLoop[] driving_loops;
         public OuterRoad[] outer_roads;
+        public Terrace[] terraces;      // Terraced terrain: raised blocks behind retaining walls.
+        public Ramp[] ramps;
+        public Stair[] stairs;
         public Building[] buildings;
         public Site[] sites;
         public TransitStop[] transit_stops;
@@ -69,8 +72,10 @@ namespace Ares.CityGen
         public bool small_props_modelled;
         public bool interiors_listed;   // False: rooms, lifts and railings left out.
         public bool water_modelled;     // False: basins are dry; fill them from "water" markers.
-        public string terrain;          // FLAT or ROLLING; heights are in every position.
-        public float relief;            // Rolling hills: the setting, metres low to high.
+        public string terrain;          // FLAT, ROLLING or TERRACED; heights are in every position.
+        public float relief;            // Hills: the setting, metres low to high.
+        public float plateau_height;    // Terraced: the plateau's rise (setting).
+        public int podiums;             // Terraced: how many podiums were asked for.
     }
 
     [Serializable]
@@ -120,6 +125,36 @@ namespace Ares.CityGen
         public float[] forward;
         public float length;      // Beyond the city edge.
         public float fade;        // Last stretch where the surface breaks up.
+    }
+
+    [Serializable]
+    public class Terrace
+    {
+        public string id;
+        public string kind;       // plateau or podium.
+        public float rise;        // Metres above the hills round it.
+        public int[] blocks;      // Lattice blocks (x, y pairs, flattened).
+    }
+
+    [Serializable]
+    public class Ramp
+    {
+        public string id;
+        public string terrace;
+        public int[] nodes;       // Lattice junctions from the top down (x, y pairs).
+        public float[] points;    // Their positions (x, y, z triples).
+    }
+
+    [Serializable]
+    public class Stair
+    {
+        public string id;
+        public string terrace;
+        public float[] top;       // Centre of the top step's edge, at the upper footway.
+        public float[] bottom;    // ...and of the foot, at the lower footway.
+        public float width;
+        public int steps;
+        public float riser;
     }
 
     [Serializable]

@@ -1,5 +1,39 @@
 # Changelog
 
+## v0.22.0: Terraced terrain with retaining walls, ramps and stairs
+
+- **Terrain: Terraced** puts the city's rolling hills under raised
+  terraces of whole blocks behind retaining walls:
+  - a **plateau**, by default 18 m high (**Plateau Height**, up to 30 m),
+    over about 15% of the blocks;
+  - **podiums** one storey (4.2 m) high, over three to six blocks
+    (**Podiums**, 0 to 3, default 1).
+  - The hills under a terrace are graded nearly level, so it stands its
+    full height all round.
+- **Ramps.** Two ramps climb to the plateau, and every street onto a
+  podium is one. Ramps are at most 10%, ease flat at their ends and turns,
+  and run out from the terrace, turning at most twice (an 18 m plateau's
+  run four blocks, with the side streets along them closed).
+- **Stairs.** Other streets up a terrace's face become 6 m stairs in equal
+  steps of at most 0.17 m, cut into the terrace between walls.
+- **Retaining walls** wherever the ground meets a footway or stair at
+  another height, and along a terrace's edge. On a terraced city the ground
+  is cut exactly at the footways' edge on the street mesh's own grid, so
+  ground, walls and footways share their edges.
+- **Placement.** No building or site faces a terrace wall or a ramp, a site
+  never straddles two levels, and driving circuits keep to the streets at a
+  terrace's foot. Terraces are laid out before the circuits and the local
+  streets, which keep to them, and every street stays reachable.
+- **Metadata** lists `terraces`, `ramps` and `stairs`, and `city` records
+  `plateau_height` and `podiums`. The heightmap holds streets, ramps and
+  stairs at their walking surface.
+- Flat and Rolling Hills cities are unchanged.
+- Plan schema 13: `plateau_height` and `podiums` settings, and `terraces`
+  (regions, ramps, stairs and the hills' node heights).
+- **Roadmap:** a North American freeway (gentle curves, grade-separated
+  interchanges with on- and off-ramps) is planned for v0.25, and the
+  megacity moves to v0.26.
+
 ## v0.21.0: Rolling hills and a heightmap export
 
 - **Terrain: Rolling Hills** in Generate City puts the city on gentle seeded

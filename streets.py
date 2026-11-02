@@ -933,10 +933,20 @@ def viaducts(plan, grading=None):
             spots = ([start + length / 2] if count == 1 else
                      [start + PIER_END + (length - 2 * PIER_END) * k / (count - 1)
                       for k in range(count)])
+            # No pier in another street's paving (where a ramp leaves the
+            # junction on a terrace's top): the next spot along that is clear.
+            total = sum(math.dist(a, b) for a, b in zip(path['points'], path['points'][1:]))
+            others = Field(plan, (), {path['id']: [(0.0, total)]})
+            line = _walk_polyline(path['points'], 1.0)
             piers = []
             for spot in spots:
-                along, (x, y), (tx, ty) = min(
-                    _walk_polyline(path['points'], 1.0), key=lambda item: abs(item[0] - spot))
+                clear = [item for item in line if start <= item[0] <= end and
+                         others.value(*item[1]) >= walk + PIER_SIZE[1]]
+                if not clear:
+                    continue
+                along, (x, y), (tx, ty) = min(clear, key=lambda item: abs(item[0] - spot))
+                if abs(along - spot) > PIER_SPACING / 2:
+                    continue
                 nx, ny = -ty, tx
                 foot = min(grading.natural(x + tx * a + nx * c, y + ty * a + ny * c)
                            for a in (-PIER_CAP[0] / 2, PIER_CAP[0] / 2)

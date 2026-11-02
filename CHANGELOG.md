@@ -1,5 +1,21 @@
 # Changelog
 
+## v0.22.6: Terraces set into the land on two sides
+
+- **Two natural sides or three.** Every terrace, the plateau and the
+  podiums alike, now meets the hills round the city on at least two
+  sides, joined round the corner between them by a faceted slope, so it
+  sits in a corner of the hillside instead of standing out with walls on
+  three sides. Terraces therefore stand where the city's edge turns a
+  corner. Where no such spot is left in a downtown or residential
+  district, the terrace is not built: of 40 sample cities, 12 now get a
+  podium (19 before) and 39 a plateau (40 before).
+- **Open hillside.** No street or stair runs down a natural side any more
+  (the land there rises on past the terrace's top, so such a stair hardly
+  climbed), and no ramp leaves over one. The streets that did are left out.
+- **Viaduct piers** no longer stand in another street's paving where a ramp
+  leaves the junction on a terrace's top.
+
 ## v0.22.5: Terraces set into the hillside
 
 - **Lower plateau.** The plateau's default height is halved, to 9 m.

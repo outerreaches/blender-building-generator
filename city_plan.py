@@ -752,7 +752,7 @@ def _terraces(settings, locations, roads):
             cells = _grow_terrace(seed_cell, target, allowed, rng)
             if len(cells) < min(target, 4):
                 continue
-            # One to three sides fall to the hills round it as natural slopes,
+            # Two or three sides fall to the hills round it as natural slopes,
             # always at the city's edge.
             soft = _soft_sides(cells, at_edge, rng)
             if soft is None:
@@ -785,13 +785,14 @@ def _terraces(settings, locations, roads):
     return result if result['regions'] else {}
 
 
-SOFT_SIDES = (1, 3)       # A terrace falls naturally on this many sides.
+SOFT_SIDES = (2, 3)       # A terrace falls naturally on this many sides.
 
 
 def _soft_sides(cells, allowed, rng):
     """The sides of a terrace that fall to the hills as a slope rather than a
-    wall: one to three of its four faces, chosen at random among those with
-    free blocks beyond. Returns {'slopes', 'corners'} or None. A slope falls
+    wall: two or three of its four faces, chosen at random among those with
+    free blocks beyond. Returns {'slopes', 'corners'}, or None when fewer than
+    two have them. A slope falls
     along ``axis`` (0: x, 1: y) toward ``sign`` from lattice line ``line``
     across one block per cell; a corner joins two slopes round a corner."""
     faces = {}
@@ -806,7 +807,7 @@ def _soft_sides(cells, allowed, rng):
                     lines[cell[axis] if sign < 0 else cell[axis] + 1].append(below)
             if lines:
                 faces[axis, sign] = lines
-    if not faces:
+    if len(faces) < SOFT_SIDES[0]:
         return None
     order = sorted(faces)
     rng.shuffle(order)
@@ -819,6 +820,8 @@ def _soft_sides(cells, allowed, rng):
                 used |= set(band)
                 slopes.append({'axis': axis, 'sign': sign, 'line': line,
                                'cells': [list(c) for c in band]})
+    if len({(slope['axis'], slope['sign']) for slope in slopes}) < SOFT_SIDES[0]:
+        return None
     corners = []
     for a in slopes:
         for b in slopes:
@@ -945,8 +948,8 @@ def _check_terrace(settings, roads, cells, band, step, reach, kind, highway, bul
     # A ramp may also climb where no street crosses yet (a new street).
     faces = sorted({(n, m) for n in inner for m in
                     ((n[0] + 1, n[1]), (n[0] - 1, n[1]), (n[0], n[1] + 1), (n[0], n[1] - 1))
-                    if m not in inner and max(map(abs, m)) <= radius - 1 and
-                    m not in highway and m not in bulbs})
+                    if m not in inner and m not in corners and max(map(abs, m)) <= radius - 1
+                    and m not in highway and m not in bulbs})
     options = []
 
     def free(n):
@@ -997,6 +1000,11 @@ def _check_terrace(settings, roads, cells, band, step, reach, kind, highway, bul
             continue
         if key in looped:
             return None
+        if low in corners:
+            # Down a natural side: open hillside, rising beyond as high as
+            # the top, so no street (or stair) crosses it.
+            cuts.append(key)
+            continue
         stairs.append({'low': list(low), 'high': list(high), 'width': STAIR_WIDTH})
     if any(key in looped or set(key) & bulbs for key in cuts):
         return None
@@ -1130,7 +1138,9 @@ def _terrace_guard(terraces):
             for key in _node_edges(node):
                 a, b = key
                 if (a in inner) != (b in inner):
-                    guard['stairs'].add(key)
+                    # Up the face a stair; down a natural side, nothing.
+                    low = b if a in inner else a
+                    guard['edges' if low in corners else 'stairs'].add(key)
                 elif a in inner and b in inner:
                     # Along the top (its edge too); none floating over lower ground.
                     if any(c in tops for c in _edge_cells(key)):

@@ -2,6 +2,10 @@
 
 Status: v0.21 (Rolling hills) and v0.22 (Terraced) done; the rest planned.
 
+**As built in v0.22.6:** a terrace takes two or three natural sides
+(`SOFT_SIDES`), so it seeds where two of its faces look out of the city;
+a terrace with fewer such faces is not built.
+
 **As built in v0.22.5:** the plateau defaults to 9 m, and a terrace's
 hill target climbs past its top (`HILL_KNOTS`: 1.2 times the rise a block
 out, 1.6 three blocks out, nothing at eight), so the terrace is a bench in

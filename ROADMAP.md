@@ -18,7 +18,7 @@
 | v0.19 | Organic city shape: an irregular edge with lobes, notches and fingers |
 | v0.20 | Cinemas: palace, twin and multiplex filling their pads, stadium seating with seat markers; cul-de-sacs only among houses; one drive-in per city |
 | v0.21 | Rolling hills: streets graded to their tier's limit, level pads with plinths and cut slopes, retaining curbs, heights in the metadata, a heightmap export |
-| v0.22 | Terraced terrain: a built-up plateau and podiums of whole blocks at the city's edge, walled on some sides and falling naturally into the open ground on one to three others; edge streets along the top; ramps (on viaducts where high) and stairs up to them; retaining walls with parapets |
+| v0.22 | Terraced terrain: a built-up plateau and podiums of whole blocks at the city's edge, walled on some sides and falling naturally into the open ground on two or three others; edge streets along the top; ramps (on viaducts where high) and stairs up to them; retaining walls with parapets |
 
 See [CHANGELOG.md](CHANGELOG.md) for the details.
 

@@ -180,8 +180,10 @@ blocks, walled on some sides and falling naturally to the hills on others:
   at the city's edge, preferring the built-up blocks there.
 - **Built up.** A terrace's top is a full district: every street across it
   is laid and every block is built on.
-- **Natural sides.** Each terrace meets the land round the city on one to
-  three of its sides, chosen at random among those facing out of the city.
+- **Natural sides.** Each terrace meets the land round the city on two or
+  three of its sides, chosen at random among those facing out of the city,
+  so it sits where the city's edge turns a corner (a podium with no such
+  spot left is not built).
   A terrace is a bench on the lower flank of a hill there: one block of
   open hillside (no buildings) leads from the terrace's edge up into the
   hill, which climbs on past the terrace's top (to 1.6 times its rise,
@@ -219,9 +221,10 @@ blocks, walled on some sides and falling naturally to the hills on others:
   - piers about 18 m apart, each a column under a cap beam;
   - a flat abutment at each end, kept just under the road so the deck can
     be driven onto.
-- **Stairs.** Any other street up a terrace's face, or down a natural side,
-  is a stair: 6 m wide, from the upper street's footway to the lower's, in
-  equal steps of at most 0.17 m, cut into the terrace between walls.
+- **Stairs.** Any other street up a terrace's face is a stair (none runs
+  down a natural side, which stays open hillside): 6 m wide, from the
+  upper street's footway to the lower's, in equal steps of at most 0.17 m,
+  cut into the terrace between walls.
 - **Retaining walls.**
   - **Where they stand:** wherever the ground meets a footway or a stair at
     another height, and along a terrace's edge where no street runs.

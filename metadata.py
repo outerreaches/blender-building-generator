@@ -308,14 +308,42 @@ class CityMetadata:
         from .streets import stair_layout
         space = self.space
         ox, oy, oz = self.origin
-        regions = [{tuple(c) for c in region['cells']} for region in found['regions']]
+        regions = [{tuple(c) for c in region['cells']} |
+                   {tuple(c) for s in region.get('slopes', ()) for c in s['cells']} |
+                   {tuple(c['cell']) for c in region.get('corners', ())}
+                   for region in found['regions']]
+        from .streets import DECK_DEPTH, viaducts
         terraces = [{'id': f'terrace_{k}', 'kind': region['kind'], 'rise': region['step'],
-                     'blocks': _flat(sorted(regions[k]))}
+                     'blocks': _flat(sorted(tuple(c) for c in region['cells'])),
+                     'slope_blocks': _flat(sorted(
+                         {tuple(c) for s in region.get('slopes', ()) for c in s['cells']} |
+                         {tuple(c['cell']) for c in region.get('corners', ())}))}
                     for k, region in enumerate(found['regions'])]
-        ramps = [{'id': f'ramp_{k}', 'terrace': _terrace_of(regions, tuple(ramp['nodes'][0])),
-                  'nodes': _flat(ramp['nodes']),
-                  'points': _flat(node_point(n) for n in ramp['nodes'])}
-                 for k, ramp in enumerate(found['ramps'])]
+        size = self.plan.settings.block_size
+        decks = viaducts(self.plan)
+
+        def point(x, y, z):
+            return space.point((ox + x, oy + y, oz + z))
+        ramps = []
+        for k, ramp in enumerate(found['ramps']):
+            nodes = [tuple(n) for n in ramp['nodes']]
+            rows = [(a[0] * size, a[1] * size, b[0] * size, b[1] * size)
+                    for a, b in zip(nodes, nodes[1:])]
+
+            def on_ramp(x, y):
+                return min(_segment_distance(x, y, r) for r in rows) < 6.0
+            spans = [d for d in decks
+                     if on_ramp(*d['stations'][len(d['stations']) // 2][1])]
+            ramps.append({'id': f'ramp_{k}', 'terrace': _terrace_of(regions, nodes[0]),
+                          'nodes': _flat(ramp['nodes']),
+                          'points': _flat(node_point(n) for n in ramp['nodes']),
+                          'viaducts': [{'start': point(*d['stations'][0][1],
+                                                       d['stations'][0][5] + DECK_DEPTH),
+                                        'end': point(*d['stations'][-1][1],
+                                                     d['stations'][-1][5] + DECK_DEPTH),
+                                        'piers': _flat(point(*c, foot)
+                                                       for c, _, foot, _ in d['piers'])}
+                                       for d in spans]})
         stairs = []
         for k, (stair, layout) in enumerate(zip(found['stairs'], stair_layout(self.plan))):
             (hx, hy), (ux, uy) = layout['origin'], layout['direction']
@@ -404,6 +432,13 @@ class CityMetadata:
                        'markers': [{'type': kind, 'count': count}
                                    for kind, count in sorted(counts.items())]},
         }
+
+
+def _segment_distance(px, py, row):
+    x0, y0, x1, y1 = row
+    dx, dy = x1 - x0, y1 - y0
+    t = max(0.0, min(1.0, ((px - x0) * dx + (py - y0) * dy) / (dx * dx + dy * dy)))
+    return math.hypot(px - x0 - dx * t, py - y0 - dy * t)
 
 
 def _terrace_of(regions, node):

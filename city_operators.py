@@ -12,8 +12,8 @@ from .spec import BuildingSpec
 from .sites import (KINDS as SITE_KINDS, PAD_THICKNESS, VARIANTS as SITE_VARIANTS,
                     compose as compose_site)
 from .streets import (Grading, build_ground_mesh, build_outer_road_mesh, build_stair_mesh,
-                      build_street_mesh, build_wall_mesh, footprint, junctions,
-                      outer_road_dashes, pavement_height, site_footprint)
+                      build_street_mesh, build_viaduct_mesh, build_wall_mesh, footprint,
+                      junctions, outer_road_dashes, pavement_height, site_footprint)
 from .styles import STYLE_ITEMS, STYLE_COLORS, building_recipe
 from .city_export import store_city_metadata
 from .building_assets import (addon_version, create_rubble, create_shell, create_shelter,
@@ -85,7 +85,8 @@ def build_roads(plan, collection):
 
 
 def build_terrace_works(plan, collection, origin):
-    """Retaining walls and stairs of a terraced city."""
+    """Retaining walls (with their parapets), stairs and viaducts of a
+    terraced city."""
     concrete = material('City_Retaining_Wall', (.46, .45, .42, 1))
     vertices, faces = build_wall_mesh(plan)
     if faces:
@@ -99,6 +100,11 @@ def build_terrace_works(plan, collection, origin):
         stairs['surface_role'] = 'stairs'
         stairs['stair_count'] = len(plan.terraces['stairs'])
         stairs.location = origin
+    vertices, faces = build_viaduct_mesh(plan)
+    if faces:
+        decks = mesh_object('City_Viaducts', vertices, faces, collection, concrete)
+        decks['surface_role'] = 'viaducts'
+        decks.location = origin
 
 
 BULB_PATH = 3.0   # Width of the path from a house round a turning circle to its footway.

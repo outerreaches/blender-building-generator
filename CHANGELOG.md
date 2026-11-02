@@ -1,5 +1,33 @@
 # Changelog
 
+## v0.22.1: Natural sides, viaducts and set-back walls on terraces
+
+- **Natural sides.** Each terrace now falls to the hills round it on one
+  to three sides, chosen at random. A natural side is one block of open
+  hillside, steepest at mid-slope, and nothing is built on it. Where two
+  natural sides meet at a corner, a rounded slope joins them. Stairs run
+  down them; the other sides keep their walls.
+- **Viaducts.** A ramp standing more than 4.5 m clear of the ground for
+  20 m or more now runs on a viaduct instead of a solid embankment, with
+  the ground running on under it:
+  - a 1.2 m deck with parapets;
+  - columns under cap beams, about 18 m apart;
+  - a flat abutment at each end.
+- **Gap at the wall foot.** Retaining walls holding ground up above a
+  street stand 2.5 m back from the footway, behind a verge at its level.
+  Sites and towers keep 3.5 m from a terrace's wall line.
+- **Parapets** on every wall that drops more than 1.5 m, on its upper side.
+- **Ramp footways** keep their curbs all the way up; they no longer come
+  down flush at the ramp's own junctions.
+- **No transit stops on inclines:** none on ramps, and none where the
+  street climbs more than 4%. This applies on Rolling Hills too, so a few
+  stops there are gone.
+- Dead-end streets at a terrace's foot are taken away, so their turning
+  ends no longer cut pockets into it.
+- Plan schema 14: each terrace's `slopes` and `corners`. Metadata: a
+  terrace's `slope_blocks` and a ramp's `viaducts` (deck ends and pier
+  feet).
+
 ## v0.22.0: Terraced terrain with retaining walls, ramps and stairs
 
 - **Terrain: Terraced** puts the city's rolling hills under raised

@@ -9,7 +9,7 @@ import json
 import math
 import random
 
-VERSION = 13
+VERSION = 14
 ROAD_WIDTHS = {"HIGHWAY": 20.0, "ARTERIAL": 12.0, "COLLECTOR": 8.0, "LOCAL": 6.0}
 ROAD_RANK = {name: i for i, name in enumerate(ROAD_WIDTHS)}
 # Corner radius at a route bend, before the curve_radius multiplier and clamping.
@@ -634,8 +634,13 @@ def _terraces(settings, locations, roads):
             cells = _grow_terrace(seed_cell, target, allowed, rng)
             if len(cells) < min(target, 4):
                 continue
-            found = _check_terrace(settings, roads, cells, step, reach, kind, highway, bulbs,
-                                   looped, taken)
+            # One to three sides fall to the hills round it as natural slopes.
+            soft = _soft_sides(cells, allowed, rng)
+            if soft is None:
+                continue
+            band = slope_cells(soft)
+            found = _check_terrace(settings, roads, cells | band, step, reach, kind, highway,
+                                   bulbs, looped, taken)
             if found is None:
                 continue
             ramps, stairs, cuts, added = found
@@ -643,17 +648,106 @@ def _terraces(settings, locations, roads):
                 roads.pop(key, None)
             roads.update(added)
             result['regions'].append({'cells': sorted([list(c) for c in cells]), 'step': step,
-                                      'kind': kind})
+                                      'kind': kind, **soft})
             result['ramps'] += ramps
             result['stairs'] += stairs
             ring = set()
-            for x, y in cells | {tuple(n) for ramp in ramps for n in ramp['nodes']}:
+            for x, y in cells | band | {tuple(n) for ramp in ramps for n in ramp['nodes']}:
                 for dx in (-2, -1, 0, 1):
                     for dy in (-2, -1, 0, 1):
                         ring.add((x + dx, y + dy))
             taken |= ring
             break
     return result if result['regions'] else {}
+
+
+SOFT_SIDES = (1, 3)       # A terrace falls naturally on this many sides.
+
+
+def _soft_sides(cells, allowed, rng):
+    """The sides of a terrace that fall to the hills as a slope rather than a
+    wall: one to three of its four faces, chosen at random among those with
+    free blocks beyond. Returns {'slopes', 'corners'} or None. A slope falls
+    along ``axis`` (0: x, 1: y) toward ``sign`` from lattice line ``line``
+    across one block per cell; a corner joins two slopes round a corner."""
+    faces = {}
+    for axis in (0, 1):
+        for sign in (-1, 1):
+            lines = defaultdict(list)
+            for cell in cells:
+                below = list(cell)
+                below[axis] += sign
+                below = tuple(below)
+                if below not in cells and allowed(below):
+                    lines[cell[axis] if sign < 0 else cell[axis] + 1].append(below)
+            if lines:
+                faces[axis, sign] = lines
+    if not faces:
+        return None
+    order = sorted(faces)
+    rng.shuffle(order)
+    count = rng.randint(*SOFT_SIDES)
+    slopes, used = [], set()
+    for axis, sign in order[:count]:
+        for line, band in sorted(faces[axis, sign].items()):
+            band = sorted(set(band) - used, key=lambda c: c[1 - axis])
+            if band:
+                used |= set(band)
+                slopes.append({'axis': axis, 'sign': sign, 'line': line,
+                               'cells': [list(c) for c in band]})
+    corners = []
+    for a in slopes:
+        for b in slopes:
+            if a['axis'] != 1 or b['axis'] != 0:
+                continue
+            x = b['line'] if b['sign'] > 0 else b['line'] - 1
+            y = a['line'] if a['sign'] > 0 else a['line'] - 1
+            cell = (x, y)
+            if (cell in cells or cell in used or not allowed(cell) or
+                    [x - b['sign'], y] not in a['cells'] or [x, y - a['sign']] not in b['cells']):
+                continue
+            used.add(cell)
+            corners.append({'cell': list(cell), 'x': [b['line'], b['sign']],
+                            'y': [a['line'], a['sign']]})
+    return {'slopes': slopes, 'corners': corners}
+
+
+def terrace_footprint(region):
+    """A terrace's blocks with its slopes."""
+    return {tuple(c) for c in region['cells']} | slope_cells(region)
+
+
+def slope_cells(region):
+    return ({tuple(c) for slope in region.get('slopes', ()) for c in slope['cells']} |
+            {tuple(corner['cell']) for corner in region.get('corners', ())})
+
+
+def slope_profile(t):
+    """Share of a terrace's rise left a fraction ``t`` down its slope."""
+    t = max(0.0, min(1.0, t))
+    return 1 - t * t * (3 - 2 * t)
+
+
+def slope_rises(region, line=lambda k: k):
+    """{cell: rise(x, y)} over a terrace's slopes; ``line`` maps a lattice
+    line to the coordinate it stands at (the mesh snaps them)."""
+    step = region['step']
+    found = {}
+
+    def down(value, crest, sign):
+        a, b = line(crest), line(crest + sign)
+        return (value - a) / (b - a)
+    for slope in region.get('slopes', ()):
+        axis, sign, crest = slope['axis'], slope['sign'], slope['line']
+        for c in slope['cells']:
+            found[tuple(c)] = (lambda x, y, axis=axis, sign=sign, crest=crest:
+                               step * slope_profile(down((x, y)[axis], crest, sign)))
+    for corner in region.get('corners', ()):
+        (cx, sx), (cy, sy) = corner['x'], corner['y']
+        found[tuple(corner['cell'])] = (
+            lambda x, y, cx=cx, sx=sx, cy=cy, sy=sy: step * slope_profile(
+                math.hypot(max(0.0, down(x, cx, sx)), max(0.0, down(y, cy, sy)))))
+    return found
 
 
 def _grow_terrace(seed_cell, target, allowed, rng):
@@ -784,16 +878,20 @@ def _check_terrace(settings, roads, cells, step, reach, kind, highway, bulbs, lo
         if not islands and not loose:
             break
         if islands:
-            island = min(islands, key=lambda piece: (len(piece), min(piece)))
+            candidates = sorted(islands, key=lambda piece: (len(piece), min(piece)))
         else:
-            island = {loose[0]}
+            candidates = [{loose[0]}]
             home = home - {tuple(n) for r in ramps for n in r['nodes']}
-        # On the terrace through its own top, else at the foot.
-        if island & inner and home & inner:
-            starts, targets, blocked = island & inner, home & inner, outside
+        # On the terrace through its own top, else at the foot; an island on
+        # the top waits until a ramp has brought the top onto the network.
+        for island in candidates:
+            if island & inner and home & inner:
+                starts, targets, blocked = island & inner, home & inner, outside
+            else:
+                starts, targets, blocked = island - raised, home - raised, corners | raised
+            if starts and targets:
+                break
         else:
-            starts, targets, blocked = island - raised, home - raised, corners | raised
-        if not starts or not targets:
             return None
         start, target = min(((a, b) for a in sorted(starts) for b in sorted(targets)),
                             key=lambda pair: (math.dist(*pair), pair))
@@ -812,9 +910,8 @@ def _check_terrace(settings, roads, cells, step, reach, kind, highway, bulbs, lo
         return None
     graph = {n for key in roads if key not in removed for n in key} | {n for key in added
                                                                         for n in key}
-    # A stair needs a street at both ends.
-    if any(tuple(s['high']) not in graph or tuple(s['low']) not in graph for s in stairs):
-        return None
+    # A stair needs a street at both ends; without one the street just goes.
+    stairs = [s for s in stairs if tuple(s['high']) in graph and tuple(s['low']) in graph]
     return ramps, stairs, sorted(set(cuts)) + sorted(removed - set(cuts)), added
 
 
@@ -878,7 +975,7 @@ def _terrace_guard(terraces):
     guard = {'nodes': set(), 'edges': set(), 'stairs': set(), 'keep': set(), 'avoid': set(),
              'top': set()}
     for region in terraces.get('regions', ()):
-        cells = {tuple(c) for c in region['cells']}
+        cells = terrace_footprint(region)
         corners = {n for c in cells for n in _cell_corners(c)}
         inner = {n for n in corners if all(c in cells for c in _node_cells(n))}
         guard['nodes'] |= inner
@@ -910,8 +1007,10 @@ def _terrace_guard(terraces):
     return guard
 
 
-def _finish_terraces(terraces, roads, stairs):
-    """Add the stairs the local streets asked for, where both ends have a street."""
+def _finish_terraces(terraces, roads, stairs, keep=frozenset()):
+    """Add the stairs the local streets asked for, where both ends have a
+    street; take away dead ends at a terrace's foot (whose turning end would
+    cut into it), unless a stair, a ramp or a location (``keep``) needs them."""
     if not terraces:
         return
     have = {n for key in roads for n in key}
@@ -923,6 +1022,24 @@ def _finish_terraces(terraces, roads, stairs):
             terraces['stairs'].append({'low': list(low), 'high': list(high),
                                        'width': STAIR_WIDTH})
     terraces['stairs'].sort(key=lambda s: (s['low'], s['high']))
+    foot = set()
+    for region in terraces['regions']:
+        cells = terrace_footprint(region)
+        corners = {n for c in cells for n in _cell_corners(c)}
+        foot |= {n for n in corners if not all(c in cells for c in _node_cells(n))}
+    needed = set(keep) | {tuple(n) for s in terraces['stairs'] for n in (s['low'], s['high'])}
+    needed |= {tuple(n) for ramp in terraces['ramps'] for n in ramp['nodes']}
+    while True:
+        degree = defaultdict(int)
+        for a, b in roads:
+            degree[a] += 1
+            degree[b] += 1
+        loose = [key for key in sorted(roads) if any(
+            degree[end] == 1 and end in foot and end not in needed for end in key)]
+        if not loose:
+            break
+        for key in loose:
+            roads.pop(key, None)
 
 
 def _terrace_benches(terraces):
@@ -930,7 +1047,7 @@ def _terrace_benches(terraces):
     graded nearly level, so it stands its full height all round."""
     keys = set()
     for region in terraces.get('regions', ()):
-        corners = {n for c in region['cells'] for n in _cell_corners(tuple(c))}
+        corners = {n for c in terrace_footprint(region) for n in _cell_corners(c)}
         keys |= {key for n in corners for key in _node_edges(n)
                  if key[0] in corners and key[1] in corners}
     return sorted(keys)
@@ -941,7 +1058,7 @@ def _terrace_raises(terraces):
     by its step; a ramp's junctions part of the way."""
     raised = {}
     for region in terraces['regions']:
-        cells = {tuple(c) for c in region['cells']}
+        cells = terrace_footprint(region)
         for cell in cells:
             for node in _cell_corners(cell):
                 x, y = node
@@ -965,6 +1082,37 @@ def terrace_obstacles(terraces):
     return terrace_walls(terraces), region, set(stairs), rows
 
 
+def terrace_slopes(terraces):
+    """Blocks on a terrace's slopes: open ground, never built on."""
+    return {c for region in (terraces or {}).get('regions', ()) for c in slope_cells(region)}
+
+
+WALL_CLEAR = 3.5          # Pads keep this far from a terrace's wall line.
+
+
+def _wall_rows(settings, terraces):
+    """Every lattice edge where a terrace meets lower ground, as carriageway
+    rows (as ``_path_rows``) wide enough to keep site pads WALL_CLEAR off it."""
+    size, walk = settings.block_size, settings.sidewalk_width
+    rows = []
+    for region in (terraces or {}).get('regions', ()):
+        footprint = terrace_footprint(region)
+        # A slope's foot meets the ground below level; its sides are walls.
+        lateral = {tuple(c): 1 - slope['axis'] for slope in region.get('slopes', ())
+                   for c in slope['cells']}
+        cells = [(tuple(c), None) for c in region['cells']] + list(lateral.items())
+        for (x, y), axis in cells:
+            for (a, b), neighbour, side in ((((x, y), (x + 1, y)), (x, y - 1), 1),
+                                            (((x, y + 1), (x + 1, y + 1)), (x, y + 1), 1),
+                                            (((x, y), (x, y + 1)), (x - 1, y), 0),
+                                            (((x + 1, y), (x + 1, y + 1)), (x + 1, y), 0)):
+                if neighbour in footprint or (axis is not None and side != axis):
+                    continue
+                rows.append((a[0] * size, a[1] * size, b[0] * size, b[1] * size,
+                             max(0.0, WALL_CLEAR - walk)))
+    return rows
+
+
 def _stair_rows(settings, stairs):
     size = settings.block_size
     return [(a[0] * size, a[1] * size, b[0] * size, b[1] * size, half) for a, b, half in stairs]
@@ -978,11 +1126,12 @@ def terrace_walls(terraces):
                   for a, b in zip(ramp['nodes'], ramp['nodes'][1:])}
     for region in terraces.get('regions', ()):
         cells = {tuple(c) for c in region['cells']}
+        footprint = terrace_footprint(region)
         for x, y in cells:
             sides = {((x, y), (x + 1, y)): (x, y - 1), ((x, y + 1), (x + 1, y + 1)): (x, y + 1),
                      ((x, y), (x, y + 1)): (x - 1, y), ((x + 1, y), (x + 1, y + 1)): (x + 1, y)}
             for (a, b), neighbour in sides.items():
-                if neighbour not in cells:
+                if neighbour not in footprint:
                     walls.setdefault((x, y), set()).add(edge(a, b))
     blocked = defaultdict(set, {cell: set(edges) for cell, edges in walls.items()})
     for key in ramp_edges:
@@ -1062,19 +1211,25 @@ class RoadSurface:
 
 class TerraceGround:
     """Natural ground on a terraced city: the base hills blended across each
-    block, plus the rise of the terrace the block belongs to."""
+    block, plus the rise of the terrace the block belongs to (falling away
+    across its slope)."""
 
     def __init__(self, settings, terraces):
         self.base = Surface(settings, {(x, y): z for x, y, z in terraces.get('ground', ())})
         self.size = settings.block_size
         self.rise = terrace_cells(terraces)
+        self.slopes = {}
+        for region in terraces.get('regions', ()):
+            self.slopes.update(slope_rises(region, lambda k: k * self.size))
 
     def __call__(self, x, y):
-        cell = (math.floor(x / self.size), math.floor(y / self.size))
-        return self.base(x, y) + self.rise.get(cell, 0.0)
+        return self.base(x, y) + self.rise_at(x, y)
 
     def rise_at(self, x, y):
-        return self.rise.get((math.floor(x / self.size), math.floor(y / self.size)), 0.0)
+        cell = (math.floor(x / self.size), math.floor(y / self.size))
+        if cell in self.slopes:
+            return self.slopes[cell](x, y)
+        return self.rise.get(cell, 0.0)
 
 
 # City shape. SQUARE fills the map. ORGANIC has an edge that wanders with the
@@ -1562,12 +1717,13 @@ def generate_city(settings=CitySettings()):
 
     _close_downtown_streets(settings, locations, roads, guard['keep'])
     culdesacs = _add_culdesacs(settings, locations, roads, guard)
-    _finish_terraces(terraces, roads, stairs)
+    _finish_terraces(terraces, roads, stairs, {loc.node for loc in locations})
     road_list = [Road(a, b, tier) for (a, b), tier in sorted(roads.items())]
     paths = _build_paths(settings, roads, locations)
     pois = (_place_pois(settings, locations, roads, paths, culdesacs, terraces)
             if settings.points_of_interest else [])
-    reserved = {block for poi in pois for block in poi.blocks}
+    # A terrace's slope is open ground.
+    reserved = {block for poi in pois for block in poi.blocks} | terrace_slopes(terraces)
     downtown, dense = _place_downtown(settings, locations, roads, paths, reserved, terraces)
     lots = downtown + _place_lots(settings, locations, roads, reserved | dense, culdesacs,
                                   terraces)
@@ -1576,8 +1732,8 @@ def generate_city(settings=CitySettings()):
     lots.sort(key=lambda lot: (stream(settings.seed, "budget", lot.group or lot.id).random(), lot.id))
     eligible = len(lots)
     lots = sorted(lots[:settings.max_buildings], key=lambda lot: lot.id)
-    shelters = _place_shelters(settings, roads, lots, pois) if settings.points_of_interest else []
     heights = {}
+    surface = None
     if settings.terrain != 'FLAT':
         ramps = [edge(tuple(a), tuple(b)) for ramp in terraces.get('ramps', ())
                  for a, b in zip(ramp['nodes'], ramp['nodes'][1:])]
@@ -1620,9 +1776,14 @@ def generate_city(settings=CitySettings()):
                 return surface.ground.base(*point) + surface.ground.rise_at(*item.center)
         lots = [replace(lot, level=round(front(lot), 3)) for lot in lots]
         pois = [replace(poi, level=round(front(poi), 3)) for poi in pois]
-        shelters = [replace(shelter, level=round(
-            surface.along(shelter.road, *shelter.position) if terraces else
-            surface(*shelter.position), 3)) for shelter in shelters]
+    shelters = []
+    if settings.points_of_interest:
+        shelters = _place_shelters(settings, roads, lots, pois,
+                                   _steep_stop(settings, surface, terraces) if surface else None)
+        if surface is not None:
+            shelters = [replace(shelter, level=round(
+                surface.along(shelter.road, *shelter.position) if terraces else
+                surface(*shelter.position), 3)) for shelter in shelters]
     return CityPlan(settings, locations, road_list, paths, lots, eligible, driving_loops,
                     pois, shelters, _outer_roads(settings, paths), culdesacs,
                     [[x, y, z] for (x, y), z in sorted(heights.items())], terraces)
@@ -2071,11 +2232,13 @@ def _poi_pad(settings, x, y, wx, wy, nodes, rows, verge=POI_VERGE):
 def _place_pois(settings, locations, roads, paths, culdesacs=(), terraces=None):
     size = settings.block_size
     walls, region, stairs, stair_rows = terrace_obstacles(terraces)
+    slopes = terrace_slopes(terraces)
     nodes = {}
     for (a, b), tier in roads.items():
         for node in (a, b):
             nodes[node] = max(nodes.get(node, 0), ROAD_WIDTHS[tier] / 2)
-    rows = _path_rows(paths) + _stair_rows(settings, stair_rows)
+    rows = (_path_rows(paths) + _stair_rows(settings, stair_rows) +
+            _wall_rows(settings, terraces))
     # Turning circles keep pads clear like any carriageway.
     rows += [(c['node'][0] * size, c['node'][1] * size, c['node'][0] * size, c['node'][1] * size,
               c['radius']) for c in culdesacs]
@@ -2117,8 +2280,8 @@ def _place_pois(settings, locations, roads, paths, culdesacs=(), terraces=None):
                             continue
                         if any(e in roads or e in stairs for e in _inner_edges(x, y, wx, wy)):
                             continue
-                        # A site stands on one level.
-                        if len({region.get(b) for b in group}) > 1:
+                        # A site stands on one level, never on a terrace's slope.
+                        if len({region.get(b) for b in group}) > 1 or slopes & set(group):
                             continue
                         sides = {k: v for k, v in _side_edges(x, y, wx, wy).items() if k in fronts}
                         front = _best_front(rule, sides, roads, along,
@@ -2184,9 +2347,33 @@ def _place_pois(settings, locations, roads, paths, culdesacs=(), terraces=None):
     return pois
 
 
-def _place_shelters(settings, roads, lots, pois):
+STOP_GRADE = .04         # Steepest street a transit stop stands on.
+
+
+def _steep_stop(settings, surface, terraces):
+    """Whether a stop on street ``key`` at ``position`` would stand on an
+    incline: on a ramp, or where the street climbs more than STOP_GRADE."""
+    ramps = set(ramp_ends(terraces or {}))
+    size = settings.block_size
+
+    def steep(key, position):
+        if key in ramps:
+            return True
+        (ax, ay), (bx, by) = key
+        ux, uy = (bx - ax), (by - ay)
+        x, y = position
+
+        def level(px, py):
+            return surface.along(key, px, py) if terraces else surface(px, py)
+        reach = min(3.0, size / 4)
+        rise = level(x + ux * reach, y + uy * reach) - level(x - ux * reach, y - uy * reach)
+        return abs(rise) > STOP_GRADE * 2 * reach
+    return steep
+
+
+def _place_shelters(settings, roads, lots, pois, steep=None):
     """Transit stops mid-block on arterial and collector footways, clear of
-    building entrances and site fronts."""
+    building entrances and site fronts, and (``steep``) off inclines."""
     size = settings.block_size
     walk = settings.sidewalk_width
     fronts = {}
@@ -2225,6 +2412,8 @@ def _place_shelters(settings, roads, lots, pois):
             else:
                 position = (ax * size + side * offset, along)
                 rotation = -math.pi / 2 if side > 0 else math.pi / 2
+            if steep is not None and steep(key, position):
+                continue
             variant = "SHELTER" if walk >= 1.8 and rng.random() < .75 else "STOP"
             shelters.append(Shelter(f"shelter_{len(shelters)}", position, rotation, variant, key))
             break
@@ -2387,7 +2576,8 @@ def _place_downtown(settings, locations, roads, paths, reserved, terraces=None):
         for node in (a, b):
             nodes[node] = max(nodes.get(node, 0), ROAD_WIDTHS[tier] / 2)
     walls, region, stairs, stair_rows = terrace_obstacles(terraces)
-    rows = _path_rows(paths) + _stair_rows(settings, stair_rows)
+    rows = (_path_rows(paths) + _stair_rows(settings, stair_rows) +
+            _wall_rows(settings, terraces))
     verge = max(DOWNTOWN_VERGE, settings.setback - settings.sidewalk_width + .1)
     owned = {(x, y) for x in range(-radius, radius) for y in range(-radius, radius)
              if (x, y) not in reserved and _downtown(settings, locations, (x, y))}

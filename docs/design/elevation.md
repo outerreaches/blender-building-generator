@@ -2,6 +2,14 @@
 
 Status: v0.21 (Rolling hills) and v0.22 (Terraced) done; the rest planned.
 
+**As built in v0.22.1:** each terrace falls naturally to the hills on one
+to three random sides (a one-block slope band; rounded corner blocks where
+two meet). High ramps stand on viaducts (piers, cap beams, parapets, flat
+abutments) with the ground running on under them. Retaining walls holding
+ground up stand back from the footway behind a 2.5 m verge, and walls
+dropping more than 1.5 m carry parapets. No transit stops on ramps or
+grades over 4%.
+
 **As built in v0.22:**
 
 - **Terraced = hills + terraces.** The Rolling base (relief) carries one

@@ -171,11 +171,16 @@ write the graded ground as a heightmap (see [Unity export](#unity-export)).
 ### Terraced
 
 **Terrain: Terraced** puts the same hills under raised terraces of whole
-blocks behind retaining walls:
+blocks, walled on some sides and falling naturally to the hills on others:
 
 - **The plateau** rises **Plateau Height** metres (default 18), over about
   15% of the city's blocks (6 to 40), preferring the built-up districts.
 - **Podiums** rise 4.2 m (one storey), over three to six blocks each.
+- **Natural sides.** Each terrace falls to the hills round it on one to
+  three of its sides, chosen at random. That side is one block of open
+  hillside, steepest at mid-slope, with no buildings on it. Where two natural
+  sides meet at a corner, a rounded slope joins them. The other sides are
+  retaining walls.
 - **Benches.** The hills under a terrace are graded nearly level, so it
   stands its full height all round. A terrace's edge follows block edges,
   so every block is on one level. Its streets rise with it; the streets
@@ -185,15 +190,32 @@ blocks behind retaining walls:
   twice) at no more than 10%, easing flat where it meets other streets and
   where it turns. An 18 m plateau's ramps run four blocks; the side streets
   along them are closed, and no building faces them. Where the lattice has
-  no street, the ramp is a new one.
-- **Stairs.** Any other street up a terrace's face is a stair: 6 m wide,
-  from the upper street's footway to the lower's, in equal steps of at most
-  0.17 m, cut into the terrace between walls.
-- **Retaining walls** stand wherever the ground meets a footway or a stair
-  at another height. That includes a terrace above the streets at its foot,
-  a ramp's embankment, and the cut a ramp or stair makes into the terrace.
-  Walls also run along a terrace's edge where no street does. Ground about
-  level with a footway steps down to it by a curb's face.
+  no street, the ramp is a new one. Ramps keep raised footways (with curbs)
+  on both sides all the way up.
+- **Viaducts.** Where a ramp stands more than 4.5 m clear of the ground on
+  both sides for 20 m or more, it runs on a viaduct instead of an
+  embankment, with the ground running on under it:
+  - a 1.2 m deck with parapets;
+  - piers about 18 m apart, each a column under a cap beam;
+  - a flat abutment at each end.
+- **Stairs.** Any other street up a terrace's face, or down a natural side,
+  is a stair: 6 m wide, from the upper street's footway to the lower's, in
+  equal steps of at most 0.17 m, cut into the terrace between walls.
+- **Retaining walls.**
+  - **Where they stand:** wherever the ground meets a footway or a stair at
+    another height, and along a terrace's edge where no street runs.
+  - **Gap at the foot:** a wall holding ground up above a street stands
+    2.5 m back from the footway, behind a verge at the footway's level.
+    Ground less than about 1 m above the footway slopes up across the verge
+    instead.
+  - **Clear of buildings:** sites and towers keep 3.5 m from a terrace's
+    wall line.
+  - **Parapets:** walls dropping more than 1.5 m carry a 1 m parapet on
+    their upper side.
+  - **No pockets:** dead-end streets at a terrace's foot are taken away, so
+    their turning ends do not cut into it.
+- **Transit stops** never stand on a ramp or where their street climbs more
+  than 4% (on Rolling Hills too).
 - **Network.** Terraces are laid out on the main streets, before the
   driving circuits and the local streets. Circuits keep to the streets at a
   terrace's foot, and every street stays reachable.
@@ -202,10 +224,10 @@ blocks behind retaining walls:
   footways share their edges. A terrace's edge lies on that grid, within
   0.75 m of the block line.
 
-`City_Retaining_Walls` and `City_Stairs` are separate objects
-(`surface_role` `retaining_walls` and `stairs`). The metadata lists
-`terraces`, `ramps` and `stairs` (see below), and the heightmap holds the
-stairs' pitch.
+`City_Retaining_Walls`, `City_Stairs` and `City_Viaducts` are separate
+objects (`surface_role` `retaining_walls`, `stairs` and `viaducts`). The
+metadata lists `terraces`, `ramps` and `stairs` (see below), and the
+heightmap holds the stairs' pitch.
 
 ## Districts
 
@@ -484,7 +506,7 @@ the same way.
 | `roads` | Every route: tier, width, lattice nodes, centreline points at carriageway level (footways run along both sides) |
 | `junctions` | Lattice nodes with roads: position, radius (widest half-width plus footway, or the turning circle plus footway), number of roads, `cul_de_sac` |
 | `driving_loops`, `outer_roads` | The driving circuits; the highways beyond the city edge (start, forward, length, fade) |
-| `terraces`, `ramps`, `stairs` | Terraced terrain: each terrace's kind (`plateau`, `podium`), rise and lattice blocks; each ramp's terrace, lattice nodes from the top down and their positions; each stair's terrace, top and foot (the middle of the top and bottom steps' outer edges, at the footways), width, step count and riser. Empty on other terrain |
+| `terraces`, `ramps`, `stairs` | Terraced terrain: each terrace's kind (`plateau`, `podium`), rise, lattice blocks on top and `slope_blocks` (its natural sides); each ramp's terrace, lattice nodes from the top down, their positions and `viaducts` (deck ends at road level and pier feet); each stair's terrace, top and foot (the middle of the top and bottom steps' outer edges, at the footways), width, step count and riser. Empty on other terrain |
 | `buildings` | One per lot: object name, style, district, condition, damage, floors, height, interiors, enterable floors, party walls, block group, footprint (position at the base, forward = front, width, depth), and `entrances` (each street door's position, outward forward and width) |
 | `sites` | Points of interest: grounds object, kind, variant, condition, pad; their buildings with the same fields as above |
 | `rooms` (per building) | Rooms to furnish: name, kind (bedroom, living, kitchen, bath, hall, corridor, lobby, office, open, shop, storage, bar, plant, stair, landing), floor, flat or shop unit, open-plan group, centre of the clear floor, clear width, depth and height, the share of floor still standing and still roofed, `doors` (position, normal into the room, width, height, the room on the other side or `street`), `windows` (sill centre, outward normal, width, sill and head above the floor, broken) and `wall_runs` (blank wall at least 2 m high: start, end, normal into the room) |
@@ -527,7 +549,7 @@ For scale: a radius-8 city with every building detailed has about 490 buildings 
 
 ## Plan data
 
-A JSON text datablock (`<collection>_plan.json`) stores the versioned plan. Coordinates are relative to the collection's stored `origin`; road nodes multiply by `block_size`, while lot positions/dimensions and path points are metres. Schema version 13 adds `plateau_height` and `podiums` to the settings and `terraces` to the plan: `regions` (each terrace's `cells`, `step` and `kind`), `ramps` (lattice `nodes` from the top down and each one's `raises` above the hills), `stairs` (`low` and `high` lattice nodes, `width`) and `ground` (the hills' node heights under the terraces; `heights` are then the road level). Version 12 added `terrain` and `relief` to the settings, `heights` (each lattice node's graded height, where it is not zero) to the plan, and `level` (pad or road height) to every lot, site and stop. Version 11 added `shape` and `irregularity` to the settings. Version 10 added `bulb` to each lot: the cul-de-sac node a house round a turning circle faces (empty for the rest). Those houses are turned to face the circle, so a lot's `rotation` is no longer always a quarter turn. Version 9 added `preset` to the settings (`CITY` or `SMALL_TOWN`). Version 8 added `culdesacs` (turning-circle node and radius). Version 7 added `party_walls` and `group` to each lot (downtown towers built against neighbours). Version 6 added `outer_roads`. Version 5 added `pois` (kind, centre, width along the frontage, depth, rotation, frontage edge, blocks, seed, condition, damage, approach) and `shelters` (position, rotation, variant, road edge); a site's layout is chosen by `sites.compose` from its seed. Version 4 added `kind`, `condition`, `interiors` and `damage` to each lot alongside the version-3 `paths`: one entry per continuous same-tier route with its lattice `nodes`, flattened metre-space `points` and `width`. Locations and lots carry their district `style`; the per-style profile table is code (`STYLE_PROFILE`), not part of the file. No legacy-plan importer is included.
+A JSON text datablock (`<collection>_plan.json`) stores the versioned plan. Coordinates are relative to the collection's stored `origin`; road nodes multiply by `block_size`, while lot positions/dimensions and path points are metres. Schema version 14 adds each terrace's natural sides: `slopes` (`axis`, downhill `sign`, crest lattice `line`, `cells`) and `corners` (a `cell` joining two slopes, with each slope's `line` and `sign` along `x` and `y`). Version 13 added `plateau_height` and `podiums` to the settings and `terraces` to the plan: `regions` (each terrace's `cells`, `step` and `kind`), `ramps` (lattice `nodes` from the top down and each one's `raises` above the hills), `stairs` (`low` and `high` lattice nodes, `width`) and `ground` (the hills' node heights under the terraces; `heights` are then the road level). Version 12 added `terrain` and `relief` to the settings, `heights` (each lattice node's graded height, where it is not zero) to the plan, and `level` (pad or road height) to every lot, site and stop. Version 11 added `shape` and `irregularity` to the settings. Version 10 added `bulb` to each lot: the cul-de-sac node a house round a turning circle faces (empty for the rest). Those houses are turned to face the circle, so a lot's `rotation` is no longer always a quarter turn. Version 9 added `preset` to the settings (`CITY` or `SMALL_TOWN`). Version 8 added `culdesacs` (turning-circle node and radius). Version 7 added `party_walls` and `group` to each lot (downtown towers built against neighbours). Version 6 added `outer_roads`. Version 5 added `pois` (kind, centre, width along the frontage, depth, rotation, frontage edge, blocks, seed, condition, damage, approach) and `shelters` (position, rotation, variant, road edge); a site's layout is chosen by `sites.compose` from its seed. Version 4 added `kind`, `condition`, `interiors` and `damage` to each lot alongside the version-3 `paths`: one entry per continuous same-tier route with its lattice `nodes`, flattened metre-space `points` and `width`. Locations and lots carry their district `style`; the per-style profile table is code (`STYLE_PROFILE`), not part of the file. No legacy-plan importer is included.
 
 ## Code and verification
 

@@ -133,7 +133,8 @@ namespace Ares.CityGen
         public string id;
         public string kind;       // plateau or podium.
         public float rise;        // Metres above the hills round it.
-        public int[] blocks;      // Lattice blocks (x, y pairs, flattened).
+        public int[] blocks;      // Lattice blocks on top (x, y pairs, flattened).
+        public int[] slope_blocks; // Blocks where it falls naturally to the ground round it.
     }
 
     [Serializable]
@@ -143,6 +144,15 @@ namespace Ares.CityGen
         public string terrace;
         public int[] nodes;       // Lattice junctions from the top down (x, y pairs).
         public float[] points;    // Their positions (x, y, z triples).
+        public Viaduct[] viaducts; // Stretches standing on piers.
+    }
+
+    [Serializable]
+    public class Viaduct
+    {
+        public float[] start;     // Deck centreline at each end, at road level.
+        public float[] end;
+        public float[] piers;     // Pier foot centres (x, y, z triples).
     }
 
     [Serializable]

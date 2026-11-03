@@ -3,13 +3,14 @@
 from dataclasses import asdict, dataclass, field, replace
 from collections import defaultdict, deque
 from functools import lru_cache
+import bisect
 import hashlib
 import heapq
 import json
 import math
 import random
 
-VERSION = 17
+VERSION = 18
 ROAD_WIDTHS = {"HIGHWAY": 20.0, "ARTERIAL": 12.0, "COLLECTOR": 8.0, "LOCAL": 6.0}
 ROAD_RANK = {name: i for i, name in enumerate(ROAD_WIDTHS)}
 # Corner radius at a route bend, before the curve_radius multiplier and clamping.
@@ -233,6 +234,7 @@ class CitySettings:
     preset: str = "CITY"               # CITY, or SMALL_TOWN: no towers, no big sites.
     shape: str = "SQUARE"              # SQUARE fills the map; ORGANIC has an irregular edge.
     irregularity: float = .6           # How far an organic edge wanders.
+    highway: str = "RAISED"            # RAISED on a viaduct with interchanges, or GRADE.
     terrain: str = "FLAT"              # FLAT, ROLLING hills, or TERRACED (see TERRAINS).
     relief: float = 30.0               # Hills: metres from the lowest to the highest.
     plateau_height: float = 9.0        # Terraced: the plateau's rise (0: none).
@@ -266,6 +268,8 @@ class CitySettings:
             raise ValueError("Unknown city shape")
         if self.terrain not in TERRAINS:
             raise ValueError("Unknown terrain")
+        if self.highway not in HIGHWAYS:
+            raise ValueError("Unknown highway")
 
 
 @dataclass(frozen=True)
@@ -357,6 +361,9 @@ class CityPlan:
     # Terraced terrain: {'regions': [{'cells', 'step'}], 'ramps': [{'nodes', 'raises'}],
     # 'stairs': [{'low', 'high', 'width'}], 'ground': [[x, y, z]] base node heights}.
     terraces: dict = field(default_factory=dict)
+    # RAISED highway: {'interchanges', 'closed', 'cross', 'half', 'ramp_half',
+    # 'mainline': [[x, z]], 'touchdown': [x west, x east], 'ramps': [...]}.
+    freeway: dict = field(default_factory=dict)
 
     def to_json(self):
         return json.dumps({"version": VERSION, **asdict(self)}, sort_keys=True, indent=2)
@@ -390,6 +397,7 @@ def edge(a, b):
 # profile eases out flat at both junctions and is at most SMOOTHSTEP_PEAK times
 # steeper than the straight grade between them.
 TERRAINS = ('FLAT', 'ROLLING', 'TERRACED')
+HIGHWAYS = ('RAISED', 'GRADE')
 GRADE_LIMITS = {'HIGHWAY': .04, 'ARTERIAL': .05, 'COLLECTOR': .06, 'LOCAL': .08}
 OPEN_GRADE = .12         # Lattice edges without a street.
 SITE_DROP = .25          # Most a site block's corners may differ (m).
@@ -683,7 +691,8 @@ class RampLine:
         return self.level(self.along(x, y))
 
 
-def _terraces(settings, locations, roads):
+def _terraces(settings, locations, roads, avoid=frozenset(), closed=frozenset(),
+              beneath=frozenset()):
     """Choose the terraces and edit the street network for them: a ramp is a
     straight street out from the terrace (added where the lattice has none);
     stairs, the side streets along a ramp and streets through a terrace at its
@@ -692,7 +701,7 @@ def _terraces(settings, locations, roads):
     if settings.terrain != 'TERRACED':
         return {}
     radius, size = settings.radius, settings.block_size
-    highway = {n for key, tier in roads.items() if tier == 'HIGHWAY' for n in key}
+    highway = {n for key, tier in roads.items() if tier == 'HIGHWAY' for n in key} | set(avoid)
     bulbs, looped = set(), set()
     city_cells = [(x, y) for x in range(-radius, radius) for y in range(-radius, radius)
                   if in_city(settings, (x + .5) * size, (y + .5) * size)]
@@ -759,7 +768,7 @@ def _terraces(settings, locations, roads):
                 continue
             band = slope_cells(soft)
             found = _check_terrace(settings, roads, cells, band, step, reach, kind, highway,
-                                   bulbs, looped, taken)
+                                   bulbs, looped, taken, closed, beneath)
             if found is None:
                 continue
             ramps, stairs, cuts, added = found
@@ -926,7 +935,7 @@ def _edge_cells(key):
 
 
 def _check_terrace(settings, roads, cells, band, step, reach, kind, highway, bulbs, looped,
-                   taken):
+                   taken, closed=frozenset(), beneath=frozenset()):
     """Ramps, stairs, street cuts and added ramp streets for a terrace over
     ``cells`` (with its slopes over ``band``), or None when it would cut a
     highway, a driving circuit or a cul-de-sac, leave the network in pieces,
@@ -1000,9 +1009,10 @@ def _check_terrace(settings, roads, cells, band, step, reach, kind, highway, bul
             continue
         if key in looped:
             return None
-        if low in corners:
-            # Down a natural side: open hillside, rising beyond as high as
-            # the top, so no street (or stair) crosses it.
+        if low in corners or low in beneath or not _in_town(settings, low):
+            # Down a natural side, or out of the city: open hillside, rising
+            # beyond as high as the top, so no street (or stair) crosses it;
+            # nor down to a raised highway's line, under its deck.
             cuts.append(key)
             continue
         stairs.append({'low': list(low), 'high': list(high), 'width': STAIR_WIDTH})
@@ -1015,7 +1025,7 @@ def _check_terrace(settings, roads, cells, band, step, reach, kind, highway, bul
         n for c in taken for n in _cell_corners(c)}
     outside = {(x, y) for x in range(-radius, radius + 1)
                for y in range(-radius, radius + 1)} - inner
-    main = (-radius, 0)
+    main = (-radius, 0) if settings.highway == 'GRADE' else (0, 0)
     for _ in range(12):
         keys = [key for key in roads if key not in removed] + list(added)
         pieces = _pieces(keys)
@@ -1052,7 +1062,7 @@ def _check_terrace(settings, roads, cells, band, step, reach, kind, highway, bul
         merged = dict(roads)
         merged.update(added)
         path = _route(start, target, merged, settings, blocked - {start, target},
-                      confine=True, closed=removed)
+                      confine=True, closed=removed | set(closed))
         if path is None:
             return None
         for a, b in zip(path, path[1:]):
@@ -1067,6 +1077,13 @@ def _check_terrace(settings, roads, cells, band, step, reach, kind, highway, bul
     # A stair needs a street at both ends; without one the street just goes.
     stairs = [s for s in stairs if tuple(s['high']) in graph and tuple(s['low']) in graph]
     return ramps, stairs, sorted(set(cuts)) + sorted(removed - set(cuts)), added
+
+
+def _in_town(settings, node):
+    """A lattice node inside the map and the city's outline."""
+    size = settings.block_size
+    return (max(map(abs, node)) <= settings.radius and
+            in_city(settings, node[0] * size, node[1] * size))
 
 
 def _pieces(keys):
@@ -1175,6 +1192,8 @@ def _finish_terraces(settings, terraces, roads, stairs, keep=frozenset()):
     for a, b in sorted(stairs - known):
         if a in have and b in have:
             high, low = (a, b) if a in inner else (b, a)
+            if not _in_town(settings, low):
+                continue      # Out on the hill round the city.
             terraces['stairs'].append({'low': list(low), 'high': list(high),
                                        'width': STAIR_WIDTH})
     terraces['stairs'].sort(key=lambda s: (s['low'], s['high']))
@@ -1931,9 +1950,12 @@ def generate_city(settings=CitySettings()):
     locations = [Location("center", center, "CENTER",
                           core if settings.style == "MIXED" else settings.style)]
     occupied = {center}
+    # A raised highway's line: no street runs along it (they cross under).
+    raised = settings.highway == 'RAISED'
+    corridor = _corridor(settings) if raised else set()
 
     def connect(a, b, tier):
-        path = _route(a, b, roads, settings, confine=tier != "HIGHWAY")
+        path = _route(a, b, roads, settings, confine=tier != "HIGHWAY", closed=corridor)
         if path is None:
             raise ValueError('Unable to connect location')
         for u, v in zip(path, path[1:]):
@@ -1945,7 +1967,8 @@ def generate_city(settings=CitySettings()):
     size = settings.block_size
     candidates = [(x, y) for x in range(-settings.radius + 1, settings.radius)
                   for y in range(-settings.radius + 1, settings.radius)
-                  if .3 <= spread(settings, x * size, y * size) <= .85]
+                  if .3 <= spread(settings, x * size, y * size) <= .85 and
+                  not (raised and y == 0)]
     rng = stream(settings.seed, "locations")
     rng.shuffle(candidates)
     for index in range(min(settings.primary_count, len(candidates))):
@@ -1963,14 +1986,16 @@ def generate_city(settings=CitySettings()):
         locations = [Location(loc.id, loc.node, loc.role, assigned.get(loc.id, loc.style))
                      for loc in locations]
 
-    # Regional links extend to opposite map boundaries; these are at-grade prototypes.
-    for end in ((-settings.radius, 0), (settings.radius, 0)):
-        connect(end, center, "HIGHWAY")
+    # Regional links extend to opposite map boundaries: at grade, or (RAISED)
+    # on a viaduct straight across, laid out after the main streets.
+    if not raised:
+        for end in ((-settings.radius, 0), (settings.radius, 0)):
+            connect(end, center, "HIGHWAY")
 
     candidates = [(x, y) for x in range(-settings.radius + 1, settings.radius)
                   for y in range(-settings.radius + 1, settings.radius)
-                  if (x, y) not in occupied and (settings.shape != 'ORGANIC' or
-                                                 spread(settings, x * size, y * size) <= .9)]
+                  if (x, y) not in occupied and not (raised and y == 0) and
+                  (settings.shape != 'ORGANIC' or spread(settings, x * size, y * size) <= .9)]
     rng.shuffle(candidates)
     for index, node in enumerate(candidates[:settings.secondary_count]):
         district = min((loc for loc in locations if loc.role != 'SECONDARY'),
@@ -1982,12 +2007,34 @@ def generate_city(settings=CitySettings()):
         # A node already on a road needs no extra edge.
         locations.append(Location(f"secondary_{index}", node, "SECONDARY", district.style))
 
+    layout, line, shut = {}, set(), set()
+    if raised:
+        layout = _freeway_layout(settings, locations, roads, corridor)
+        # The highway's line and its cross streets' far ends.
+        line = {(x, 0) for x in range(-settings.radius, settings.radius + 1)} | {
+            (x, s) for x in layout['interchanges'] for s in (-1, 1)}
+        shut = corridor | set(layout['closed'])
     # Terraces are laid out on the main streets, before the circuits and the
     # local streets, which then keep to them (``guard``).
-    terraces = _terraces(settings, locations, roads)
+    under = {(x, 0) for x in range(-settings.radius, settings.radius + 1)} if raised else set()
+    terraces = _terraces(settings, locations, roads, line, shut, under)
     guard = _terrace_guard(terraces)
-    driving_loops = _add_driving_loops(settings, locations, roads, guard['nodes'],
-                                       guard['edges'] | guard['stairs'])
+    if raised:
+        # No stair or street from a terrace down to the highway's line.
+        toward = {key for key in guard['stairs'] if set(key) & under}
+        guard['stairs'] -= toward
+        guard['edges'] |= toward
+        # No street along the highway or under a ramp's low end; no turning
+        # circle under the deck or beside a ramp; the cross streets stay.
+        guard['edges'] |= shut
+        guard['avoid'] |= line | {(x + dx, s) for x in layout['interchanges']
+                                  for dx in range(-4, 5) for s in (-1, 1)}
+        guard['keep'] |= set(layout['cross'])
+        driving_loops = _raised_loops(settings, locations, roads, layout['interchanges'],
+                                      guard['nodes'], guard['edges'] | guard['stairs'])
+    else:
+        driving_loops = _add_driving_loops(settings, locations, roads, guard['nodes'],
+                                           guard['edges'] | guard['stairs'])
 
     # Local growth starts from connected nodes only; loops naturally meet old streets.
     reached = {n for road in roads for n in road}
@@ -2021,18 +2068,25 @@ def generate_city(settings=CitySettings()):
                     reached.add(other)
                     frontier.append(other)
 
-    _close_downtown_streets(settings, locations, roads, guard['keep'])
+    _close_downtown_streets(settings, locations, roads, guard['keep'], corridor)
     culdesacs = _add_culdesacs(settings, locations, roads, guard)
     _finish_terraces(settings, terraces, roads, stairs, {loc.node for loc in locations})
+    ramps = []
+    if raised:
+        _underpasses(settings, roads, guard['edges'] | guard['stairs'],
+                     {loc.node for loc in locations}, guard['avoid'])
+        ramps = freeway_ramps(settings, layout, roads)
     road_list = [Road(a, b, tier) for (a, b), tier in sorted(roads.items())]
     paths = _build_paths(settings, roads, locations, ramp_bends(terraces))
-    pois = (_place_pois(settings, locations, roads, paths, culdesacs, terraces)
+    decks = ramps if raised else None
+    pois = (_place_pois(settings, locations, roads, paths, culdesacs, terraces, decks)
             if settings.points_of_interest else [])
     # A terrace's slope is open ground.
     reserved = {block for poi in pois for block in poi.blocks} | terrace_slopes(terraces)
-    downtown, dense = _place_downtown(settings, locations, roads, paths, reserved, terraces)
+    downtown, dense = _place_downtown(settings, locations, roads, paths, reserved, terraces,
+                                      decks)
     lots = downtown + _place_lots(settings, locations, roads, reserved | dense, culdesacs,
-                                  terraces)
+                                  terraces, decks)
     # Stable priority sampling avoids truncating one geographical side of the
     # city; the buildings of one downtown block are kept or dropped together.
     lots.sort(key=lambda lot: (stream(settings.seed, "budget", lot.group or lot.id).random(), lot.id))
@@ -2041,13 +2095,15 @@ def generate_city(settings=CitySettings()):
     heights = {}
     surface = None
     if settings.terrain != 'FLAT':
-        ramps = [edge(tuple(a), tuple(b)) for ramp in terraces.get('ramps', ())
-                 for a, b in zip(ramp['nodes'], ramp['nodes'][1:])]
+        flat = [edge(tuple(a), tuple(b)) for ramp in terraces.get('ramps', ())
+                for a, b in zip(ramp['nodes'], ramp['nodes'][1:])]
         wild = {}
         if terraces:
             targets, pins, free = _wild_land(settings, terraces)
             wild = dict(extra=WILD_CELLS, targets=targets, pins=pins, free=free)
-        heights = _grade(settings, roads, pois, ramps, _terrace_benches(terraces), **wild)
+        # Under a raised highway the ground is graded as for one at grade.
+        graded = {**roads, **{key: 'HIGHWAY' for key in corridor}}
+        heights = _grade(settings, graded, pois, flat, _terrace_benches(terraces), **wild)
         surface = Surface(settings, heights)
 
         def front_point(item):
@@ -2061,9 +2117,9 @@ def generate_city(settings=CitySettings()):
         if terraces:
             terraces['wild'] = WILD_CELLS
             terraces['ground'] = [[x, y, z] for (x, y), z in sorted(heights.items())]
-            raised = _terrace_raises(terraces)
-            heights = {node: round(heights.get(node, 0.0) + raised.get(node, 0.0), 3)
-                       for node in sorted(set(heights) | set(raised))}
+            lifted = _terrace_raises(terraces)
+            heights = {node: round(heights.get(node, 0.0) + lifted.get(node, 0.0), 3)
+                       for node in sorted(set(heights) | set(lifted))}
             for ramp in terraces['ramps']:
                 nodes = [tuple(n) for n in ramp['nodes']]
                 line = RampLine(nodes, size, heights.get(nodes[0], 0.0),
@@ -2108,9 +2164,20 @@ def generate_city(settings=CitySettings()):
             shelters = [replace(shelter, level=round(
                 surface.along(shelter.road, *shelter.position) if terraces else
                 surface(*shelter.position), 3)) for shelter in shelters]
+    freeway, outer = {}, _outer_roads(settings, paths)
+    if raised:
+        if surface is None:
+            ground = street = lambda x, y: 0.0
+        else:
+            street = surface
+            ground = surface.ground if terraces else surface
+        under = [(a[0] * size, 1 if a[1] + b[1] > 0 else -1, ROAD_WIDTHS[tier] / 2)
+                 for (a, b), tier in sorted(roads.items()) if a[0] == b[0] and 0 in (a[1], b[1])]
+        freeway = {**layout, **_freeway_geometry(settings, ramps, ground, street, under)}
+        outer = _freeway_outer_roads(settings, freeway)
     return CityPlan(settings, locations, road_list, paths, lots, eligible, driving_loops,
-                    pois, shelters, _outer_roads(settings, paths), culdesacs,
-                    [[x, y, z] for (x, y), z in sorted(heights.items())], terraces)
+                    pois, shelters, outer, culdesacs,
+                    [[x, y, z] for (x, y), z in sorted(heights.items())], terraces, freeway)
 
 
 # Suburban cul-de-sacs: a short street from the network to an inner lattice
@@ -2344,7 +2411,8 @@ def _tract_rows(streets, low_x, high_x, low_y, high_y, profile, rng):
     return houses
 
 
-def _place_lots(settings, locations, roads, reserved=frozenset(), culdesacs=(), terraces=None):
+def _place_lots(settings, locations, roads, reserved=frozenset(), culdesacs=(), terraces=None,
+                freeway=None):
     walls = terrace_obstacles(terraces)[0]
     tops = terrace_cells(terraces or {})
     footprints = set().union(*(terrace_footprint(r) for r in (terraces or {}).get('regions', ())))
@@ -2390,6 +2458,10 @@ def _place_lots(settings, locations, roads, reserved=frozenset(), culdesacs=(), 
                 if (x, y) in tops and beyond not in footprints and key not in roads:
                     # On top, where the wall stands on the block line.
                     margins[side] = max(margins[side], TOP_CLEAR + .75)
+                if freeway is not None and (side, y) in (("S", 0), ("N", -1)):
+                    # Clear of a raised highway's deck and its ramps.
+                    margins[side] = max(margins[side], _freeway_margin(
+                        settings, freeway, x, 1 if y == 0 else -1))
             low_x = x * size + margins["W"]
             high_x = (x + 1) * size - margins["E"]
             low_y = y * size + margins["S"]
@@ -2565,7 +2637,9 @@ def _poi_pad(settings, x, y, wx, wy, nodes, rows, verge=POI_VERGE):
     return None
 
 
-def _place_pois(settings, locations, roads, paths, culdesacs=(), terraces=None):
+def _place_pois(settings, locations, roads, paths, culdesacs=(), terraces=None, freeway=None):
+    """Sites; ``freeway`` (a raised highway's ramps) keeps them clear of its
+    decks and off both sides of its line at once."""
     size = settings.block_size
     walls, region, stairs, stair_rows = terrace_obstacles(terraces)
     slopes = terrace_slopes(terraces)
@@ -2575,6 +2649,10 @@ def _place_pois(settings, locations, roads, paths, culdesacs=(), terraces=None):
             nodes[node] = max(nodes.get(node, 0), ROAD_WIDTHS[tier] / 2)
     rows = (_path_rows(paths) + _stair_rows(settings, stair_rows) +
             _wall_rows(settings, terraces, roads))
+    apart = set()
+    if freeway is not None:
+        rows += _freeway_rows(settings, freeway)
+        apart = _corridor(settings)
     # Turning circles keep pads clear like any carriageway.
     rows += [(c['node'][0] * size, c['node'][1] * size, c['node'][0] * size, c['node'][1] * size,
               c['radius']) for c in culdesacs]
@@ -2614,7 +2692,8 @@ def _place_pois(settings, locations, roads, paths, culdesacs=(), terraces=None):
                         group = tuple((x + i, y + j) for i in range(wx) for j in range(wy))
                         if any(b in taken for b in group):
                             continue
-                        if any(e in roads or e in stairs for e in _inner_edges(x, y, wx, wy)):
+                        if any(e in roads or e in stairs or e in apart
+                               for e in _inner_edges(x, y, wx, wy)):
                             continue
                         # A site stands on one level, never on a terrace's slope.
                         if len({region.get(b) for b in group}) > 1 or slopes & set(group):
@@ -2713,11 +2792,14 @@ def _walled_house(settings, roads, surface, lot):
         if ay == by:
             line = ay * size + (half + walk) * (1 if side == 'S' else -1)
             gap = min(ys) - line if side == 'S' else line - max(ys)
-            points = [(px, line) for px in (min(xs), lot.center[0], max(xs))]
+            low, high = min(xs), max(xs)
         else:
             line = ax * size + (half + walk) * (1 if side == 'W' else -1)
             gap = min(xs) - line if side == 'W' else line - max(xs)
-            points = [(line, py) for py in (min(ys), lot.center[1], max(ys))]
+            low, high = min(ys), max(ys)
+        count = max(2, math.ceil((high - low) / 4.0))
+        along = [low + (high - low) * k / count for k in range(count + 1)]
+        points = [(t, line) if ay == by else (line, t) for t in along]
         if gap > HOUSE_REACH:
             continue
         for px, py in points:
@@ -2839,6 +2921,359 @@ def _outer_roads(settings, paths):
     return roads
 
 
+# -- raised highway --------------------------------------------------------------
+
+# A RAISED highway runs straight across the city along the y = 0 lattice line
+# on a viaduct, the streets crossing it passing underneath, and comes down to
+# grade out in the wasteland beyond the map, where the outer road carries on.
+# Diamond interchanges at a few cross streets join it to the city: on each
+# side an off-ramp and an on-ramp run alongside the deck, between it and the
+# cross street (traffic keeps right: eastbound on the south side), with a
+# short run at grade between a ramp's foot and the cross street. No other
+# street crosses under a ramp's low end.
+FREEWAY_HALF = 12.5        # Carriageway (20 m) and shoulders.
+FREEWAY_CLEAR = 6.5        # Deck top over the ground or a street under it.
+FREEWAY_GRADE = .03
+FREEWAY_EDGE = 3           # Interchanges keep this many blocks off the map's edge.
+RAMP_LANE = 5.0            # Half a ramp's width.
+RAMP_OFFSET = FREEWAY_HALF + RAMP_LANE   # A ramp's centreline, beside the deck.
+RAMP_TAIL = 10.0           # At grade between a ramp's foot and the cross street's footway.
+FREEWAY_RAMP_GRADE = .06
+FREEWAY_RAMP_REACH = 200.0  # Longest climb of a ramp (m).
+FREEWAY_RAMP_DEPTH = 1.1   # A ramp's deck, top to soffit (as streets').
+RAMP_UNDER = 4.5           # Least headroom over a street under a ramp.
+FREEWAY_TAPER = 40.0       # A ramp's lane narrows into the deck's over this length.
+FREEWAY_SPACING = 10       # Blocks between interchanges (their ramps never meet).
+FREEWAY_CLOSED = (1, 2)    # Blocks from an interchange where no street crosses...
+FREEWAY_CLOSED_HILLS = (1, 2, 3)   # ...on hills, where its ramps climb longer.
+FREEWAY_PAD = 3.5          # Buildings keep this far from the decks.
+FREEWAY_STEP = 8.0         # Metres between deck profile samples.
+FREEWAY_CURVE = 6          # Samples either way a crest or sag is rounded over.
+
+
+def _corridor(settings):
+    """The lattice edges along the raised highway: no street takes them."""
+    radius = settings.radius
+    return {edge((x, 0), (x + 1, 0)) for x in range(-radius, radius)}
+
+
+def _freeway_layout(settings, locations, roads, closed):
+    """Choose the raised highway's interchanges (lattice x of their cross
+    streets) and edit the streets for them: a cross street through each, no
+    other street crossing under its ramps (the network joined up again round
+    them). Returns {'interchanges', 'closed' (lattice edges no street may
+    take), 'cross' (the cross streets' edges)}."""
+    radius, size = settings.radius, settings.block_size
+    reach = radius - FREEWAY_EDGE
+    closed_at = FREEWAY_CLOSED if settings.terrain == 'FLAT' else FREEWAY_CLOSED_HILLS
+    rank = {}
+    for x in range(-reach, reach + 1):
+        # The centre's own crossing stays open.
+        if x and abs(x) in closed_at:
+            continue
+        if all(in_city(settings, x * size, s * size) for s in (-1, 1)):
+            tiers = [roads.get(edge((x, 0), (x, s))) for s in (-1, 1)]
+            rank[x] = (min((ROAD_RANK[t] for t in tiers if t), default=len(ROAD_RANK)),
+                       -sum(bool(t) for t in tiers))
+    # On hills, where the ramps climb least: from the cross street up to the
+    # deck a ramp's length away either way (the deck over the ungraded
+    # hills, as it will be over the city).
+    excess = {x: 0 for x in rank}
+    if settings.terrain != 'FLAT':
+        hills = _terrain_heights(settings)
+        ground = {x: hills[(x, 0)] for x in range(-radius, radius + 1)}
+        fall = FREEWAY_GRADE * size
+
+        def deck(x):
+            return max(z + FREEWAY_CLEAR - fall * abs(x - j) for j, z in ground.items())
+        out = round((RAMP_TAIL + FREEWAY_RAMP_REACH) / size)
+        for x in rank:
+            excess[x] = round(max(deck(x - out), deck(x + out)) - ground[x])
+    # As many as fit, spread evenly along the city, each at the best main
+    # street crossing near its place.
+    count = 1 + 2 * max(0, reach) // FREEWAY_SPACING
+    chosen = []
+    gap = max(FREEWAY_SPACING, 2 * reach / count)
+    for k in range(count):
+        ideal = (k - (count - 1) / 2) * gap
+        options = [x for x in rank if abs(x - ideal) <= 2 and
+                   all(abs(x - c) >= FREEWAY_SPACING for c in chosen)]
+        if options:
+            chosen.append(min(options, key=lambda x: (excess[x], rank[x], abs(x - ideal), x)))
+    if not chosen:
+        chosen = [0]
+    shut = {edge((x + sign * k, 0), (x + sign * k, s)) for x in chosen
+            for k in closed_at for sign in (-1, 1) for s in (-1, 1)}
+    cross = {edge((x, 0), (x, s)) for x in chosen for s in (-1, 1)}
+    for key in sorted(shut):
+        roads.pop(key, None)
+    for key in sorted(cross):
+        if key not in roads:
+            roads[key] = 'COLLECTOR'
+    # Pieces the closed crossings left apart are joined on again round them.
+    blocked = set(closed) | shut
+    home_node = (0, 0)
+    places = {loc.node for loc in locations}
+    for _ in range(4 * len(shut) + 4):
+        pieces = _pieces(list(roads))
+        home = next((piece for piece in pieces if home_node in piece), None)
+        islands = [piece for piece in pieces if piece is not home]
+        islands += [{node} for node in sorted(places - set().union(*pieces))]
+        if home is None or not islands:
+            break
+        island = min(islands, key=lambda piece: (len(piece), min(piece)))
+        start, target = min(((a, b) for a in sorted(island) for b in sorted(home)),
+                            key=lambda pair: (math.dist(*pair), pair))
+        path = _route(start, target, roads, settings, confine=True, closed=blocked)
+        if path is None:
+            break
+        for a, b in zip(path, path[1:]):
+            roads.setdefault(edge(a, b), 'COLLECTOR')
+    return {'interchanges': sorted(chosen), 'closed': sorted(shut), 'cross': sorted(cross)}
+
+
+def _underpasses(settings, roads, closed, keep, avoid=frozenset()):
+    """A street that reaches the raised highway's line and stops under the
+    deck carries on under it where a street waits on the other side, and is
+    cut back otherwise (but not from a location's node)."""
+    radius = settings.radius
+    for x in range(-radius, radius + 1):
+        node = (x, 0)
+        sides = [s for s in (-1, 1) if edge(node, (x, s)) in roads]
+        if len(sides) != 1 or any(edge(node, (x + d, 0)) in roads for d in (-1, 1)):
+            continue
+        other = (x, -sides[0])
+        key = edge(node, other)
+        network = {n for pair in roads for n in pair}
+        if key not in closed and other in network and other not in avoid:
+            roads[key] = 'LOCAL'
+        elif node not in keep:
+            roads.pop(edge(node, (x, sides[0])))
+
+
+def freeway_ramps(settings, layout, roads):
+    """Each interchange's four ramps before their heights: {'node', 'kind'
+    ('off' or 'on'), 'side' (-1 south, 1 north), 'reach' (-1 west, 1 east:
+    the way it runs from the cross street), 'y' (its centreline), 'foot' (x
+    where it leaves the ground) and 'tail' (its run at grade, from the cross
+    street's centre to the foot)}."""
+    size, walk = settings.block_size, settings.sidewalk_width
+    ramps = []
+    for x in layout['interchanges']:
+        cross = max(ROAD_WIDTHS[roads[key]] / 2 for key in
+                    (edge((x, 0), (x, s)) for s in (-1, 1)) if key in roads)
+        for side in (-1, 1):
+            for reach in (-1, 1):
+                # Eastbound (south) leaves before the cross street, westbound
+                # (north) after it.
+                kind = 'off' if reach == (-1 if side < 0 else 1) else 'on'
+                y = side * RAMP_OFFSET
+                foot = round(x * size + reach * (cross + walk + RAMP_TAIL), 3)
+                ramps.append({'node': [x, 0], 'kind': kind, 'side': side, 'reach': reach,
+                              'y': y, 'foot': foot, 'tail': [[x * size, y], [foot, y]]})
+    return ramps
+
+
+def _ramp_span(ramp):
+    """The x interval a ramp (and its run at grade) may take, at most."""
+    far = ramp['foot'] + ramp['reach'] * (FREEWAY_RAMP_REACH + FREEWAY_TAPER)
+    return sorted((ramp['tail'][0][0], far))
+
+
+def _freeway_rows(settings, ramps):
+    """The decks as carriageway rows (as ``_path_rows``), so site pads keep
+    FREEWAY_PAD clear of them."""
+    walk = settings.sidewalk_width
+    extent = settings.radius * settings.block_size + 20
+    rows = [(-extent, 0.0, extent, 0.0, FREEWAY_HALF + FREEWAY_PAD - walk)]
+    for ramp in ramps:
+        x0, x1 = _ramp_span(ramp)
+        rows.append((x0, ramp['y'], x1, ramp['y'], RAMP_LANE + FREEWAY_PAD - walk))
+    return rows
+
+
+def _freeway_margin(settings, ramps, x, side):
+    """How far buildings in the block (x, 0) (side 1) or (x, -1) (side -1)
+    keep from the highway's line: clear of the deck, or beside a ramp as far
+    as from a street (its run at grade has footways, and its ground is
+    graded to theirs)."""
+    size = settings.block_size
+    margin = FREEWAY_HALF + FREEWAY_PAD
+    for ramp in ramps:
+        x0, x1 = _ramp_span(ramp)
+        if ramp['side'] == side and x0 < (x + 1) * size and x1 > x * size:
+            margin = max(margin, RAMP_OFFSET + RAMP_LANE + FREEWAY_PAD,
+                         RAMP_OFFSET + RAMP_LANE + settings.sidewalk_width + 2 +
+                         settings.setback + .5)
+    return margin
+
+
+def _freeway_geometry(settings, ramps, ground, street, crossings=()):
+    """Heights for the raised highway and its ramps. The deck top clears the
+    ground (``ground``) and the streets (``street``) by FREEWAY_CLEAR over the
+    city's ground, at no more than FREEWAY_GRADE, and comes down to grade
+    beyond it, out in the wasteland ('touchdown'). Each ramp climbs from its
+    foot (level with the street there) to the deck's level at about
+    FREEWAY_RAMP_GRADE (eased flat at both ends; at most FREEWAY_RAMP_REACH
+    long), then runs on level with the deck while its lane narrows into it;
+    shorter where a street (``crossings``: x, side, half width) crosses under
+    its climb, so it clears the street by RAMP_UNDER."""
+    size = settings.block_size
+    extent = settings.radius * size + 20
+    far = extent + max(FREEWAY_STEP, settings.wasteland)
+    count = int(min(far, extent + 1200) / FREEWAY_STEP)
+    xs = [k * FREEWAY_STEP for k in range(-count, count + 1)]
+    lateral = (-FREEWAY_HALF - 1, -FREEWAY_HALF / 2, 0.0, FREEWAY_HALF / 2, FREEWAY_HALF + 1)
+    below = [max(max(ground(x, y), street(x, y)) for y in lateral) for x in xs]
+    need = [z + FREEWAY_CLEAR if abs(x) <= extent else z for x, z in zip(xs, below)]
+    deck = [max(n - FREEWAY_GRADE * abs(x - x2) for x2, n in zip(xs, need)) for x in xs]
+    # Crests and sags rounded off (vertical curves): the profile widened by
+    # FREEWAY_CURVE either way, then averaged over as much, which keeps it
+    # over every point it had to clear, and no steeper.
+    k = FREEWAY_CURVE
+    wide = [max(deck[max(0, i - k):i + k + 1]) for i in range(len(deck))]
+    deck = [sum(wide[max(0, i - k):i + k + 1]) / len(wide[max(0, i - k):i + k + 1])
+            for i in range(len(wide))]
+    # Down by the ground's far edge, however near the wasteland ends.
+    deck = [min(z, below[i] + FREEWAY_GRADE * max(0.0, xs[-1] - abs(xs[i])))
+            for i, z in enumerate(deck)]
+    ends = []
+    for sign in (-1, 1):
+        order = sorted((i for i in range(len(xs)) if sign * xs[i] > extent),
+                       key=lambda i: abs(xs[i]))
+        ends.append(next((i for i in order if deck[i] <= below[i] + .01), order[-1]))
+    mainline = [[xs[i], round(max(deck[i], below[i]), 3)] for i in range(ends[0], ends[1] + 1)]
+    mainline[0][1] = round(below[ends[0]], 3)
+    mainline[-1][1] = round(below[ends[1]], 3)
+    xs_main = [x for x, _ in mainline]
+
+    def deck_at(x):
+        k = bisect.bisect_right(xs_main, x) - 1
+        if k < 0:
+            return mainline[0][1]
+        if k >= len(mainline) - 1:
+            return mainline[-1][1]
+        (x0, z0), (x1, z1) = mainline[k], mainline[k + 1]
+        return z0 + (z1 - z0) * (x - x0) / (x1 - x0)
+
+    def climb(ramp, base, length):
+        sign, steps = ramp['reach'], max(4, math.ceil(length / 4.0))
+        points = []
+        for k in range(steps + 1):
+            x = ramp['foot'] + sign * length * k / steps
+            points.append([round(x, 3), ramp['y'],
+                           round(base + (deck_at(x) - base) * ramp_profile(k / steps), 3)])
+        return points
+
+    def steepest(points):
+        return max(abs(b[2] - a[2]) / abs(b[0] - a[0]) for a, b in zip(points, points[1:]))
+    built = []
+    walk = settings.sidewalk_width
+
+    def clear(ramp, points):
+        for x, side, half in crossings:
+            if side != ramp['side']:
+                continue
+            for dx in (-half - walk, 0.0, half + walk):
+                top = next((a[2] + (b[2] - a[2]) * (x + dx - a[0]) / (b[0] - a[0])
+                            for a, b in zip(points, points[1:])
+                            if min(a[0], b[0]) <= x + dx <= max(a[0], b[0])), None)
+                if top is None:
+                    continue
+                under = max(street(x + dx, side * (FREEWAY_HALF + d)) for d in (0.0, 5.0, 10.0))
+                if top - FREEWAY_RAMP_DEPTH - under < RAMP_UNDER:
+                    return False
+        return True
+    for ramp in ramps:
+        base = street(ramp['foot'], ramp['y'])
+        length = 60.0
+        points = climb(ramp, base, length)
+        while steepest(points) > FREEWAY_RAMP_GRADE + 1e-6 and length < FREEWAY_RAMP_REACH:
+            longer = climb(ramp, base, min(FREEWAY_RAMP_REACH, length + 8.0))
+            if not clear(ramp, longer):
+                break
+            length, points = min(FREEWAY_RAMP_REACH, length + 8.0), longer
+        end = points[-1][0]
+        taper = []
+        for k in range(1, 5):
+            x = end + ramp['reach'] * FREEWAY_TAPER * k / 4
+            taper.append([round(x, 3), ramp['y'], round(deck_at(x), 3)])
+        built.append({**ramp, 'base': round(base, 3), 'length': round(length, 3),
+                      'points': points + taper, 'taper': FREEWAY_TAPER})
+    return {'half': FREEWAY_HALF, 'ramp_half': RAMP_LANE, 'mainline': mainline,
+            'touchdown': [xs[ends[0]], xs[ends[1]]], 'ramps': built}
+
+
+def _freeway_outer_roads(settings, freeway):
+    """The highway at grade on from where the raised one comes down, out to
+    the same far end as an at-grade highway's."""
+    reach = min(settings.highway_reach, settings.wasteland)
+    if reach < 1 or not freeway:
+        return []
+    roads = []
+    edge_x = settings.radius * settings.block_size
+    for x in freeway['touchdown']:
+        sign = 1 if x > 0 else -1
+        length = reach - (abs(x) - edge_x)
+        if length < 1:
+            continue
+        roads.append({'id': f'outer_{len(roads)}', 'node': [sign * settings.radius, 0],
+                      'tier': 'HIGHWAY', 'start': [x, 0.0], 'direction': [float(sign), 0.0],
+                      'width': ROAD_WIDTHS['HIGHWAY'], 'length': round(length, 3),
+                      'fade': round(min(length, reach * OUTER_FADE), 3), 'deck': True})
+    return roads
+
+
+def _raised_loops(settings, locations, roads, interchanges, blocked=frozenset(),
+                  closed=frozenset()):
+    """Driving circuits on a raised highway: off at one interchange, round
+    through the districts and back on at the next one (or the same). The
+    highway's leg is listed by its lattice nodes along its line."""
+    if settings.driving_loop_count == 0 or not interchanges:
+        return []
+    radius, size = settings.radius, settings.block_size
+    line = {(x, 0) for x in range(-radius, radius + 1)}
+    nodes = [(x, 0) for x in interchanges]
+    pairs = list(zip(nodes, nodes[1:])) or [(nodes[0], nodes[0])]
+    anchors = [loc.node for loc in locations if loc.node not in line and
+               loc.node not in blocked]
+    fallback = [(x, y) for x in range(-radius + 1, radius) for y in range(-radius + 1, radius)
+                if (x, y) not in line and (x, y) not in anchors and (x, y) not in blocked
+                and in_city(settings, x * size, y * size)]
+    stream(settings.seed, 'loop_anchors').shuffle(fallback)
+    anchors.extend(fallback)
+    circuits, signatures = [], set()
+    for anchor in anchors:
+        start, end = min(pairs, key=lambda pair: (
+            math.dist(anchor, ((pair[0][0] + pair[1][0]) / 2, 0)), pair))
+        outward = _route(start, anchor, roads, settings, (set(blocked) | {end}) - {start},
+                         confine='strict', closed=closed)
+        if outward is None:
+            continue
+        returning = _route(anchor, end, roads, settings, (set(outward[:-1]) | set(blocked)) - {end},
+                           confine='strict', closed=closed)
+        if returning is None:
+            continue
+        street_path = outward + returning[1:]
+        keys = [edge(a, b) for a, b in zip(street_path, street_path[1:])]
+        signature = frozenset(keys)
+        if len(keys) < 6 or len(set(keys)) < len(keys) or signature in signatures:
+            continue
+        signatures.add(signature)
+        for key in keys:
+            if key not in roads:
+                roads[key] = 'COLLECTOR'
+        step = 1 if end[0] <= start[0] else -1
+        leg = [(x, 0) for x in range(end[0] + step, start[0] + step, step)]
+        circuits.append({'id': f'driving_loop_{len(circuits)}', 'nodes': street_path + leg,
+                         'length_m': (len(keys) + len(leg)) * size,
+                         'tiers': sorted({roads[key] for key in keys} | {'HIGHWAY'}),
+                         'freeway': [start[0], end[0]]})
+        if len(circuits) == settings.driving_loop_count:
+            break
+    return circuits
+
+
 # -- dense downtown ------------------------------------------------------------
 
 DOWNTOWN_VERGE = .5          # Building line behind the footway, downtown.
@@ -2872,11 +3307,12 @@ def _edge_blocks(key):
     return (x, ay - 1), (x, ay)
 
 
-def _close_downtown_streets(settings, locations, roads, keep=frozenset()):
+def _close_downtown_streets(settings, locations, roads, keep=frozenset(), apart=frozenset()):
     """Close some downtown local streets so blocks join into superblocks.
 
     A street closes only between two downtown blocks, only if the road network
-    stays connected, and only while the joined blocks fit in 2 x 2.
+    stays connected, and only while the joined blocks fit in 2 x 2. Blocks
+    either side of an ``apart`` edge (a raised highway's line) never join.
     """
     share = settings.downtown_superblocks
     if share <= 0:
@@ -2899,8 +3335,8 @@ def _close_downtown_streets(settings, locations, roads, keep=frozenset()):
         for y in range(-radius, radius):
             for key in (edge((x + 1, y), (x + 1, y + 1)), edge((x, y + 1), (x + 1, y + 1))):
                 a, b = _edge_blocks(key)
-                if key not in roads and _downtown(settings, locations, a) and \
-                        _downtown(settings, locations, b):
+                if key not in roads and key not in apart and \
+                        _downtown(settings, locations, a) and _downtown(settings, locations, b):
                     parent[find(a)] = find(b)
     candidates = [key for key, tier in sorted(roads.items())
                   if tier == "LOCAL" and key not in keep and
@@ -2944,7 +3380,7 @@ def _connected(roads, start, goal):
     return False
 
 
-def _place_downtown(settings, locations, roads, paths, reserved, terraces=None):
+def _place_downtown(settings, locations, roads, paths, reserved, terraces=None, freeway=None):
     """Downtown blocks built out to the footway, split into party-walled towers.
 
     Blocks joined across streetless edges (natural or closed) are laid out as
@@ -2960,6 +3396,11 @@ def _place_downtown(settings, locations, roads, paths, reserved, terraces=None):
     walls, region, stairs, stair_rows = terrace_obstacles(terraces)
     rows = (_path_rows(paths) + _stair_rows(settings, stair_rows) +
             _wall_rows(settings, terraces, roads))
+    apart = set()
+    if freeway is not None:
+        # Clear of a raised highway's decks, and never across its line.
+        rows += _freeway_rows(settings, freeway)
+        apart = _corridor(settings)
     tops = terrace_cells(terraces or {})
     verge = max(DOWNTOWN_VERGE, settings.setback - settings.sidewalk_width + .1)
     owned = {(x, y) for x in range(-radius, radius) for y in range(-radius, radius)
@@ -2970,7 +3411,7 @@ def _place_downtown(settings, locations, roads, paths, reserved, terraces=None):
             group = tuple((x + i, y + j) for i in range(wx) for j in range(wy))
             if any(b not in owned for b in group):
                 continue
-            if any(e in roads or e in stairs for e in _inner_edges(x, y, wx, wy)):
+            if any(e in roads or e in stairs or e in apart for e in _inner_edges(x, y, wx, wy)):
                 continue
             if len({region.get(b) for b in group}) > 1:
                 continue

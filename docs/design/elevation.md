@@ -1,6 +1,28 @@
 # Design: elevation, infrastructure levels and the megacity
 
-Status: v0.21 (Rolling hills) and v0.22 (Terraced) done; the rest planned.
+Status: v0.21 (Rolling hills), v0.22 (Terraced) and v0.23 (Raised
+highway) done; the rest planned.
+
+**As built in v0.23:** the highway is raised (`highway: RAISED`, the
+default; `GRADE` keeps the at-grade one, plan for plan). It runs straight
+along the y = 0 lattice line, which no street takes, on a 25 m deck whose
+top clears the ground and the streets under it by 6.5 m at no more than 3%
+(an envelope of 3% cones over the required heights, sampled every 8 m,
+then widened and averaged over 48 m either way to round its crests and
+sags without breaking the clearance or the grade). It comes down to grade
+beyond the map, where the outer road starts (`deck`). Interchanges are
+diamonds at main street crossings ten blocks apart, chosen on hills where
+the deck a ramp's length away stands least above the cross street (over
+the ungraded hills). Each ramp runs at grade 10 m past the cross street's
+footway, climbs at 6% (eased; longer, up to 200 m, on hills, and steeper
+only where a street crossing under it needs the headroom) and tapers into
+the deck over 40 m. The crossings one and two blocks from an interchange
+(three on hills) are closed and the network rejoined round them. Lots,
+pads and superblocks keep 3.5 m clear of the decks and never span the
+line; terraces keep a block off it. On hills the line is graded as a
+highway. This covers the raised highway of §4 and the grade separation,
+diamond interchanges and tapered ramps of §4b; the free-flowing alignment
+and partial cloverleafs are still to come.
 
 **As built in v0.22.7:** the ground is graded to every foundation
 (`Grading._shaped`): level for `PAD_SHOULDER`, then cut at `PAD_CUT_SLOPE`
@@ -234,10 +256,11 @@ Piers go in medians or inside blocks.
 
 **First versions:**
 
-- **Raised highway:** one deck level on piers along a corridor, with ramps
-  down to the arterials. In the Terraced style it is the way onto the
-  plateau. Decks, parapets and piers are closed solids. The metadata lists
-  the deck as a road with heights, `structure: viaduct`.
+- **Raised highway** (built in v0.23; see the top): one deck level on
+  piers along a corridor, with ramps down to the arterials. Still to come:
+  in the Terraced style, a way onto the plateau, and the deck listed with
+  the roads as `structure: viaduct` (today it has its own `freeway`
+  section).
 - **Road tunnels out of the map:** portals cut into the relief at the map
   edge. The tunnel mouth is the level boundary, as in the reference.
 - **Rail:**
@@ -253,8 +276,9 @@ Piers go in medians or inside blocks.
 
 ## 4b. Freeway (North American practice)
 
-Today's highway follows the street lattice, with filleted right-angle turns.
-A proper freeway replaces it:
+The at-grade highway follows the street lattice, with filleted right-angle
+turns; since v0.23 the raised one runs straight across the city instead,
+with diamond interchanges. A proper freeway goes further:
 
 - **Alignment.** A free-flowing alignment that ignores the lattice: tangents
   joined by circular curves (with spiral transitions where they help).
@@ -367,8 +391,9 @@ The aim is the scale of Akira or Judge Dredd at a cost the game can run.
 | --- | --- |
 | v0.21 (done) | Terrain field (Flat, Rolling), road grading, pads and plinths, ground and street meshes on the terrain, metadata heights, heightmap export |
 | v0.22 (done) | Terraced style: plateau and podiums behind retaining walls, ramp streets and stairs, exact walls where ground meets a street |
-| v0.23 | Cross-sections: ditches, embankments and cuttings, culverts; hills continued past the map's edge |
-| v0.24 | Levels: structure types, raised highway with ramps, road tunnels at the map edge, rail with crossings and a freight siding, subway routes with station entrances, sewer network data with manholes |
-| v0.25 | Freeway (§4b): free-flowing alignment with gentle curves, grade-separated, interchanges with on- and off-ramps |
-| v0.26 | Megacity preset: megablocks, stacked decks, skybridges, collapsed spans, instanced modules, skyline ring |
+| v0.23 (done) | Raised highway: a straight viaduct across the city, the streets passing under it, diamond interchanges with tapered ramps, at grade again in the wasteland |
+| v0.24 | Cross-sections: ditches, embankments and cuttings, culverts; hills continued past the map's edge |
+| v0.25 | Levels: structure types, road tunnels at the map edge, rail with crossings and a freight siding, subway routes with station entrances, sewer network data with manholes |
+| v0.26 | Freeway (§4b): free-flowing alignment with gentle curves, partial cloverleafs |
+| v0.27 | Megacity preset: megablocks, stacked decks, skybridges, collapsed spans, instanced modules, skyline ring |
 | Later | Walkable subway tunnels and platforms; walkable sewers with collapsed sections and breaches into the subway |

@@ -201,8 +201,16 @@ def _segments(plan, cut=None):
                     pa, pb = _point_at(path['points'], a), _point_at(path['points'], b)
                     rows.append((pa[0], pa[1], pb[0], pb[1], half, 'square'))
     for road in getattr(plan, 'outer_roads', ()):
+        if road.get('deck'):
+            continue
         (x, y), (dx, dy) = road['start'], road['direction']
         rows.append((x, y, x + dx * OUTER_STUB, y + dy * OUTER_STUB, road['width'] / 2))
+    freeway = getattr(plan, 'freeway', None) or {}
+    for ramp in freeway.get('ramps', ()):
+        # A ramp's run at grade, from the cross street to its foot (square
+        # there, where the ramp's deck takes over).
+        (x0, y0), (x1, y1) = ramp['tail']
+        rows.append((x0, y0, x1, y1, freeway['ramp_half'], 'square'))
     size = plan.settings.block_size
     for bulb in getattr(plan, 'culdesacs', ()):
         # A turning circle: a zero-length segment as wide as the circle.
@@ -230,6 +238,10 @@ class _Outer:
         handover = start + self.sign * OUTER_CUT
         self.cut = (math.ceil(handover / SAMPLE - 1e-9) if self.sign > 0
                     else math.floor(handover / SAMPLE + 1e-9)) * SAMPLE
+        # Coming down off a raised highway's deck: no street mesh to meet.
+        self.deck = bool(road.get('deck'))
+        if self.deck:
+            self.cut = start
         self.lo = math.floor((centre - self.band) / SAMPLE + 1e-9) * SAMPLE
         self.hi = math.ceil((centre + self.band) / SAMPLE - 1e-9) * SAMPLE
         self.centre = centre
@@ -238,6 +250,8 @@ class _Outer:
 
     def drops(self, x0, y0):
         """True for street-mesh cells the outer road replaces."""
+        if self.deck:
+            return False
         a, b = (x0, y0) if self.axis == 0 else (y0, x0)
         beyond = a >= self.cut - 1e-9 if self.sign > 0 else a + SAMPLE <= self.cut + 1e-9
         return beyond and self.lo - 1e-9 <= b and b + SAMPLE <= self.hi + 1e-9
@@ -555,7 +569,7 @@ def build_ground_mesh(plan):
         # open. Outer highways run through gaps cut in them.
         holes = []
         for outer in outer_roads(plan):
-            a0 = extent if outer.sign > 0 else -extent
+            a0 = max(extent, abs(outer.start)) * (1 if outer.sign > 0 else -1)
             holes.append(outer.rect(a0))
         for rect in ((-far, -far, -extent, far), (extent, -far, far, far),
                      (-extent, extent, extent, far), (-extent, -far, extent, -extent)):
@@ -608,7 +622,7 @@ def _terrain_ground_mesh(plan):
     if settings.wasteland > 0:
         holes = []
         for outer in outer_roads(plan):
-            a0 = extent if outer.sign > 0 else -extent
+            a0 = max(extent, abs(outer.start)) * (1 if outer.sign > 0 else -1)
             holes.append(outer.rect(a0))
         for rect in ((-far, -far, -extent, far), (extent, -far, far, far),
                      (-extent, extent, extent, far), (-extent, -far, extent, -extent)):
@@ -942,7 +956,7 @@ def _terraced_ground(plan):
     if settings.wasteland > 0:
         holes = []
         for outer in outer_roads(plan):
-            a0 = edge_line if outer.sign > 0 else -edge_line
+            a0 = max(edge_line, abs(outer.start)) * (1 if outer.sign > 0 else -1)
             holes.append(outer.rect(a0))
         far = max(far, edge_line + 1.0)
         for rect in ((-far, -far, -edge_line, far), (edge_line, -far, far, far),
@@ -1073,6 +1087,302 @@ def build_viaduct_mesh(plan):
             box(centre, tangent, PIER_SIZE[0], min(PIER_SIZE[1], width / 3), foot,
                 soffit - PIER_CAP[1])
     return vertices, faces
+
+
+# A raised highway (``plan.freeway``): the mainline deck on hammerhead piers,
+# with a median barrier, parapets and lane markings, and its ramps on single
+# columns. Where a deck runs too near the ground for open space under it, it
+# stands on solid fill between its fascias instead (an embankment).
+FREEWAY_DEPTH = 1.6        # Mainline deck: top to soffit.
+FREEWAY_RAMP_DEPTH = 1.1   # As city_plan's.
+FREEWAY_OPEN = 1.0         # Least clear height under a soffit; lower is fill.
+FREEWAY_PIERS = 30.0       # Mainline pier spacing (m); ramp piers half that.
+FREEWAY_PIER = (2.0, 3.2)  # Column along the deck, across it.
+FREEWAY_CAP = (2.4, 1.3)   # Cap beam along the deck, depth (it spans the deck).
+FREEWAY_PIER_CLEAR = 2.5   # Piers keep this far from a street's footway.
+FREEWAY_MEDIAN = (.6, .85)  # Median barrier width, height.
+FREEWAY_MERGE = .3         # A ramp within this of the deck's level runs into it.
+FREEWAY_LINE = .15         # Paint width.
+FREEWAY_DASH = (3.0, 9.0)  # Lane dash, gap.
+
+
+def _freeway_ground(plan):
+    """Natural ground under a raised highway (at the surface it rides on)."""
+    if getattr(plan, 'terraces', None):
+        grading = Grading(plan)
+        return lambda x, y: grading.natural(x, y)
+    if getattr(plan, 'heights', None):
+        surface = plan.surface()
+        return lambda x, y: surface(x, y)
+    return lambda x, y: 0.0
+
+
+def freeway_stations(plan):
+    """The raised highway as built: ('mainline' and each ramp) lists of
+    stations (x, y centre, z top, inner edge |y|, outer edge |y|, bottom z,
+    open), with open stations standing clear over the ground and the rest on
+    fill. Returns {'mainline': [...], 'ramps': [[...]], 'piers': [(x, y, along,
+    across, foot, cap bottom, cap top, cap across)]}."""
+    freeway = getattr(plan, 'freeway', None) or {}
+    if not freeway:
+        return {}
+    ground = _freeway_ground(plan)
+    half, ramp_half = freeway['half'], freeway['ramp_half']
+    walk = plan.settings.sidewalk_width
+    size = plan.settings.block_size
+    crossings = []
+    for road in plan.roads:
+        (ax, ay), (bx, by) = road.a, road.b
+        if ax == bx and min(ay, by) <= 0 <= max(ay, by):
+            crossings.append((ax * size, road.width / 2 + walk + FREEWAY_PIER_CLEAR))
+
+    def under(x, y0, y1):
+        samples = [ground(x, y0 + (y1 - y0) * k / 4) for k in range(5)]
+        return min(samples), max(samples)
+    mainline = []
+    for x, z in freeway['mainline']:
+        low, high = under(x, -half, half)
+        bottom = z - FREEWAY_DEPTH
+        open_ = bottom - high >= FREEWAY_OPEN
+        mainline.append((x, 0.0, z, -half, half, bottom if open_ else low - .5, open_))
+    ramps = []
+    for ramp in freeway['ramps']:
+        side, sign = ramp['side'], ramp['reach']
+        climb, taper = ramp['length'], ramp['taper']
+        stations = []
+        for x, y, z in ramp['points']:
+            along = abs(x - ramp['foot'])
+            width = 2 * ramp_half * max(0.0, min(1.0, (climb + taper - along) / taper))
+            inner, outer = side * half, side * (half + width)
+            low, high = under(x, inner, side * (half + 2 * ramp_half))
+            bottom = z - FREEWAY_RAMP_DEPTH
+            open_ = bottom - high >= FREEWAY_OPEN
+            stations.append((x, y, z, inner, outer, bottom if open_ else low - .5, open_))
+        ramps.append(stations)
+
+    def clear_of_streets(x, reach):
+        return all(abs(x - cx) >= clear + reach for cx, clear in crossings)
+    piers = []
+
+    def deck_at(stations, x):
+        for a, b in zip(stations, stations[1:]):
+            if a[0] <= x <= b[0] or b[0] <= x <= a[0]:
+                t = (x - a[0]) / (b[0] - a[0]) if b[0] != a[0] else 0.0
+                return a[2] + (b[2] - a[2]) * t, a[6] and b[6]
+        return None, False
+    # Mainline piers every FREEWAY_PIERS out from the middle both ways.
+    xs = [st[0] for st in mainline]
+    spots = []
+    k = 0
+    while True:
+        moved = False
+        for sign in ((1,) if k == 0 else (-1, 1)):
+            x = sign * k * FREEWAY_PIERS
+            if xs[0] < x < xs[-1]:
+                spots.append(x)
+                moved = True
+        if not moved and k:
+            break
+        k += 1
+    for x in sorted(spots):
+        z, open_ = deck_at(mainline, x)
+        if z is None or not open_:
+            continue
+        # Shift off a street under the deck (either way, the nearer free spot).
+        for shift in (0.0, 3.0, -3.0, 6.0, -6.0, 9.0, -9.0, 12.0, -12.0):
+            if clear_of_streets(x + shift, FREEWAY_CAP[0] / 2):
+                break
+        else:
+            continue
+        x += shift
+        z, open_ = deck_at(mainline, x)
+        if z is None or not open_:
+            continue
+        low, high = under(x, -half, half)
+        soffit = z - FREEWAY_DEPTH
+        if soffit - FREEWAY_CAP[1] - high < 2.0:
+            continue
+        piers.append((x, 0.0, FREEWAY_PIER[0], FREEWAY_PIER[1], min(
+            ground(x + a, b) for a in (-1.0, 1.0) for b in (-2.0, 0.0, 2.0)) - .5,
+            soffit - FREEWAY_CAP[1], soffit, 2 * half - 1.0))
+    for ramp, stations in zip(freeway['ramps'], ramps):
+        side = ramp['side']
+        y = side * (half + ramp_half)
+        start = ramp['foot']
+        total = ramp['length'] + ramp['taper']
+        count = max(1, int(total // (FREEWAY_PIERS / 2)))
+        for j in range(1, count + 1):
+            x = start + ramp['reach'] * total * j / (count + 1)
+            if not clear_of_streets(x, 1.2):
+                continue
+            z, open_ = deck_at(stations, x)
+            if z is None or not open_:
+                continue
+            soffit = z - FREEWAY_RAMP_DEPTH
+            low, high = under(x, side * half, side * (half + 2 * ramp_half))
+            if soffit - .8 - high < 2.0:
+                continue
+            # Under the narrowing lane, nearer the deck.
+            width = 2 * ramp_half * max(0.0, min(1.0, (total - abs(x - start)) / ramp['taper']))
+            if width < 4.0:
+                continue
+            centre = side * (half + width / 2)
+            piers.append((x, centre, 1.4, 2.2, min(ground(x, centre + d) for d in (-1.5, 0.0, 1.5))
+                          - .5, soffit - .8, soffit, width - 1.0))
+    return {'mainline': mainline, 'ramps': ramps, 'piers': piers}
+
+
+def build_freeway_mesh(plan):
+    """Return vertices, faces, material indices (0 deck asphalt, 1 concrete)
+    for a raised highway, or empty lists."""
+    built = freeway_stations(plan)
+    vertices, faces, materials = [], [], []
+    if not built:
+        return vertices, faces, materials
+    ids = {}
+    solid = [0]
+
+    def vertex(co):
+        # Each solid keeps its own vertices (parapets stand on the deck
+        # without sharing its edges).
+        co = (round(co[0], 8), round(co[1], 8), round(co[2], 8))
+        key = (solid[0], co)
+        if key not in ids:
+            ids[key] = len(vertices)
+            vertices.append(co)
+        return ids[key]
+
+    def face(points, material, outward):
+        indices = list(dict.fromkeys(vertex(p) for p in _oriented(points, outward)))
+        if len(indices) >= 3:
+            faces.append(tuple(indices))
+            materials.append(material)
+
+    def box(x, y, along, across, bottom, top):
+        solid[0] += 1
+        corners = [(x - along / 2, y - across / 2), (x + along / 2, y - across / 2),
+                   (x + along / 2, y + across / 2), (x - along / 2, y + across / 2)]
+        for (ax, ay), (bx, by) in zip(corners, corners[1:] + corners[:1]):
+            mx, my = (ax + bx) / 2 - x, (ay + by) / 2 - y
+            face([(ax, ay, bottom), (bx, by, bottom), (bx, by, top), (ax, ay, top)], 1, (mx, my, 0.0))
+        face([(cx, cy, top) for cx, cy in corners], 1, (0.0, 0.0, 1.0))
+        face([(cx, cy, bottom) for cx, cy in corners], 1, (0.0, 0.0, -1.0))
+
+    def strip(stations, inner, outer, low, high, material):
+        """A closed solid band along ``stations`` between two lateral edges
+        (functions of a station) and two heights (offsets from the top, or
+        None for the station's bottom): its top in ``material``, the rest
+        concrete."""
+        def level(st, offset):
+            return st[5] if offset is None else st[2] + offset
+        solid[0] += 1
+        for a, b in zip(stations, stations[1:]):
+            ia, ib, oa, ob = inner(a), inner(b), outer(a), outer(b)
+            if abs(ia - oa) < 1e-6 and abs(ib - ob) < 1e-6:
+                continue
+            face([(a[0], ia, level(a, high)), (b[0], ib, level(b, high)),
+                  (b[0], ob, level(b, high)), (a[0], oa, level(a, high))], material, (0.0, 0.0, 1.0))
+            face([(a[0], ia, level(a, low)), (b[0], ib, level(b, low)),
+                  (b[0], ob, level(b, low)), (a[0], oa, level(a, low))], 1, (0.0, 0.0, -1.0))
+            for (ea, eb), sign in (((ia, ib), -1.0), ((oa, ob), 1.0)):
+                side = sign * (1.0 if oa > ia else -1.0)
+                face([(a[0], ea, level(a, low)), (b[0], eb, level(b, low)),
+                      (b[0], eb, level(b, high)), (a[0], ea, level(a, high))], 1,
+                     (0.0, side, 0.0))
+        for st, sign in ((stations[0], -1.0), (stations[-1], 1.0)):
+            direction = sign * (1.0 if stations[-1][0] > stations[0][0] else -1.0)
+            i, o = inner(st), outer(st)
+            face([(st[0], i, level(st, low)), (st[0], o, level(st, low)),
+                  (st[0], o, level(st, high)), (st[0], i, level(st, high))], 1,
+                 (direction, 0.0, 0.0))
+
+    def runs(stations, keep):
+        """Consecutive stretches of stations whose segments all pass ``keep``."""
+        found, current = [], []
+        for a, b in zip(stations, stations[1:]):
+            if keep(a, b):
+                current = current or [a]
+                current.append(b)
+            elif current:
+                found.append(current)
+                current = []
+        if current:
+            found.append(current)
+        return found
+
+    mainline, ramps = built['mainline'], built['ramps']
+    freeway = plan.freeway
+    half = freeway['half']
+    # Mainline: deck (asphalt top; fascias and soffit or fill in concrete).
+    strip(mainline, lambda st: -half, lambda st: half, None, 0.0, 0)
+    # Where a ramp runs level with the deck, no parapet between them.
+    merged = {-1: [], 1: []}
+    for ramp, stations in zip(freeway['ramps'], ramps):
+        for st in stations:
+            near = min(mainline, key=lambda m: abs(m[0] - st[0]))
+            if abs(near[2] - st[2]) <= FREEWAY_MERGE and abs(st[4]) > abs(st[3]) + 1e-6:
+                merged[ramp['side']].append(st[0])
+    for side in (-1, 1):
+        spans = sorted(merged[side])
+
+        def free(a, b, spans=spans):
+            lo, hi = sorted((a[0], b[0]))
+            return not any(lo - 4.0 <= x <= hi + 4.0 for x in spans)
+        for run in runs(mainline, free):
+            inner = side * (half - PARAPET[1])
+            strip(run, lambda st, v=inner: v, lambda st, v=side * half: v, 0.0, PARAPET[2], 1)
+    strip(mainline, lambda st: -FREEWAY_MEDIAN[0] / 2, lambda st: FREEWAY_MEDIAN[0] / 2,
+          0.0, FREEWAY_MEDIAN[1], 1)
+    # Ramps: deck, then a parapet along the outer edge where it stands up.
+    ground = _freeway_ground(plan)
+    for ramp, stations in zip(freeway['ramps'], ramps):
+        side = ramp['side']
+        inset = side * .05
+        strip(stations, lambda st: st[3] + inset, lambda st: st[4], None, 0.0, 0)
+        high = runs(stations, lambda a, b: min(a[2] - ground(a[0], a[4]), b[2] - ground(b[0], b[4]))
+                    > .8 and abs(a[4] - a[3]) > PARAPET[1] + .05)
+        for run in high:
+            strip(run, lambda st: st[4] - side * PARAPET[1], lambda st: st[4], 0.0, PARAPET[2], 1)
+    for x, y, along, across, foot, cap_bottom, cap_top, cap_across in built['piers']:
+        box(x, y, along, across, foot, cap_bottom)
+        box(x, y, FREEWAY_CAP[0], cap_across, cap_bottom, cap_top)
+    return vertices, faces, materials
+
+
+def freeway_markings(plan):
+    """Lane paint on a raised highway's deck: quads (four xyz points) for
+    the solid edge and median lines and the dashed lane lines."""
+    freeway = getattr(plan, 'freeway', None) or {}
+    if not freeway:
+        return []
+    mainline = [(x, 0.0, z) for x, z in freeway['mainline']]
+    edge_line = freeway['half'] - 2.5
+    quads = []
+
+    def quad(x0, x1, y):
+        z0, z1 = _interpolate(mainline, x0) + .004, _interpolate(mainline, x1) + .004
+        w = FREEWAY_LINE / 2
+        quads.append([(x0, y - w, z0), (x1, y - w, z1), (x1, y + w, z1), (x0, y + w, z0)])
+    for y in (-edge_line, edge_line, -FREEWAY_MEDIAN[0] / 2 - .4, FREEWAY_MEDIAN[0] / 2 + .4):
+        for (x0, _, _), (x1, _, _) in zip(mainline, mainline[1:]):
+            quad(x0, x1, y)
+    dash, gap = FREEWAY_DASH
+    lane = (edge_line + FREEWAY_MEDIAN[0] / 2 + .4) / 2
+    for y in (-lane, lane):
+        x = math.ceil(mainline[0][0] / (dash + gap)) * (dash + gap)
+        while x + dash < mainline[-1][0]:
+            quad(x, x + dash, y)
+            x += dash + gap
+    return quads
+
+
+def _interpolate(stations, x):
+    """Deck top at ``x`` along a run of stations."""
+    for a, b in zip(stations, stations[1:]):
+        if a[0] <= x <= b[0]:
+            t = (x - a[0]) / (b[0] - a[0]) if b[0] != a[0] else 0.0
+            return a[2] + (b[2] - a[2]) * t
+    return stations[0][2] if x < stations[0][0] else stations[-1][2]
 
 
 def footprint(center, width, depth, rotation):
@@ -1248,13 +1558,17 @@ class Grading:
             # Between two foundations at different levels: the nearer one's.
             ceiling, floor = nearest[1], nearest[2]
         value = self.field.value(x, y)
-        if value < self.walk - .3:
-            # Under the paving the ground is never lifted into it (its edge,
-            # cut on the sample grid, counts as outside).
+        if value < self.walk - .3 or self.streets.value(x, y) < self.walk - .3:
+            # Under the paving (a viaduct's too) the ground is never lifted
+            # into it (its edge, cut on the sample grid, counts as outside).
             return min(height, ceiling)
         beyond = max(0.0, value - self.walk)
         if beyond < PAD_REACH:
-            footway = self.surface(x, y) + self.offset     # The ground at a footway's edge.
+            # The ground at a footway's edge: on terraces (cut at that edge)
+            # just under the footway's top; on hills (whose cells reach under
+            # the paving) at the street's own ground.
+            footway = self.surface(x, y) + (self.plan.settings.curb_height - .05
+                                            if self.terraces else self.offset)
             slope = max(0.0, beyond - PAD_SHOULDER)
             high = footway + PAD_CUT_SLOPE * slope
             low = footway - PAD_FILL_SLOPE * slope
@@ -1621,6 +1935,11 @@ def build_outer_road_mesh(plan, street_vertices):
     for index, outer in enumerate(outer_roads(plan)):
         low, high = outer.centre - outer.band, outer.centre + outer.band
         heights = {}
+        if outer.deck:
+            # Off a raised highway's deck: shoulders flush with the carriageway.
+            heights = {round(b, 8): 0.0 for b in (low, outer.centre - outer.half,
+                                                   outer.centre + outer.half, high)}
+            street_vertices = ()
         for x, y, z in street_vertices:
             a, b = (x, y) if outer.axis == 0 else (y, x)
             if abs(a - outer.cut) < 1e-6 and low - 1e-6 <= b <= high + 1e-6:

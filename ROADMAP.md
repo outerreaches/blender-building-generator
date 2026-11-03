@@ -19,6 +19,7 @@
 | v0.20 | Cinemas: palace, twin and multiplex filling their pads, stadium seating with seat markers; cul-de-sacs only among houses; one drive-in per city |
 | v0.21 | Rolling hills: streets graded to their tier's limit, level pads with plinths and cut slopes, retaining curbs, heights in the metadata, a heightmap export |
 | v0.22 | Terraced terrain: a built-up plateau and podiums of whole blocks at the city's edge, walled on some sides and falling naturally into the open ground on two or three others; edge streets along the top; ramps (on viaducts where high) and stairs up to them; retaining walls with parapets |
+| v0.23 | Raised highway: a straight viaduct across the city on piers, the streets passing under it; diamond interchanges whose ramps climb alongside the deck and taper into it; at grade again out in the wasteland |
 
 See [CHANGELOG.md](CHANGELOG.md) for the details.
 
@@ -51,10 +52,10 @@ stay as they are; every feature below is off until its setting is changed.
 
 | Version | Scope |
 | --- | --- |
-| v0.23 | Cross-sections: roadside ditches outside the dense districts, embankments and cuttings, culverts; the hills carried on into the wasteland round Rolling Hills cities too (Terraced has it since v0.22.4) |
-| v0.24 | Levels: elevated, at-grade and below-grade structures; a raised highway with ramps; road tunnels at the map edge; rail with level crossings and a freight siding; subway routes with station entrances; the sewer network as data, with manholes |
-| v0.25 | Freeway to North American practice: a free-flowing alignment with gentle curves (no right-angle turns; curve radii and grades for its design speed), grade-separated from the street grid, with interchanges (diamond, partial cloverleaf) whose on- and off-ramps have acceleration and deceleration lanes |
-| v0.26 | Megacity preset: megablocks, stacked highway decks, skybridges and collapsed spans, built from instanced modules with a low-poly skyline ring |
+| v0.24 | Cross-sections: roadside ditches outside the dense districts, embankments and cuttings, culverts; the hills carried on into the wasteland round Rolling Hills cities too (Terraced has it since v0.22.4) |
+| v0.25 | Levels: elevated, at-grade and below-grade structures; road tunnels at the map edge; rail with level crossings and a freight siding; subway routes with station entrances; the sewer network as data, with manholes |
+| v0.26 | Freeway to North American practice: the raised highway on a free-flowing alignment with gentle curves (curve radii and grades for its design speed) instead of straight along the lattice, and partial cloverleafs where there is room |
+| v0.27 | Megacity preset: megablocks, stacked highway decks, skybridges and collapsed spans, built from instanced modules with a low-poly skyline ring |
 
 ## Later
 

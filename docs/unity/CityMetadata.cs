@@ -38,6 +38,7 @@ namespace Ares.CityGen
         public Terrace[] terraces;      // Terraced terrain: raised blocks behind retaining walls.
         public Ramp[] ramps;
         public Stair[] stairs;
+        public Freeway freeway;         // A raised highway (null when it runs at grade).
         public Building[] buildings;
         public Site[] sites;
         public TransitStop[] transit_stops;
@@ -76,6 +77,7 @@ namespace Ares.CityGen
         public float relief;            // Hills: the setting, metres low to high.
         public float plateau_height;    // Terraced: the plateau's rise (setting).
         public int podiums;             // Terraced: how many podiums were asked for.
+        public string highway;          // RAISED (on a viaduct) or GRADE.
     }
 
     [Serializable]
@@ -153,6 +155,37 @@ namespace Ares.CityGen
         public float[] start;     // Deck centreline at each end, at road level.
         public float[] end;
         public float[] piers;     // Pier foot centres (x, y, z triples).
+    }
+
+    [Serializable]
+    public class Freeway
+    {
+        public float width;
+        public FreewayInterchange[] interchanges;
+        public float[] mainline;  // Deck centreline at road level (x, y, z triples), west to east.
+        public float[] touchdown; // Where it meets the ground: the mainline's two ends.
+        public FreewayRamp[] ramps;
+        public float[] piers;     // Pier foot centres (x, y, z triples).
+    }
+
+    [Serializable]
+    public class FreewayInterchange
+    {
+        public int[] node;        // The cross street's lattice node on the highway's line.
+        public float[] position;
+    }
+
+    [Serializable]
+    public class FreewayRamp
+    {
+        public string id;
+        public string kind;       // off or on.
+        public int interchange;   // Index into interchanges.
+        public string side;       // south (eastbound) or north (westbound).
+        public float width;
+        public float climb;       // Metres from its foot to the deck's level...
+        public float taper;       // ...then this far while its lane joins the deck.
+        public float[] points;    // Centreline from the cross street (x, y, z triples).
     }
 
     [Serializable]

@@ -353,6 +353,39 @@ class CityMetadata:
                            'riser': _r(layout['riser'])})
         return terraces, ramps, stairs
 
+    def _freeway(self, node_point):
+        """A raised highway: its deck's centreline, interchanges, ramps (from
+        the cross street, at grade, to where the lane has joined the deck) and
+        pier feet; None for one at grade."""
+        freeway = getattr(self.plan, 'freeway', None) or {}
+        if not freeway:
+            return None
+        from .streets import freeway_stations
+        space = self.space
+        ox, oy, oz = self.origin
+
+        def point(x, y, z):
+            return space.point((ox + x, oy + y, oz + z))
+        built = freeway_stations(self.plan)
+        ramps = []
+        for k, ramp in enumerate(freeway['ramps']):
+            (tx, ty), _ = ramp['tail']
+            line = [point(tx, ty, ramp['base'])] + [point(*p) for p in ramp['points']]
+            ramps.append({'id': f'freeway_ramp_{k}', 'kind': ramp['kind'],
+                          'interchange': freeway['interchanges'].index(ramp['node'][0]),
+                          'side': 'north' if ramp['side'] > 0 else 'south',
+                          'width': 2 * freeway['ramp_half'],
+                          'climb': ramp['length'], 'taper': ramp['taper'],
+                          'points': _flat(line)})
+        return {'width': 2 * freeway['half'],
+                'interchanges': [{'node': [x, 0], 'position': node_point((x, 0))}
+                                 for x in freeway['interchanges']],
+                'mainline': _flat(point(x, 0.0, z) for x, z in freeway['mainline']),
+                'touchdown': _flat(point(x, 0.0, z) for x, z in (freeway['mainline'][0],
+                                                                 freeway['mainline'][-1])),
+                'ramps': ramps,
+                'piers': _flat(point(x, y, foot) for x, y, _, _, foot, *_ in built['piers'])}
+
     # -- output ----------------------------------------------------------
     def as_dict(self):
         plan, space = self.plan, self.space
@@ -399,7 +432,8 @@ class CityMetadata:
                      'small_props_modelled': self.props_modelled,
                      'interiors_listed': self.interiors, 'water_modelled': self.water,
                      'terrain': settings.terrain, 'relief': settings.relief,
-                     'plateau_height': settings.plateau_height, 'podiums': settings.podiums},
+                     'plateau_height': settings.plateau_height, 'podiums': settings.podiums,
+                     'highway': settings.highway},
             'districts': [{'id': loc.id, 'role': loc.role, 'style': loc.style,
                            'position': node_point(loc.node)} for loc in plan.locations],
             'roads': roads,
@@ -420,6 +454,7 @@ class CityMetadata:
             'terraces': terraces,
             'ramps': ramps,
             'stairs': stairs,
+            'freeway': self._freeway(node_point),
             'buildings': self.buildings,
             'sites': self.sites,
             'transit_stops': self.stops,

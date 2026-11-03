@@ -11,10 +11,10 @@ from .metadata import SPACES as METADATA_SPACES, CityMetadata
 from .spec import BuildingSpec
 from .sites import (KINDS as SITE_KINDS, PAD_THICKNESS, VARIANTS as SITE_VARIANTS,
                     compose as compose_site)
-from .streets import (Grading, build_ground_mesh, build_outer_road_mesh, build_stair_mesh,
-                      build_street_mesh, build_viaduct_mesh, build_wall_mesh, footprint,
-                      junctions, lot_approach, lot_yard, outer_road_dashes, pavement_height,
-                      site_footprint)
+from .streets import (Grading, build_freeway_mesh, build_ground_mesh, build_outer_road_mesh,
+                      build_stair_mesh, build_street_mesh, build_viaduct_mesh, build_wall_mesh,
+                      footprint, freeway_markings, junctions, lot_approach, lot_yard,
+                      outer_road_dashes, pavement_height, site_footprint)
 from .styles import STYLE_ITEMS, STYLE_COLORS, building_recipe
 from .city_export import store_city_metadata
 from .building_assets import (addon_version, create_rubble, create_shell, create_shelter,
@@ -106,6 +106,23 @@ def build_terrace_works(plan, collection, origin):
         decks = mesh_object('City_Viaducts', vertices, faces, collection, concrete)
         decks['surface_role'] = 'viaducts'
         decks.location = origin
+
+
+def build_freeway(plan, collection, origin):
+    """The raised highway: its decks and ramps (asphalt), with their fascias,
+    parapets, median barrier and piers (concrete)."""
+    vertices, faces, indices = build_freeway_mesh(plan)
+    if not faces:
+        return None
+    obj = mesh_object('City_Freeway', vertices, faces, collection,
+                      material('City_Asphalt', (.085, .09, .10, 1)))
+    obj.data.materials.append(material('City_Retaining_Wall', (.46, .45, .42, 1)))
+    for poly, index in zip(obj.data.polygons, indices):
+        poly.material_index = index
+    obj['surface_role'] = 'freeway'
+    obj['interchanges'] = len(plan.freeway['interchanges'])
+    obj.location = origin
+    return obj
 
 
 BULB_PATH = 3.0   # Width of the path from a house round a turning circle to its footway.
@@ -243,6 +260,11 @@ def build_markings(plan, collection):
     for quad in outer_road_dashes(plan):
         base = len(vertices)
         vertices.extend((x, y, .004) for x, y in quad)
+        faces.append(tuple(range(base, base + 4)))
+    # The raised highway's lanes, on its deck.
+    for quad in freeway_markings(plan):
+        base = len(vertices)
+        vertices.extend(quad)
         faces.append(tuple(range(base, base + 4)))
     if not faces:
         return None
@@ -456,6 +478,12 @@ class MESH_OT_generate_city(bpy.types.Operator):
     curb_height: FloatProperty(name='Curb Height (m)', default=.15, min=0, max=.25)
     wasteland: FloatProperty(name='Wasteland Extent (m)', default=12000, min=0, max=20000,
                              description='Open ground beyond the city edge; the city itself stays inside the invisible walls')
+    highway: EnumProperty(name='Highway', default='RAISED',
+                          items=[('RAISED', 'Raised', 'A viaduct straight across the city, the '
+                                  'streets passing under it, joined to them at diamond '
+                                  'interchanges; at grade again out in the wasteland'),
+                                 ('GRADE', 'At Grade', 'A street like the others, crossing the '
+                                  'city through its junctions')])
     highway_reach: FloatProperty(name='Highway Reach (m)', default=3000, min=0, max=20000,
                                  description='How far the highways run on beyond the city edge, '
                                              'breaking up into the ground over the last 40%; '
@@ -503,7 +531,7 @@ class MESH_OT_generate_city(bpy.types.Operator):
         for title, names in (
             ('City Growth', ('preset', 'seed', 'radius', 'shape', 'irregularity', 'block_size', 'primary_count', 'secondary_count', 'driving_loop_count')),
             ('Terrain', ('terrain', 'relief', 'plateau_height', 'podiums')),
-            ('Density and Access', ('curve_radius', 'core_radius', 'core_density', 'outskirts_density', 'road_density', 'setback', 'sidewalk_width', 'curb_height', 'wasteland', 'highway_reach')),
+            ('Density and Access', ('curve_radius', 'core_radius', 'core_density', 'outskirts_density', 'road_density', 'setback', 'sidewalk_width', 'curb_height', 'wasteland', 'highway', 'highway_reach')),
             ('Buildings', ('style', 'damage', 'max_buildings', 'downtown_superblocks',
                            'points_of_interest', 'small_props', 'water', 'detail')),
             ('Game Data', ('metadata_space', 'interior_metadata')),
@@ -522,7 +550,8 @@ class MESH_OT_generate_city(bpy.types.Operator):
             layout.prop(self, 'interior_ratio')
         layout.prop(self, 'lane_markings')
         layout.prop(self, 'route_guides')
-        layout.label(text='Roads meet at grade: no bridges or tunnels yet.', icon='INFO')
+        layout.label(text='Streets meet at grade; only the raised highway bridges them.',
+                     icon='INFO')
         layout.label(text='Preview first; large shell batches can take time.')
 
     def execute(self, context):
@@ -537,6 +566,7 @@ class MESH_OT_generate_city(bpy.types.Operator):
             root['city_preset'] = self.preset
             root['city_shape'] = self.shape
             root['city_terrain'] = self.terrain
+            root['city_highway'] = self.highway
             root['generator_version'] = VERSION
             root['addon_version'] = addon_version()
             root['output_detail'] = self.detail
@@ -572,6 +602,8 @@ class MESH_OT_generate_city(bpy.types.Operator):
             ground.location = origin
             if plan.terraces:
                 build_terrace_works(plan, root, origin)
+            if plan.freeway:
+                build_freeway(plan, root, origin)
             grading = Grading(plan) if plan.heights else None
             context.window_manager.progress_begin(0, max(1, len(plan.lots)))
             meta = CityMetadata(plan, tuple(origin), self.metadata_space, self.small_props,

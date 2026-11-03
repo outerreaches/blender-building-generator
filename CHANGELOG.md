@@ -1,5 +1,39 @@
 # Changelog
 
+## v0.23.0: Raised highway
+
+- **On a viaduct.** The main highway now crosses the city on a raised deck,
+  straight from one side to the other with no turns, and every street
+  meeting it passes underneath. The deck (two lanes each way, a median
+  barrier, shoulders and parapets) stands on hammerhead piers clear of the
+  streets under it, keeps at least 6.5 m above them, climbs no more than
+  3% and rounds off its crests and sags. Out in the wasteland it comes
+  down to grade and runs on as the at-grade highway, fading away as before.
+- **Interchanges.** Diamond interchanges at main street crossings (one on a
+  default map, more on larger ones). On each side an off-ramp and an
+  on-ramp run alongside the deck from the cross street, climbing at 6% (up
+  to 10% on hills, as a terrace's ramps) and narrowing into the deck. No
+  street crosses under a ramp's low end; the street network is joined up
+  round the crossings that close.
+- **Around it.** Buildings and sites keep clear of the decks (beside a ramp
+  as far as from a street); no superblock, site, cul-de-sac or terrace takes
+  the highway's line, and no stair or street comes down from a terrace to
+  it; driving circuits leave at one interchange and come back on at the
+  next or the same one.
+- No stair runs from a terrace out onto the hill round an organic city
+  (the land there rises with the terrace, so it hardly climbed). On
+  terraced cities a front yard now meets the footway at its top rather
+  than a curb's depth below, and a house's footways are checked every 4 m
+  along it for the retaining-wall rule of v0.22.7.
+- **Highway setting.** Raised by default; At Grade keeps the earlier
+  layout (the same plans as v0.22.7, bar the rare stair or house the rules
+  above now leave out).
+- New object `City_Freeway` (asphalt and concrete); its lane paint is in
+  `City_LanePaint`. The metadata lists the freeway: deck centreline,
+  interchanges, ramps and pier feet (`Freeway` in `CityMetadata.cs`).
+- Plan schema 18: `highway` setting, `freeway`, an outer road's `deck`, a
+  circuit's `freeway`.
+
 ## v0.22.7: Foundations set into the ground
 
 - **Blended foundations.** On hills and terraces the ground is now graded

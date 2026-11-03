@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.23.1: Ramps meet the streets road to road
+
+- Where a city street runs onto a raised highway's ramp, the road now
+  carries straight on into it: no sidewalk across the carriageway at the
+  ramp's foot. The street's footways end square there, with a curb across
+  each end, and on hills the ramp's deck takes the street's cross-fall at
+  its foot, levelling out over 12 m, so the two meet without a step.
+
 ## v0.23.0: Raised highway
 
 - **On a viaduct.** The main highway now crosses the city on a raised deck,

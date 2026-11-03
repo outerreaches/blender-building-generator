@@ -2948,6 +2948,7 @@ FREEWAY_CLOSED = (1, 2)    # Blocks from an interchange where no street crosses.
 FREEWAY_CLOSED_HILLS = (1, 2, 3)   # ...on hills, where its ramps climb longer.
 FREEWAY_PAD = 3.5          # Buildings keep this far from the decks.
 FREEWAY_STEP = 8.0         # Metres between deck profile samples.
+FREEWAY_GRID = 1.5         # The street mesh's sample grid (streets.SAMPLE).
 FREEWAY_CURVE = 6          # Samples either way a crest or sag is rounded over.
 
 
@@ -3068,7 +3069,9 @@ def freeway_ramps(settings, layout, roads):
                 # (north) after it.
                 kind = 'off' if reach == (-1 if side < 0 else 1) else 'on'
                 y = side * RAMP_OFFSET
-                foot = round(x * size + reach * (cross + walk + RAMP_TAIL), 3)
+                # On the street mesh's sample grid, where its road hands over.
+                foot = round(round((x * size + reach * (cross + walk + RAMP_TAIL)) /
+                                   FREEWAY_GRID) * FREEWAY_GRID, 3)
                 ramps.append({'node': [x, 0], 'kind': kind, 'side': side, 'reach': reach,
                               'y': y, 'foot': foot, 'tail': [[x * size, y], [foot, y]]})
     return ramps

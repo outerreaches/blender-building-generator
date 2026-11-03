@@ -408,9 +408,10 @@ short).
   on hills where the ramps climb least). Traffic keeps right: eastbound on
   the south side, which leaves before the cross street and joins after it,
   and westbound the other way round. Each ramp runs alongside the deck: at
-  grade from the cross street for about 10 m past its footway, then
-  climbing at 6% (eased at both ends; up to 10%, as a terrace's ramps, on
-  hills) to the deck's level, where its lane narrows into the deck over
+  grade from the cross street for about 10 m past its footway (where the
+  street's footways end and its road carries straight on into the ramp),
+  then climbing at 6% (eased at both ends; up to 10%, as a terrace's ramps,
+  on hills) to the deck's level, where its lane narrows into the deck over
   40 m. Ramps stand on single columns where high and on fill where low,
   with a parapet along their outer edge.
 - **Streets near it.** No street crosses under a ramp's low end: the two

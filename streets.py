@@ -62,6 +62,7 @@ OUTER_CUT = 40.0      # The street mesh hands over to the outer road this far ou
 OUTER_RAMP = 2.0      # Footways ramp down to the shoulders over this length.
 OUTER_SOLID_ROW = 30.0  # Metres between cross-sections of an outer road...
 OUTER_FADE_ROW = 4.0    # ...and where it breaks up.
+TAIL_END = 'cut'        # A raised highway ramp's run at grade meets its deck.
 
 
 def junctions(plan):
@@ -207,10 +208,11 @@ def _segments(plan, cut=None):
         rows.append((x, y, x + dx * OUTER_STUB, y + dy * OUTER_STUB, road['width'] / 2))
     freeway = getattr(plan, 'freeway', None) or {}
     for ramp in freeway.get('ramps', ()):
-        # A ramp's run at grade, from the cross street to its foot (square
-        # there, where the ramp's deck takes over).
+        # A ramp's run at grade, from the cross street to its foot, where the
+        # ramp's deck takes over: the road runs straight on, with no footway
+        # round its end ('cut').
         (x0, y0), (x1, y1) = ramp['tail']
-        rows.append((x0, y0, x1, y1, freeway['ramp_half'], 'square'))
+        rows.append((x0, y0, x1, y1, freeway['ramp_half'], TAIL_END))
     size = plan.settings.block_size
     for bulb in getattr(plan, 'culdesacs', ()):
         # A turning circle: a zero-length segment as wide as the circle.
@@ -320,6 +322,21 @@ def _square_distance(px, py, row):
     return math.hypot(max(ex, 0.0), max(ey, 0.0)) + min(max(ex, ey), 0.0)
 
 
+def _cut_distance(px, py, row, walk):
+    """A flat-ended row (as ``_square_distance``) whose second end opens onto
+    something else's paving: past that end the field is unpaved at once, so
+    no footway wraps round it."""
+    x0, y0, x1, y1, half = row[:5]
+    length = math.hypot(x1 - x0, y1 - y0)
+    ux, uy = (x1 - x0) / length, (y1 - y0) / length
+    along = (px - x0) * ux + (py - y0) * uy
+    if along > length + 1e-9:
+        return walk + 1.0 + 100.0 * (along - length)
+    # Up to that end only the sides (and the first end) bound it.
+    ex, ey = -along, abs((px - x0) * uy - (py - y0) * ux) - half
+    return math.hypot(max(ex, 0.0), max(ey, 0.0)) + min(max(ex, ey), 0.0)
+
+
 def _distance(px, py, segment):
     x, y, qx, qy, _ = segment
     dx, dy = qx - x, qy - y
@@ -358,7 +375,9 @@ class Field:
         for di in (-1, 0, 1):
             for dj in (-1, 0, 1):
                 for segment in self.grid.get((i + di, j + dj), ()):
-                    candidate = (_square_distance(x, y, segment) if len(segment) > 5 else
+                    candidate = (_cut_distance(x, y, segment, self.walk) if
+                                 len(segment) > 5 and segment[5] == 'cut' else
+                                 _square_distance(x, y, segment) if len(segment) > 5 else
                                  _distance(x, y, segment) - segment[4])
                     if candidate < best:
                         best = candidate
@@ -516,9 +535,12 @@ def build_street_mesh(plan):
                   (b[0], b[1], zb + bottom if surface is not None else bottom)), 2)
 
     outers = outer_roads(plan)
+    mouths = _ramp_mouths(plan)
     for i, j in sorted(field.active_cells()):
         x0, y0 = i * SAMPLE, j * SAMPLE
         if any(outer.drops(x0, y0) for outer in outers):
+            continue
+        if any(mouth(x0, y0) for mouth in mouths):
             continue
         corners = ((x0, y0, field.value(x0, y0)),
                    (x0 + SAMPLE, y0, field.value(x0 + SAMPLE, y0)),
@@ -529,6 +551,22 @@ def build_street_mesh(plan):
             emit(_clip(_clip(polygon, walk, True), 0.0, False), 1,
                  lambda x, y: pavement_height(plan, x, y, nodes))
     return vertices, faces, materials
+
+
+def _ramp_mouths(plan):
+    """For each raised highway ramp, a test for the street-mesh cells past its
+    foot (on its band): the ramp's deck carries the road on from there."""
+    freeway = getattr(plan, 'freeway', None) or {}
+    band = freeway.get('ramp_half', 0.0) + plan.settings.sidewalk_width + SAMPLE
+    tests = []
+    for ramp in freeway.get('ramps', ()):
+        foot, sign, y = ramp['foot'], ramp['reach'], ramp['y']
+
+        def past(x0, y0, foot=foot, sign=sign, y=y):
+            beyond = x0 >= foot - 1e-6 if sign > 0 else x0 + SAMPLE <= foot + 1e-6
+            return beyond and y - band <= y0 + SAMPLE / 2 <= y + band
+        tests.append(past)
+    return tests
 
 
 def build_ground_mesh(plan):
@@ -1104,6 +1142,7 @@ FREEWAY_MEDIAN = (.6, .85)  # Median barrier width, height.
 FREEWAY_MERGE = .3         # A ramp within this of the deck's level runs into it.
 FREEWAY_LINE = .15         # Paint width.
 FREEWAY_DASH = (3.0, 9.0)  # Lane dash, gap.
+RAMP_TILT = 12.0           # A ramp's deck takes the street's cross-fall at its foot, level after this.
 
 
 def _freeway_ground(plan):
@@ -1144,8 +1183,9 @@ def freeway_stations(plan):
         low, high = under(x, -half, half)
         bottom = z - FREEWAY_DEPTH
         open_ = bottom - high >= FREEWAY_OPEN
-        mainline.append((x, 0.0, z, -half, half, bottom if open_ else low - .5, open_))
+        mainline.append((x, 0.0, z, -half, half, bottom if open_ else low - .5, open_, 0.0, 0.0))
     ramps = []
+    road = plan.surface()
     for ramp in freeway['ramps']:
         side, sign = ramp['side'], ramp['reach']
         climb, taper = ramp['length'], ramp['taper']
@@ -1157,7 +1197,12 @@ def freeway_stations(plan):
             low, high = under(x, inner, side * (half + 2 * ramp_half))
             bottom = z - FREEWAY_RAMP_DEPTH
             open_ = bottom - high >= FREEWAY_OPEN
-            stations.append((x, y, z, inner, outer, bottom if open_ else low - .5, open_))
+            # At its foot the deck takes the street's cross-fall (it meets
+            # the road there edge to edge), levelling out over RAMP_TILT.
+            share = max(0.0, 1.0 - along / RAMP_TILT)
+            centre = road(x, y)
+            tilts = tuple((road(x, edge) - centre) * share for edge in (inner, outer))
+            stations.append((x, y, z, inner, outer, bottom if open_ else low - .5, open_) + tilts)
         ramps.append(stations)
 
     def clear_of_streets(x, reach):
@@ -1273,27 +1318,34 @@ def build_freeway_mesh(plan):
         (functions of a station) and two heights (offsets from the top, or
         None for the station's bottom): its top in ``material``, the rest
         concrete."""
-        def level(st, offset):
-            return st[5] if offset is None else st[2] + offset
+        def level(st, offset, y):
+            if offset is None:
+                return st[5]
+            # The station's cross-fall, from its inner to its outer edge.
+            span = st[4] - st[3]
+            t = (y - st[3]) / span if abs(span) > 1e-9 else 0.0
+            return st[2] + offset + st[7] + (st[8] - st[7]) * t
         solid[0] += 1
         for a, b in zip(stations, stations[1:]):
             ia, ib, oa, ob = inner(a), inner(b), outer(a), outer(b)
             if abs(ia - oa) < 1e-6 and abs(ib - ob) < 1e-6:
                 continue
-            face([(a[0], ia, level(a, high)), (b[0], ib, level(b, high)),
-                  (b[0], ob, level(b, high)), (a[0], oa, level(a, high))], material, (0.0, 0.0, 1.0))
-            face([(a[0], ia, level(a, low)), (b[0], ib, level(b, low)),
-                  (b[0], ob, level(b, low)), (a[0], oa, level(a, low))], 1, (0.0, 0.0, -1.0))
+            face([(a[0], ia, level(a, high, ia)), (b[0], ib, level(b, high, ib)),
+                  (b[0], ob, level(b, high, ob)), (a[0], oa, level(a, high, oa))], material,
+                 (0.0, 0.0, 1.0))
+            face([(a[0], ia, level(a, low, ia)), (b[0], ib, level(b, low, ib)),
+                  (b[0], ob, level(b, low, ob)), (a[0], oa, level(a, low, oa))], 1,
+                 (0.0, 0.0, -1.0))
             for (ea, eb), sign in (((ia, ib), -1.0), ((oa, ob), 1.0)):
                 side = sign * (1.0 if oa > ia else -1.0)
-                face([(a[0], ea, level(a, low)), (b[0], eb, level(b, low)),
-                      (b[0], eb, level(b, high)), (a[0], ea, level(a, high))], 1,
+                face([(a[0], ea, level(a, low, ea)), (b[0], eb, level(b, low, eb)),
+                      (b[0], eb, level(b, high, eb)), (a[0], ea, level(a, high, ea))], 1,
                      (0.0, side, 0.0))
         for st, sign in ((stations[0], -1.0), (stations[-1], 1.0)):
             direction = sign * (1.0 if stations[-1][0] > stations[0][0] else -1.0)
             i, o = inner(st), outer(st)
-            face([(st[0], i, level(st, low)), (st[0], o, level(st, low)),
-                  (st[0], o, level(st, high)), (st[0], i, level(st, high))], 1,
+            face([(st[0], i, level(st, low, i)), (st[0], o, level(st, low, o)),
+                  (st[0], o, level(st, high, o)), (st[0], i, level(st, high, i))], 1,
                  (direction, 0.0, 0.0))
 
     def runs(stations, keep):
@@ -1346,6 +1398,24 @@ def build_freeway_mesh(plan):
     for x, y, along, across, foot, cap_bottom, cap_top, cap_across in built['piers']:
         box(x, y, along, across, foot, cap_bottom)
         box(x, y, FREEWAY_CAP[0], cap_across, cap_bottom, cap_top)
+    # Where a ramp leaves the street its footways end (the road runs on):
+    # a curb across each footway's end.
+    surface, nodes = plan.surface(), flush_junctions(plan)
+    walk = plan.settings.sidewalk_width
+    for ramp in freeway['ramps']:
+        x, sign = ramp['foot'], ramp['reach']
+        for lateral in (-1, 1):
+            y0 = ramp['y'] + lateral * freeway['ramp_half']
+            y1 = y0 + lateral * walk
+            top = max(surface(x, y) + pavement_height(plan, x, y, nodes) for y in (y0, y1))
+            low = min(surface(x, y) for y in (y0, y1)) - .3
+            solid[0] += 1
+            corners = [(x, y0), (x + sign * .15, y0), (x + sign * .15, y1), (x, y1)]
+            for (ax, ay), (bx, by) in zip(corners, corners[1:] + corners[:1]):
+                mx, my = (ax + bx) / 2 - (x + sign * .075), (ay + by) / 2 - (y0 + y1) / 2
+                face([(ax, ay, low), (bx, by, low), (bx, by, top), (ax, ay, top)], 1, (mx, my, 0.0))
+            face([(cx, cy, top) for cx, cy in corners], 1, (0.0, 0.0, 1.0))
+            face([(cx, cy, low) for cx, cy in corners], 1, (0.0, 0.0, -1.0))
     return vertices, faces, materials
 
 

@@ -2093,6 +2093,12 @@ def generate_city(settings=CitySettings()):
                 # Abreast of a gap in the street: on its own block's ground.
                 return surface.ground.base(*point) + surface.ground.rise_at(*item.center)
         lots = [replace(lot, level=round(front(lot), 3)) for lot in lots]
+        # No house where the ground could not blend from a footway to its
+        # foundation: it would stand along a retaining wall (a row built
+        # together goes together).
+        walled = {lot.group or lot.id for lot in lots
+                  if _walled_house(settings, roads, surface, lot)}
+        lots = [lot for lot in lots if (lot.group or lot.id) not in walled]
         pois = [replace(poi, level=round(front(poi), 3)) for poi in pois]
     shelters = []
     if settings.points_of_interest:
@@ -2675,6 +2681,52 @@ def _place_pois(settings, locations, roads, paths, culdesacs=(), terraces=None):
             taken.update(group)
         pois.extend(placed)
     return pois
+
+
+# A house's ground is graded to its foundation and to the footways round it
+# (level with each for HOUSE_BLEND[0], then cut at HOUSE_BLEND[1] or filled
+# at HOUSE_BLEND[2], as streets' PAD_SHOULDER, PAD_CUT_SLOPE and
+# PAD_FILL_SLOPE); a footway nearer than that allows would leave a wall
+# between them.
+HOUSE_BLEND = (1.5, .6, .4)
+HOUSE_STEP = .35         # Most a house's foundation may stand off a footway's level.
+HOUSE_REACH = 12.0       # Footways this near a house are checked.
+
+
+def _walled_house(settings, roads, surface, lot):
+    """True for a house (not a downtown tower) whose foundation stands
+    further off a footway beside it than its graded ground can make up."""
+    if lot.style == 'DOWNTOWN':
+        return False
+    size, walk = settings.block_size, settings.sidewalk_width
+    top = lot.level + settings.curb_height
+    corners = _corners(lot.center, lot.width, lot.depth, lot.rotation)
+    xs, ys = [p[0] for p in corners], [p[1] for p in corners]
+    x, y = math.floor(lot.center[0] / size), math.floor(lot.center[1] / size)
+    shoulder, cut, fill = HOUSE_BLEND
+    for side, key in _side_edges(x, y, 1, 1).items():
+        key = key[0]
+        if key not in roads:
+            continue
+        half = ROAD_WIDTHS[roads[key]] / 2
+        (ax, ay), (bx, by) = key
+        if ay == by:
+            line = ay * size + (half + walk) * (1 if side == 'S' else -1)
+            gap = min(ys) - line if side == 'S' else line - max(ys)
+            points = [(px, line) for px in (min(xs), lot.center[0], max(xs))]
+        else:
+            line = ax * size + (half + walk) * (1 if side == 'W' else -1)
+            gap = min(xs) - line if side == 'W' else line - max(xs)
+            points = [(line, py) for py in (min(ys), lot.center[1], max(ys))]
+        if gap > HOUSE_REACH:
+            continue
+        for px, py in points:
+            footway = (surface.along(key, px, py) if hasattr(surface, 'along') else
+                       surface(px, py)) + settings.curb_height
+            slope = cut if footway > top else fill
+            if abs(footway - top) > HOUSE_STEP + slope * max(0.0, gap - 2 * shoulder):
+                return True
+    return False
 
 
 STOP_GRADE = .04         # Steepest street a transit stop stands on.

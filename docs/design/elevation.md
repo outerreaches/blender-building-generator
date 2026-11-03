@@ -2,6 +2,13 @@
 
 Status: v0.21 (Rolling hills) and v0.22 (Terraced) done; the rest planned.
 
+**As built in v0.22.7:** the ground is graded to every foundation
+(`Grading._shaped`): level for `PAD_SHOULDER`, then cut at `PAD_CUT_SLOPE`
+or filled at `PAD_FILL_SLOPE`, meeting the footways near a building at the
+same slopes; where two foundations disagree the nearer wins. A house that
+cannot blend into a footway beside it (`_walled_house`) is dropped with its
+row. Under a viaduct's start the ground and the walls stay under the road.
+
 **As built in v0.22.6:** a terrace takes two or three natural sides
 (`SOFT_SIDES`), so it seeds where two of its faces look out of the city;
 a terrace with fewer such faces is not built.

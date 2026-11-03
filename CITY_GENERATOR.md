@@ -153,13 +153,20 @@ With **Terrain: Rolling Hills** the city stands on gentle seeded hills.
 - **Level pads.**
   - Every building and site stands on a level pad at the height of the road
     in front of its middle, so its front door is at street level.
-  - Downhill, the foundation reaches the ground as a plinth.
-  - Uphill, the ground is cut back: it stays 0.1 m under the pad and climbs
-    from it no steeper than 0.6.
-  - A building's paved approach slopes from the footway to its pad.
-- **Retaining curbs.** On terrain the curbs reach 2.5 m down. Where a lot
-  lies below its street, the curb shows as a concrete wall holding up the
-  footway.
+  - The ground is graded to the foundation: it stays 0.1 m under the pad
+    and level with it for 1.5 m all round, then climbs back to the natural
+    ground no steeper than 0.6 (a cut) or falls to it no steeper than 0.4
+    (a fill), so a building stands in its ground rather than on a plinth.
+    Between two buildings at different levels the nearer one's grading wins.
+  - Near a building the ground also meets the footways at those slopes, so
+    its front yard runs from the footway to the door. A building's paved
+    approach slopes from the footway to its pad.
+  - A house (not a downtown tower) whose foundation stands further off a
+    footway beside it than its graded ground can make up is not built, with
+    the rest of its row: it would stand along a retaining wall.
+- **Retaining curbs.** On terrain the curbs reach 2.5 m down. Where the
+  ground lies below its street away from the buildings, the curb shows as a
+  concrete wall holding up the footway.
 - **How high.** The map's level edge and the highway's 4% through the centre
   hold small maps lower than the setting. At the default 30 m, typical hills
   are about 12 m on a radius-6 map, 18 m at radius 8 and 24 m at radius 12.

@@ -1,5 +1,28 @@
 # Changelog
 
+## v0.22.7: Foundations set into the ground
+
+- **Blended foundations.** On hills and terraces the ground is now graded
+  to every building's foundation: level with it for 1.5 m all round, then
+  sloping back to the natural ground (cut no steeper than 0.6, filled no
+  steeper than 0.4). Buildings no longer stand on bare plinths with steep
+  drops beside their entrances; a house's front yard runs from the footway
+  to its door. In four sample hilly cities the houses whose foundation
+  stood more than 0.5 m proud of the ground beside it fell from 5, 12, 19
+  and 37 to none (all now within 0.25 m). Downtown towers built out to a
+  sloped street still show a stepped base there.
+- **No houses along retaining walls.** A house whose foundation stands too
+  far off a footway beside it for its ground to make up the difference is
+  no longer built (with the rest of its row); it would have stood along a
+  retaining wall. Two or three buildings in a hilly city; flat cities are
+  unchanged.
+- **No wall across a ramp's mouth.** Where a ramp leaves a junction on a
+  terrace's top straight onto its viaduct, the ground and the retaining
+  walls under the start of the deck now stay just beneath the road, as its
+  abutment, with no parapet. Before, a wall along the terrace's edge and
+  its parapet stood up through the road there and partly blocked it
+  (terraced_city_42, by lot_-5_-5_dt_-5_-5_21r0t0).
+
 ## v0.22.6: Terraces set into the land on two sides
 
 - **Two natural sides or three.** Every terrace, the plateau and the

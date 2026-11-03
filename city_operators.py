@@ -13,7 +13,8 @@ from .sites import (KINDS as SITE_KINDS, PAD_THICKNESS, VARIANTS as SITE_VARIANT
                     compose as compose_site)
 from .streets import (Grading, build_ground_mesh, build_outer_road_mesh, build_stair_mesh,
                       build_street_mesh, build_viaduct_mesh, build_wall_mesh, footprint,
-                      junctions, outer_road_dashes, pavement_height, site_footprint)
+                      junctions, lot_approach, lot_yard, outer_road_dashes, pavement_height,
+                      site_footprint)
 from .styles import STYLE_ITEMS, STYLE_COLORS, building_recipe
 from .city_export import store_city_metadata
 from .building_assets import (addon_version, create_rubble, create_shell, create_shelter,
@@ -184,29 +185,9 @@ def build_frontage(lot, plan, collection, sunken=None, grading=None):
     return obj
 
 
-def lot_approach(lot, plan):
-    """Distance from a lot's centre, along its facing, to the back of the
-    footway it fronts (a turning circle's for a house round one)."""
-    size = plan.settings.block_size
-    if lot.bulb:
-        radius = next(b['radius'] for b in plan.culdesacs if tuple(b['node']) == tuple(lot.bulb))
-        centre = (lot.bulb[0] * size, lot.bulb[1] * size)
-        return math.dist(centre, lot.center) - radius - plan.settings.sidewalk_width
-    road = next(r for r in plan.roads if (r.a, r.b) == lot.frontage)
-    mid = ((road.a[0] + road.b[0]) * size / 2, (road.a[1] + road.b[1]) * size / 2)
-    facing = (math.sin(lot.rotation), -math.cos(lot.rotation))
-    distance = sum((mid[i] - lot.center[i]) * facing[i] for i in range(2))
-    return distance - road.width / 2 - plan.settings.sidewalk_width
-
-
 def footprint_with_approach(lot, plan):
     """World corners of a lot's foundation: the building and its approach."""
-    end = lot_approach(lot, plan)
-    depth = lot.depth / 2 + end
-    c, s = math.cos(lot.rotation), math.sin(lot.rotation)
-    shift = (lot.depth / 2 - end) / 2          # Local y of the combined centre.
-    centre = (lot.center[0] - shift * s, lot.center[1] + shift * c)
-    return footprint(centre, lot.width, depth, lot.rotation)
+    return lot_yard(lot, plan)
 
 
 def polyline_sample(points, distance):

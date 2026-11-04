@@ -1,5 +1,29 @@
 # Changelog
 
+## v0.23.6: Courtyards, estate grounds and uneven plots
+
+- **Yards.** The open ground inside the superblocks is no longer bare.
+  A 2 x 2 perimeter block's courtyard gets a lawn, a ring path and paths in
+  to a garden plaza or a playground, with trees round them. A brutalist
+  estate's grounds between its slab rows get a main path, cross paths to
+  the slabs, a ball court or a playground, lamps, benches and trees. A point
+  tower and its way out to the street stay clear. Yards stand on level pads
+  (on plinths on hills), and their trees, benches, lamps and play equipment
+  are game markers. One to three yards in a radius-8 city: courtyards need
+  four blocks of one district with no main street between them.
+- **Uneven plots.** Ordinary blocks cut their 2 x 2 plots at uneven widths
+  too, so blocks no longer repeat one grid. District Superblocks at 0 now
+  keeps every street, but not the old plot positions.
+- **Pilotis only on wide buildings.** A pilotis lobby recesses the ground
+  storey about 3 m all round, so on a building under 14.5 m across no stair
+  fitted inside it and the upper floors could not be reached (fitted or
+  not). Narrower brutalist blocks now have no pilotis and narrower towers a
+  grand lobby. The uneven plots made such buildings common enough to show.
+- Court lines painted on a lawn or court no longer share their underside's
+  plane where they cross.
+- Plan schema 20 (`yards`); metadata `yards` (`Yard` in `CityMetadata.cs`)
+  and `counts.yards`.
+
 ## v0.23.5: District superblocks
 
 - **Less of a grid.** Old town, residential, brutalist and industrial blocks

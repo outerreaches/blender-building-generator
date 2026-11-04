@@ -151,6 +151,7 @@ class CityMetadata:
         self.curb = plan.settings.curb_height
         self.buildings = []
         self.sites = []
+        self.yards = []
         self.stops = []
         self.markers = []
 
@@ -266,6 +267,19 @@ class CityMetadata:
         self.sites.append(entry)
         for marker in site.markers:
             self.markers.append(self._marker(marker, site_t, poi.id))
+
+    def add_yard(self, yard, site, obj_name):
+        """A courtyard or estate grounds (``sites.compose_yard``) and its
+        markers (trees, benches, lamps, play equipment)."""
+        ox, oy, oz = self.origin
+        transform = (ox + yard.center[0], oy + yard.center[1], oz + self.curb + yard.level, 0.0)
+        entry = {'id': yard.id, 'object': obj_name, 'kind': yard.kind, 'variant': site.variant,
+                 'district': yard.district, 'seed': yard.seed,
+                 'width': _r(yard.width), 'depth': _r(yard.depth)}
+        entry.update(self.space.pose(apply(transform, 0.0, 0.0, 0.0), 0.0, -1.0))
+        self.yards.append(entry)
+        for marker in site.markers:
+            self.markers.append(self._marker(marker, transform, yard.id))
 
     def add_shelter(self, shelter, obj_name):
         ox, oy, oz = self.origin
@@ -460,9 +474,11 @@ class CityMetadata:
             'freeway': self._freeway(node_point),
             'buildings': self.buildings,
             'sites': self.sites,
+            'yards': self.yards,
             'transit_stops': self.stops,
             'markers': markers,
             'counts': {'buildings': len(self.buildings), 'sites': len(self.sites),
+                       'yards': len(self.yards),
                        'transit_stops': len(self.stops),
                        'markers': [{'type': kind, 'count': count}
                                    for kind, count in sorted(counts.items())]},

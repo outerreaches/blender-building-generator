@@ -442,7 +442,10 @@ class Ground:
         w = .1
 
         def line(a, b, layer):
-            self.strip(a, b, w, material, base + LAYER[layer], z0=base)
+            # On a surface, crossing lines sink into it by different depths:
+            # their undersides share no plane.
+            sink = LAYER[layer] * .5 if base > 0 else 0.0
+            self.strip(a, b, w, material, base + LAYER[layer], z0=base - sink)
         line((x0, y0 + w / 2), (x1, y0 + w / 2), 'paint')
         line((x0, y1 - w / 2), (x1, y1 - w / 2), 'paint')
         line((x0 + w / 2, y0 + w), (x0 + w / 2, y1 - w), 'paint_cross')
@@ -2321,6 +2324,231 @@ LAYOUTS = {
     'CINEMA': _cinema,
     'DRIVE_IN': _drive_in,
 }
+
+
+# -- yards: open ground inside superblocks -------------------------------------
+
+YARD_KINDS = ('COURTYARD', 'GROUNDS')
+YARD_VARIANTS = {'COURTYARD': ('GARDEN', 'PLAY'), 'GROUNDS': ('COURT', 'PLAY')}
+YARD_PATH = 1.8          # Path widths: ring and cross paths,
+YARD_MAIN = 2.4          # and an estate's main path.
+YARD_RING = 3.0          # A courtyard's ring path stands this far in from its edge.
+YARD_CROSS = 22.0        # An estate's cross paths, about this far apart.
+YARD_TREES = 7.5         # Tree spacing.
+
+
+def compose_yard(kind, width, depth, seed=0, keep_out=(), props=True, water=False):
+    """Open ground inside a superblock, in coordinates like a site's (centred,
+    z = 0 at pad level) but with no street: a perimeter block's courtyard
+    (COURTYARD) or an estate's grounds between its slabs (GROUNDS).
+
+    A lawn covers it, round ``keep_out`` (x0, y0, x1, y1 rectangles left bare:
+    a tower and its approach). A courtyard has a ring path, paths in to a
+    garden plaza or a playground in the middle, and trees round it; estate
+    grounds have a main path along them, cross paths to the slabs on either
+    side, and a ball court or a playground. Trees, benches, lamps and play
+    equipment are markers, as on the sites (small props modelled with
+    ``props``)."""
+    if kind not in YARD_KINDS:
+        raise ValueError(f'Unknown yard kind: {kind}')
+    rng = random.Random((seed * 1000003) ^ zlib.crc32(kind.encode()) ^ 0x7A2D)
+    variant = rng.choice(YARD_VARIANTS[kind])
+    g = Ground(props, water)
+    x0, y0, x1, y1 = -width / 2, -depth / 2, width / 2, depth / 2
+    holes = []
+    for hx0, hy0, hx1, hy1 in keep_out:
+        hole = (max(x0, hx0), max(y0, hy0), min(x1, hx1), min(y1, hy1))
+        if hole[2] - hole[0] > .1 and hole[3] - hole[1] > .1:
+            holes.append(hole)
+    xs = sorted({x0, x1, *(h[0] for h in holes), *(h[2] for h in holes)})
+    ys = sorted({y0, y1, *(h[1] for h in holes), *(h[3] for h in holes)})
+    solids.slab_solid(g.mesh, xs, ys, -PAD_THICKNESS, 0.0, lambda x, y: 1.0, S_GRASS, holes)
+    taken = [_grow(h, .4) for h in holes]
+
+    def free(rect):
+        return (rect[0] >= x0 - 1e-6 and rect[1] >= y0 - 1e-6 and rect[2] <= x1 + 1e-6 and
+                rect[3] <= y1 + 1e-6 and not any(_meet(rect, t) for t in taken))
+
+    laid = []
+
+    def path(rect, layer='path'):
+        """A path, broken where it would cross a kept-out patch and joining
+        the paths already laid edge to edge (no two overlap)."""
+        pieces = [rect]
+        for hole in [_grow(h, .2) for h in holes] + laid:
+            pieces = [part for piece in pieces for part in _minus(piece, hole)]
+        pieces = [piece for piece in pieces if min(piece[2] - piece[0], piece[3] - piece[1]) > .5]
+        for piece in pieces:
+            g.layer(piece, S_CONCRETE, 'path')
+            laid.append(piece)
+        return pieces
+
+    paths = []
+    feature = None
+    if kind == 'COURTYARD':
+        r = YARD_RING
+        ring = (x0 + r, y0 + r, x1 - r, y1 - r)
+        w = YARD_PATH
+        for rect in ((ring[0], ring[1], ring[2], ring[1] + w), (ring[0], ring[3] - w, ring[2], ring[3]),
+                     (ring[0], ring[1] + w, ring[0] + w, ring[3] - w),
+                     (ring[2] - w, ring[1] + w, ring[2], ring[3] - w)):
+            paths += path(rect)
+        inner = (ring[0] + w, ring[1] + w, ring[2] - w, ring[3] - w)
+        iw, idp = inner[2] - inner[0], inner[3] - inner[1]
+        if variant == 'PLAY' and iw > 16 and idp > 14:
+            pw, pd = min(14.0, iw - 8), min(10.0, idp - 8)
+            feature = (-pw / 2, -pd / 2, pw / 2, pd / 2)
+            if free(feature):
+                g.layer(feature, S_RUBBER, 'rubber')
+                g.play_structure(-pw / 2 + 4.2, 0.0, rng, base=LAYER['rubber'])
+                if pw > 12:
+                    g.swings(pw / 2 - 3.2, 0.0, base=LAYER['rubber'])
+                g.bench(0.0, -pd / 2 - 1.2, quarter=2)
+                g.bench(0.0, pd / 2 + 1.2, quarter=0)
+            else:
+                feature = None
+        if feature is None and iw > 10 and idp > 10:
+            radius = min(iw, idp) * .18 + 1.5
+            feature = (-radius, -radius, radius, radius)
+            if free(feature):
+                g.poly(solids.circle(0, 0, radius, 16), S_CONCRETE, 0.0, LAYER['plaza'])
+                g.tree(0.0, 0.0, 1.2, base=LAYER['plaza'])
+                for k in range(4):
+                    angle = math.pi / 4 + k * math.pi / 2
+                    g.bench(math.cos(angle) * (radius - .9), math.sin(angle) * (radius - .9),
+                            quarter=(k + 1) % 4, base=LAYER['plaza'])
+            else:
+                feature = None
+        if feature is not None:
+            # Paths in from the ring to the middle.
+            fx0, fy0, fx1, fy1 = feature
+            for rect in ((-w / 2, inner[1], w / 2, fy0), (-w / 2, fy1, w / 2, inner[3]),
+                         (inner[0], -w / 2, fx0, w / 2), (fx1, -w / 2, inner[2], w / 2)):
+                if rect[2] - rect[0] > .5 and rect[3] - rect[1] > .5:
+                    paths += path(rect)
+        for x, y in ((ring[0] + w / 2, ring[1] + w / 2), (ring[2] - w / 2, ring[1] + w / 2),
+                     (ring[0] + w / 2, ring[3] - w / 2), (ring[2] - w / 2, ring[3] - w / 2)):
+            if free((x - .3, y - .3, x + .3, y + .3)):
+                g.lamp(x, y, 4.5, base=LAYER['path'])
+    else:
+        along_x = width >= depth
+        a0, a1 = (x0, x1) if along_x else (y0, y1)
+        b0, b1 = (y0, y1) if along_x else (x0, x1)
+
+        def world(u0, v0, u1, v1):
+            return (u0, v0, u1, v1) if along_x else (v0, u0, v1, u1)
+        span = b1 - b0
+        if variant == 'COURT' and a1 - a0 > 40 and span > 23:
+            cw, cd = SCHOOL_COURT
+            spots = [(abs(k) + abs(j), (a0 + a1) / 2 + k * 6.0, (b0 + b1) / 2 + j * span / 5)
+                     for k in range(-4, 5) for j in (-1, 0, 1)]
+            for _, centre, across in sorted(spots):
+                rect = world(centre - cw / 2, across - cd / 2, centre + cw / 2, across + cd / 2)
+                if free(_grow(rect, 1.0)):
+                    feature = rect
+                    break
+            if feature is not None:
+                g.layer(feature, S_ASPHALT, 'apron')
+                g.court_lines(feature, base=LAYER['apron'])
+                fx0, fy0, fx1, fy1 = feature
+                if along_x:
+                    g.goal(fx0 + .6, (fy0 + fy1) / 2, width=3.0, quarter=1)
+                    g.goal(fx1 - .6, (fy0 + fy1) / 2, width=3.0, quarter=3)
+                else:
+                    g.goal((fx0 + fx1) / 2, fy0 + .6, width=3.0)
+                    g.goal((fx0 + fx1) / 2, fy1 - .6, width=3.0, quarter=2)
+        if feature is None and a1 - a0 > 20 and span > 14:
+            pw, pd = 12.0, min(9.0, span - 5)
+            spots = [(abs(k) + abs(j), (a0 + a1) / 2 + k * 5.0, (b0 + b1) / 2 + j * span / 5)
+                     for k in range(-5, 6) for j in (-1, 0, 1)]
+            for _, centre, across in sorted(spots):
+                rect = world(centre - pw / 2, across - pd / 2, centre + pw / 2, across + pd / 2)
+                if free(_grow(rect, 1.0)):
+                    feature = rect
+                    break
+            if feature is not None:
+                g.layer(feature, S_RUBBER, 'rubber')
+                fx, fy = (feature[0] + feature[2]) / 2, (feature[1] + feature[3]) / 2
+                g.play_structure(fx, fy, rng, base=LAYER['rubber'])
+        # The main path along the grounds, round the court or playground.
+        mid = (b0 + b1) / 2
+        if feature is not None:
+            fv = (feature[1] + feature[3]) / 2 if along_x else (feature[0] + feature[2]) / 2
+            if abs(fv - mid) > 1e-6:
+                # Beside an off-centre court: the path runs along its far side.
+                half = (feature[3] - feature[1]) / 2 if along_x else (feature[2] - feature[0]) / 2
+                mid = fv - half - 2.5 if fv > mid else fv + half + 2.5
+        main = world(a0, mid - YARD_MAIN / 2, a1, mid + YARD_MAIN / 2)
+        if feature is not None:
+            f = _grow(feature, 1.0)
+            if not _meet(main, f):
+                paths += path(main)
+            else:
+                for piece in _minus(main, f):
+                    paths += path(piece)
+                # Round it on one side.
+                fu0, fv0, fu1, fv1 = f if along_x else (f[1], f[0], f[3], f[2])
+                if fv1 + YARD_PATH < b1 - 1:
+                    paths += path(world(fu0 - YARD_PATH, fv1, fu1 + YARD_PATH, fv1 + YARD_PATH))
+                    for u in (fu0 - YARD_PATH, fu1):
+                        paths += path(world(u, mid + YARD_MAIN / 2, u + YARD_PATH, fv1))
+        else:
+            paths += path(main)
+        # Cross paths to the slabs either side.
+        count = max(1, round((a1 - a0) / YARD_CROSS))
+        for k in range(count):
+            u = a0 + (a1 - a0) * (k + .5) / count
+            rect = world(u - YARD_PATH / 2, b0, u + YARD_PATH / 2, b1)
+            if feature is not None:
+                pieces = _minus(rect, _grow(feature, 1.0))
+            else:
+                pieces = [rect]
+            for piece in pieces:
+                paths += path(piece, 'path_cross')
+        for k in range(1, max(2, round((a1 - a0) / 24.0))):
+            u = a0 + (a1 - a0) * k / max(2, round((a1 - a0) / 24.0))
+            lx, ly = (u, mid + YARD_MAIN / 2 + .6) if along_x else (mid + YARD_MAIN / 2 + .6, u)
+            if free((lx - .3, ly - .3, lx + .3, ly + .3)) and not _on(paths, lx, ly, .2):
+                g.lamp(lx, ly, 4.5)
+        for k in range(count):
+            u = a0 + (a1 - a0) * (k + .5) / count + YARD_PATH + 1.2
+            bx, by = (u, mid - YARD_MAIN / 2 - .8) if along_x else (mid - YARD_MAIN / 2 - .8, u)
+            if free((bx - 1.0, by - .5, bx + 1.0, by + .5)) and not _on(paths, bx, by, .5):
+                g.bench(bx, by, quarter=2 if along_x else 3)
+    # Trees over the lawn, clear of paths, the middle and the kept-out patches.
+    for x in _spaced(x0 + 2.5, x1 - 2.5, YARD_TREES):
+        for y in _spaced(y0 + 2.5, y1 - 2.5, YARD_TREES):
+            jx, jy = x + rng.uniform(-1.0, 1.0), y + rng.uniform(-1.0, 1.0)
+            spot = (jx - 1.2, jy - 1.2, jx + 1.2, jy + 1.2)
+            if not free(spot) or _on(paths, jx, jy, 1.2):
+                continue
+            if feature is not None and _meet(spot, _grow(feature, 1.0)):
+                continue
+            g.tree(jx, jy, rng.uniform(.8, 1.15))
+    return Site(kind, variant, width, depth, 0.0, g.mesh, [], [], g.markers)
+
+
+def _grow(rect, by):
+    return (rect[0] - by, rect[1] - by, rect[2] + by, rect[3] + by)
+
+
+def _meet(a, b):
+    return a[0] < b[2] and b[0] < a[2] and a[1] < b[3] and b[1] < a[3]
+
+
+def _minus(rect, hole):
+    """``rect`` less ``hole``: up to four rectangles."""
+    if not _meet(rect, hole):
+        return [rect]
+    x0, y0, x1, y1 = rect
+    hx0, hy0, hx1, hy1 = max(x0, hole[0]), max(y0, hole[1]), min(x1, hole[2]), min(y1, hole[3])
+    parts = [(x0, y0, x1, hy0), (x0, hy1, x1, y1), (x0, hy0, hx0, hy1), (hx1, hy0, x1, hy1)]
+    return [p for p in parts if p[2] - p[0] > 1e-6 and p[3] - p[1] > 1e-6]
+
+
+def _on(rects, x, y, margin):
+    return any(r[0] - margin < x < r[2] + margin and r[1] - margin < y < r[3] + margin
+               for r in rects)
 
 
 def shelter(variant='SHELTER'):

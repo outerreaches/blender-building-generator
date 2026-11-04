@@ -10,15 +10,16 @@ from .dims import GROUND_SLAB
 from .metadata import SPACES as METADATA_SPACES, CityMetadata
 from .spec import BuildingSpec
 from .sites import (KINDS as SITE_KINDS, PAD_THICKNESS, VARIANTS as SITE_VARIANTS,
-                    compose as compose_site)
+                    compose as compose_site, compose_yard)
 from .streets import (Grading, build_freeway_mesh, build_ground_mesh, build_outer_road_mesh,
                       build_stair_mesh, build_street_mesh, build_viaduct_mesh, build_wall_mesh,
                       footprint, freeway_markings, junctions, lot_approach, lot_yard,
                       outer_road_dashes, pavement_height, site_footprint)
 from .styles import NO_STRUCTURE, STYLE_ITEMS, STYLE_COLORS, building_recipe
 from .city_export import store_city_metadata
-from .building_assets import (addon_version, create_rubble, create_shell, create_shelter,
-                              create_site, create_site_preview, material)
+from .building_assets import (add_site_material_slots, addon_version, create_rubble,
+                              create_shell, create_shelter, create_site, create_site_preview,
+                              material, mesh_object_from_data)
 
 
 def mesh_object(name, vertices, faces, collection, mat):
@@ -406,6 +407,43 @@ def build_sites(plan, root, origin, detail, props=True, meta=None, water=False, 
     return collection
 
 
+def build_yards(plan, root, origin, detail, props=True, meta=None, water=False, grading=None):
+    """Courtyards and estate grounds: one grounds object per yard, a level pad
+    (on terrain, on a plinth down to the lowest graded ground under it)."""
+    collection = bpy.data.collections.new('Yards')
+    root.children.link(collection)
+    h = plan.settings.curb_height
+    for yard in plan.yards:
+        site = compose_yard(yard.kind, yard.width, yard.depth, yard.seed, yard.keep_out,
+                            props and detail == 'SHELLS', water)
+        if detail == 'SHELLS':
+            obj = mesh_object_from_data(f'{yard.id}_Grounds', site.ground, collection)
+        else:
+            obj = box_between(f'{yard.id}_Grounds', (-yard.width / 2, -yard.depth / 2,
+                                                     -PAD_THICKNESS),
+                              (yard.width / 2, yard.depth / 2, 0.0), collection,
+                              material('City_Grass', (.30, .38, .22, 1)))
+        if detail == 'SHELLS':
+            add_site_material_slots(obj)
+        obj.location = (origin.x + yard.center[0], origin.y + yard.center[1],
+                        origin.z + h + yard.level)
+        obj['surface_role'] = 'yard'
+        obj['yard_kind'], obj['yard_variant'] = yard.kind, site.variant
+        obj['district'], obj['city_style'], obj['asset_seed'] = yard.district, yard.style, yard.seed
+        if grading is not None:
+            top = h + yard.level
+            bottom = grading.lowest(footprint(yard.center, yard.width, yard.depth, 0.0)) - .2 - top
+            plinth = box_between(f'{yard.id}_Plinth',
+                                 (-yard.width / 2, -yard.depth / 2, bottom),
+                                 (yard.width / 2, yard.depth / 2, -PAD_THICKNESS), collection,
+                                 material('City_Pavement', (.42, .41, .38, 1)))
+            plinth.parent = obj
+            plinth['surface_role'] = 'yard_plinth'
+        if meta is not None:
+            meta.add_yard(yard, site, obj.name)
+    return collection
+
+
 def remove_generated_collection(collection):
     for child in list(collection.children):
         remove_generated_collection(child)
@@ -656,6 +694,9 @@ class MESH_OT_generate_city(bpy.types.Operator):
                 context.window_manager.progress_update(index + 1)
             if plan.pois or plan.shelters:
                 build_sites(plan, root, origin, self.detail, self.small_props, meta, self.water,
+                            grading)
+            if plan.yards:
+                build_yards(plan, root, origin, self.detail, self.small_props, meta, self.water,
                             grading)
             store_city_metadata(root, meta.as_dict())
             root['small_props'] = self.small_props

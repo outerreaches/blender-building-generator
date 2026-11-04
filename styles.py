@@ -33,6 +33,9 @@ STYLE_COLORS = {'DOWNTOWN': (.42, .47, .52, 1), 'OLD_TOWN': (.48, .30, .20, 1),
                 'RESIDENTIAL': (.62, .58, .44, 1), 'BRUTALIST': (.48, .48, .46, 1),
                 'INDUSTRIAL': (.32, .39, .42, 1), 'SUBURBAN': (.66, .55, .42, 1)}
 LOBBIES = ('GRAND', 'RETAIL', 'ARCADE', 'PILOTIS')
+# A pilotis storey is recessed about 3 m all round: on a narrower building no
+# stair would fit inside it, so its upper floors could not be reached.
+PILOTIS_LEAST = 14.5
 # Odds that a building without a fitted interior keeps its partitions; the
 # rest are gutted to their bearing walls, with rubble on the floors. Shells
 # and the floors above a rubble fill are always gutted; wall rings and
@@ -84,7 +87,7 @@ def building_recipe(style, width, depth, floors, seed, damage=0, interiors=False
     if style == 'DOWNTOWN':
         system = _pick(rng, (('CURTAIN', 4), ('RIBBON', 3.5), ('PUNCHED', 2.5)))
         lobby = _pick(rng, (('GRAND', 3.5), ('RETAIL', 3), ('ARCADE', 2), ('PILOTIS', 1.5)))
-        if party_walls and lobby == 'PILOTIS':
+        if lobby == 'PILOTIS' and (party_walls or min(width, depth) < PILOTIS_LEAST):
             lobby = 'GRAND'        # No open ground storey under a neighbour's wall.
         ground = {'GRAND': rng.uniform(6.4, 7.8), 'RETAIL': rng.uniform(4.8, 5.4),
                   'ARCADE': rng.uniform(5.2, 6.0), 'PILOTIS': rng.uniform(5.0, 5.8)}[lobby]
@@ -130,7 +133,8 @@ def building_recipe(style, width, depth, floors, seed, damage=0, interiors=False
                        window_height=1.6, sill_height=.85, window_spacing=1.1,
                        cornice=rng.random() < .5, parapet_height=.5)
     elif style == 'BRUTALIST':
-        lobby = 'PILOTIS' if rng.random() < .35 and floors >= 4 else 'NONE'
+        lobby = ('PILOTIS' if rng.random() < .35 and floors >= 4 and
+                 min(width, depth) >= PILOTIS_LEAST else 'NONE')
         profile.update(floor_height=3.3, ground_floor_height=4.2 if lobby == 'PILOTIS' else 3.6,
                        wall_thickness=.45, sill_height=1.0, parapet_height=.9,
                        window_width=1.6, window_height=1.4, window_spacing=1.2,

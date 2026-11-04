@@ -41,6 +41,7 @@ namespace Ares.CityGen
         public Freeway freeway;         // A raised highway (null when it runs at grade).
         public Building[] buildings;
         public Site[] sites;
+        public Yard[] yards;
         public TransitStop[] transit_stops;
         public Marker[] markers;
         public Counts counts;
@@ -354,6 +355,22 @@ namespace Ares.CityGen
 
     // -------------------------------------------------------------------------
 
+    // A courtyard or estate grounds inside a superblock: a level pad (position
+    // at its centre, pad level); its trees, benches and play equipment are
+    // markers whose `site` is the yard's id.
+    [Serializable]
+    public class Yard : Pose
+    {
+        public string id;
+        public string @object;
+        public string kind;       // COURTYARD or GROUNDS.
+        public string variant;    // GARDEN, PLAY or COURT.
+        public string district;
+        public int seed;
+        public float width;       // Along world x (Blender); the pad is axis-aligned.
+        public float depth;
+    }
+
     [Serializable]
     public class Site : Pose
     {
@@ -407,6 +424,7 @@ namespace Ares.CityGen
     {
         public int buildings;
         public int sites;
+        public int yards;
         public int transit_stops;
         public MarkerCount[] markers;
     }

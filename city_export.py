@@ -133,7 +133,7 @@ def write_city_metadata(collection, fbx_path):
         return None
     names = {obj.name for obj in collection.all_objects}
     missing = []
-    for group in ('buildings', 'sites', 'transit_stops'):
+    for group in ('buildings', 'sites', 'yards', 'transit_stops'):
         for entry in data.get(group, ()):
             if entry.get('object') not in names:
                 missing.append(entry.get('object'))

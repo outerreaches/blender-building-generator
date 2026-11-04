@@ -1605,7 +1605,9 @@ class Grading:
         # The ground is graded up and down to each foundation (``_shaped``).
         self.pads = ([(footprint(lot.center, lot.width, lot.depth, lot.rotation),
                        curb + lot.level) for lot in plan.lots] +
-                     [(site_footprint(poi), curb + poi.level) for poi in plan.pois])
+                     [(site_footprint(poi), curb + poi.level) for poi in plan.pois] +
+                     [(footprint(yard.center, yard.width, yard.depth, 0.0), curb + yard.level)
+                      for yard in getattr(plan, 'yards', ())])
         self.hash = defaultdict(list)
         for polygon, top in self.pads:
             xs, ys = [p[0] for p in polygon], [p[1] for p in polygon]

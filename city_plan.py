@@ -10,7 +10,7 @@ import json
 import math
 import random
 
-VERSION = 19
+VERSION = 20
 ROAD_WIDTHS = {"HIGHWAY": 20.0, "ARTERIAL": 12.0, "COLLECTOR": 8.0, "LOCAL": 6.0}
 ROAD_RANK = {name: i for i, name in enumerate(ROAD_WIDTHS)}
 # Corner radius at a route bend, before the curve_radius multiplier and clamping.
@@ -48,6 +48,9 @@ SUPERBLOCKS = {'OLD_TOWN': ('PERIMETER', (2, 2), 1.0),
 ESTATE_SLAB = (12.0, 16.0)   # Depth of an estate's slab blocks.
 ESTATE_OPEN = 14.0           # Least open ground between an estate's two rows.
 ESTATE_FILL = 1.6            # A slab stands with the district density times this.
+YARD_GAP = 1.0               # A yard keeps this far from the plots and slabs round it.
+YARD_LEAST = 12.0            # Smallest yard side.
+YARD_KEEP = .5               # Clearance round a tower and its way out in a yard.
 ESTATE_TOWER = (16.0, 20.0)  # A point tower's sides, in the ground between them,
 ESTATE_OPEN_TOWER = 10.0     # with this much open ground either side of it.
 ESTATE_LONGEST = 64.0        # Longest slab; longer rows split with a gap.
@@ -352,6 +355,23 @@ class Poi:
 
 
 @dataclass(frozen=True)
+class Yard:
+    """Open ground inside a superblock, laid out by ``sites.compose_yard``: a
+    perimeter block's courtyard (COURTYARD) or an estate's grounds between
+    its slabs (GROUNDS). Axis-aligned, centred on ``center``."""
+    id: str
+    kind: str
+    center: tuple
+    width: float         # Along x.
+    depth: float         # Along y.
+    style: str
+    district: str
+    seed: int
+    keep_out: tuple = ()  # (x0, y0, x1, y1) in yard coordinates left bare (a tower's yard).
+    level: float = 0.0    # Pad height above the flat city.
+
+
+@dataclass(frozen=True)
 class Shelter:
     """A transit stop on a footway; its back faces the block."""
     id: str
@@ -382,6 +402,7 @@ class CityPlan:
     # RAISED highway: {'interchanges', 'closed', 'cross', 'half', 'ramp_half',
     # 'mainline': [[x, z]], 'touchdown': [x west, x east], 'ramps': [...]}.
     freeway: dict = field(default_factory=dict)
+    yards: list = field(default_factory=list)        # Yard: courtyards and estate grounds.
 
     def to_json(self):
         return json.dumps({"version": VERSION, **asdict(self)}, sort_keys=True, indent=2)
@@ -2108,8 +2129,9 @@ def generate_city(settings=CitySettings()):
     reserved = {block for poi in pois for block in poi.blocks} | terrace_slopes(terraces)
     downtown, dense = _place_downtown(settings, locations, roads, paths, reserved, terraces,
                                       decks)
-    lots = downtown + _place_lots(settings, locations, roads, reserved | dense, culdesacs,
-                                  terraces, decks)
+    parcels, yards = _place_lots(settings, locations, roads, reserved | dense, culdesacs,
+                                 terraces, decks)
+    lots = downtown + parcels
     # Stable priority sampling avoids truncating one geographical side of the
     # city; the buildings of one downtown block are kept or dropped together.
     lots.sort(key=lambda lot: (stream(settings.seed, "budget", lot.group or lot.id).random(), lot.id))
@@ -2179,6 +2201,13 @@ def generate_city(settings=CitySettings()):
                   if _walled_house(settings, roads, surface, lot)}
         lots = [lot for lot in lots if (lot.group or lot.id) not in walled]
         pois = [replace(poi, level=round(front(poi), 3)) for poi in pois]
+
+        def natural(item):
+            # A yard faces no street: its own ground at its middle.
+            if terraces:
+                return surface.ground.base(*item.center) + surface.ground.rise_at(*item.center)
+            return surface(*item.center)
+        yards = [replace(yard, level=round(natural(yard), 3)) for yard in yards]
     shelters = []
     if settings.points_of_interest:
         shelters = _place_shelters(settings, roads, lots, pois,
@@ -2200,7 +2229,8 @@ def generate_city(settings=CitySettings()):
         outer = _freeway_outer_roads(settings, freeway)
     return CityPlan(settings, locations, road_list, paths, lots, eligible, driving_loops,
                     pois, shelters, outer, culdesacs,
-                    [[x, y, z] for (x, y), z in sorted(heights.items())], terraces, freeway)
+                    [[x, y, z] for (x, y), z in sorted(heights.items())], terraces, freeway,
+                    yards)
 
 
 # Suburban cul-de-sacs: a short street from the network to an inner lattice
@@ -2451,8 +2481,8 @@ def _place_lots(settings, locations, roads, reserved=frozenset(), culdesacs=(), 
         for node in (a, b):
             nodes[node] = max(nodes.get(node, 0), ROAD_WIDTHS[tier] / 2)
     avoid = footprints | set(tops) | set(walls) | _near_terraces(terraces)
-    grouped, taken = _superblock_lots(settings, locations, roads, reserved, avoid, nodes,
-                                      freeway, bulbs, ring_corners)
+    grouped, taken, yards = _superblock_lots(settings, locations, roads, reserved, avoid, nodes,
+                                             freeway, bulbs, ring_corners)
     lots += grouped
     for x in range(-settings.radius, settings.radius):
         for y in range(-settings.radius, settings.radius):
@@ -2511,9 +2541,11 @@ def _place_lots(settings, locations, roads, reserved=frozenset(), culdesacs=(), 
                                           width, depth, SIDE_ROTATION[side], borders[side]))
                 continue
             cells = profile['parcels']
-            cell_x = (high_x - low_x - 2 * (cells - 1)) / cells
-            cell_y = (high_y - low_y - 2 * (cells - 1)) / cells
-            if min(cell_x, cell_y) < 5:
+            # Plots of uneven widths: blocks do not repeat one 2 x 2 grid.
+            cuts = stream(settings.seed, "parcel_cuts", x, y)
+            xs = _uneven_cuts(low_x, high_x, cells, 2.0, cuts)
+            ys = _uneven_cuts(low_y, high_y, cells, 2.0, cuts)
+            if min(min(b - a for a, b in xs), min(b - a for a, b in ys)) < 5:
                 continue
             for ix in range(cells):
                 for iy in range(cells):
@@ -2527,10 +2559,9 @@ def _place_lots(settings, locations, roads, reserved=frozenset(), culdesacs=(), 
                             sides.append(side)
                     if not sides:
                         continue
-                    cell_low_x = low_x + ix * (cell_x + 2)
-                    cell_low_y = low_y + iy * (cell_y + 2)
-                    cell_high_x = cell_low_x + cell_x
-                    cell_high_y = cell_low_y + cell_y
+                    cell_low_x, cell_high_x = xs[ix]
+                    cell_low_y, cell_high_y = ys[iy]
+                    cell_x, cell_y = cell_high_x - cell_low_x, cell_high_y - cell_low_y
                     cx, cy = (cell_low_x + cell_high_x) / 2, (cell_low_y + cell_high_y) / 2
                     density = min(1.0, density_at(settings, cx, cy) * profile['density'])
                     if rng.random() > density and (x, y) not in tops:
@@ -2564,7 +2595,7 @@ def _place_lots(settings, locations, roads, reserved=frozenset(), culdesacs=(), 
                     rotation = {"S": 0, "E": math.pi / 2, "N": math.pi, "W": -math.pi / 2}[side]
                     lots.append(_make_lot(settings, ident, rng, district, profile, (cx, cy),
                                           width, depth, rotation, borders[side]))
-    return lots
+    return lots, yards
 
 
 # -- superblocks outside downtown --------------------------------------------
@@ -2611,9 +2642,9 @@ def _superblock_lots(settings, locations, roads, reserved, avoid, nodes, freeway
     """Lots of the old town, residential, brutalist and industrial superblocks.
     Returns the lots and the blocks they took (the block pass skips them)."""
     if settings.district_superblocks <= 0:
-        return [], set()
+        return [], set(), []
     size = settings.block_size
-    lots, taken = [], set()
+    lots, taken, yards = [], set(), []
     for x, y, wx, wy, district in _superblock_groups(settings, locations, roads, reserved, avoid):
         profile = STYLE_PROFILE[district.style]
         layout = SUPERBLOCKS[district.style][0]
@@ -2643,24 +2674,26 @@ def _superblock_lots(settings, locations, roads, reserved, avoid, nodes, freeway
             # no slab stands back across open ground from it.
             layout = 'PERIMETER'
         if layout == 'ESTATE':
-            made = _estate_lots(settings, district, profile, rect, streets, group, rng)
+            made, yard = _estate_lots(settings, district, profile, rect, streets, group, rng)
         else:
             cells = profile['parcels']
             nx, ny = (cells * wx, cells * wy) if layout == 'PERIMETER' else (1, 1)
-            made = _perimeter_lots(settings, district, profile, rect, streets, (nx, ny), group,
-                                   rng)
+            made, yard = _perimeter_lots(settings, district, profile, rect, streets, (nx, ny),
+                                         group, rng)
+        if yard is not None:
+            yards.append(yard)
         made = [lot for lot in made if _clear_of_bulbs(
             _corners(lot.center, lot.width, lot.depth, lot.rotation), bulbs) and all(
             _apart(_corners(lot.center, lot.width, lot.depth, lot.rotation), ring, BULB_GAP)
             for ring in ring_corners)]
         lots += made
         taken |= {(x + i, y + j) for i in range(wx) for j in range(wy)}
-    return lots, taken
+    return lots, taken, yards
 
 
 def _uneven_cuts(lo, hi, count, gap, rng):
     """``count`` intervals across [lo, hi] with ``gap`` between them, of
-    uneven widths (a superblock's plots are not a regular grid)."""
+    uneven widths (a block's plots are not a regular grid)."""
     weights = [rng.uniform(.7, 1.3) for _ in range(count)]
     span = hi - lo - gap * (count - 1)
     cuts, at = [], lo
@@ -2717,7 +2750,27 @@ def _perimeter_lots(settings, district, profile, rect, streets, cells, group, rn
             lots.append(_make_lot(settings, ident, item, district, profile,
                                   (round(cx, 3), round(cy, 3)), round(width, 3), round(depth, 3),
                                   SIDE_ROTATION[side], frontage))
-    return lots
+    yard = None
+    if nx >= 3 and ny >= 3:
+        # The inner plots, which face no street, are the courtyard.
+        yard = _yard(settings, district, 'COURTYARD', group,
+                     (xs[1][0] + YARD_GAP, ys[1][0] + YARD_GAP,
+                      xs[-2][1] - YARD_GAP, ys[-2][1] - YARD_GAP))
+    return lots, yard
+
+
+def _yard(settings, district, kind, group, rect, keep_out=()):
+    """A Yard over the world ``rect`` (None if too small), with ``keep_out``
+    given in world coordinates."""
+    x0, y0, x1, y1 = rect
+    if x1 - x0 < YARD_LEAST or y1 - y0 < YARD_LEAST:
+        return None
+    cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
+    ident = f"yard_{group}"
+    local = tuple(tuple(round(v, 3) for v in (k[0] - cx, k[1] - cy, k[2] - cx, k[3] - cy))
+                  for k in keep_out)
+    return Yard(ident, kind, (round(cx, 3), round(cy, 3)), round(x1 - x0, 3), round(y1 - y0, 3),
+                district.style, district.id, stream(settings.seed, ident).randrange(2**31), local)
 
 
 def _estate_lots(settings, district, profile, rect, streets, group, rng):
@@ -2728,7 +2781,7 @@ def _estate_lots(settings, district, profile, rect, streets, group, rng):
     along_x = x1 - x0 >= y1 - y0
     low, high = ("S", "N") if along_x else ("W", "E")
     if not streets[low] and not streets[high]:
-        return []
+        return [], None
     a0, a1 = (x0, x1) if along_x else (y0, y1)
     b0, b1 = (y0, y1) if along_x else (x0, x1)
     # One row down the middle of a shallow group, else one along each long
@@ -2775,6 +2828,7 @@ def _estate_lots(settings, district, profile, rect, streets, group, rng):
                                   SIDE_ROTATION[front], frontage))
     # A point tower in the open ground between two rows, facing a street at
     # one end of it (its approach runs between the rows).
+    keep_out = []
     if rows == 2:
         gap0, gap1 = starts[0] + depths[0], starts[1]
         ends = [side for side in ((("W", "E") if along_x else ("S", "N"))) if streets[side]]
@@ -2792,7 +2846,26 @@ def _estate_lots(settings, district, profile, rect, streets, group, rng):
                 lots.append(_make_lot(settings, ident, item, district, profile,
                                       (round(cx, 3), round(cy, 3)), round(across, 3),
                                       round(deep, 3), SIDE_ROTATION[front], frontage))
-    return lots
+                # The tower and its way out to the street stay clear of the
+                # grounds (across, along its front's axis).
+                end = a0 if front in "WS" else a1
+                u0, u1 = sorted((end, ca + (deep / 2 if end < ca else -deep / 2)))
+                v0, v1 = cb - across / 2, cb + across / 2
+                keep_out.append(_grow_rect((u0, v0, u1, v1) if along_x else (v0, u0, v1, u1),
+                                           YARD_KEEP))
+    if rows == 2:
+        b_lo, b_hi = starts[0] + depths[0] + YARD_GAP, starts[1] - YARD_GAP
+    else:
+        # Behind a single row (its front faces the nearer street).
+        back = starts[0] + depths[0] if middle - b0 <= b1 - middle else starts[0]
+        b_lo, b_hi = ((back + YARD_GAP, b1) if middle - b0 <= b1 - middle else
+                      (b0, back - YARD_GAP))
+    rect = (a0, b_lo, a1, b_hi) if along_x else (b_lo, a0, b_hi, a1)
+    return lots, _yard(settings, district, 'GROUNDS', group, rect, keep_out)
+
+
+def _grow_rect(rect, by):
+    return (rect[0] - by, rect[1] - by, rect[2] + by, rect[3] + by)
 
 
 # -- points of interest ------------------------------------------------------

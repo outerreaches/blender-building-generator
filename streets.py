@@ -555,17 +555,19 @@ def build_street_mesh(plan):
 
 
 def _ramp_mouths(plan):
-    """For each raised highway ramp, a test for the street-mesh cells past its
-    foot (on its band): the ramp's deck carries the road on from there."""
+    """For each raised highway ramp, a test for the street-mesh cells just
+    past its foot (the column of cells on its band beyond the foot line): the
+    ramp's deck carries the road on from there. Further out the field is
+    open ground anyway, and any street crossing under the ramp keeps its own."""
     freeway = getattr(plan, 'freeway', None) or {}
     band = freeway.get('ramp_half', 0.0) + plan.settings.sidewalk_width + SAMPLE
     tests = []
     for ramp in freeway.get('ramps', ()):
         foot, sign, y = ramp['foot'], ramp['reach'], ramp['y']
+        start = foot if sign > 0 else foot - SAMPLE
 
-        def past(x0, y0, foot=foot, sign=sign, y=y):
-            beyond = x0 >= foot - 1e-6 if sign > 0 else x0 + SAMPLE <= foot + 1e-6
-            return beyond and y - band <= y0 + SAMPLE / 2 <= y + band
+        def past(x0, y0, start=start, y=y):
+            return abs(x0 - start) < 1e-6 and y - band <= y0 + SAMPLE / 2 <= y + band
         tests.append(past)
     return tests
 

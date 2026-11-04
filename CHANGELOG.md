@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.23.3: Streets whole beside the ramps
+
+- Streets near a raised highway's ramps had holes in their paving (only
+  the lane paint left over bare ground) since v0.23.1: where a ramp's road
+  takes over from the street mesh, every street cell along the ramp's line
+  beyond its foot was left out, not just the strip at the foot. Now only
+  that strip is, and every street crossing near the ramps keeps its
+  paving (484 bare patches in the default city before).
+
 ## v0.23.2: Ramps clear of the ground
 
 - On hills and terraces the ground no longer stands up through a raised

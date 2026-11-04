@@ -422,7 +422,9 @@ short).
   spans it. Buildings and site pads keep 3.5 m clear of every deck, and
   beside a ramp as far as from a street.
 - **Grading.** On hills the ground along the line is graded as for a
-  highway at grade (4%), so the deck follows the land.
+  highway at grade (4%), so the deck follows the land. Under every deck the
+  ground stays 0.3 m below the road (beside a ramp in a cutting it climbs
+  back at 0.6), and no retaining wall stands up through a deck.
 
 The decks are one object, `City_Freeway` (`surface_role` `freeway`;
 asphalt on top, concrete elsewhere); its lane paint is part of

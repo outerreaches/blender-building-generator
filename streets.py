@@ -13,6 +13,7 @@ union of the curved corridors. Road corners are fillets, so their bend radius is
 explicit in the centreline rather than an artefact of the grid.
 """
 from collections import defaultdict
+import bisect
 import math
 
 SAMPLE = 1.5          # Metres per surface sample cell.
@@ -757,6 +758,10 @@ def _terraced_ground(plan):
             return grading.paved(x, y) - ABUTMENT_DROP
         return None
 
+    def decked(point):
+        """How high a wall may stand under a raised highway's deck there."""
+        return grading.under_decks(point[0], point[1], False)
+
     def strip_height(x, y, f, natural):
         """The verge between a footway and the ground beyond it."""
         if grading.stair_at(x, y) is not None:
@@ -923,12 +928,15 @@ def _terraced_ground(plan):
         """A wall that stops just beneath the road where it runs under a
         street's paving (a viaduct's abutment), with no parapet there."""
         cap_a, cap_b = paving(a), paving(b)
-        if cap_a is not None:
+        deck_a, deck_b = decked(a), decked(b)
+        cap_a = min(deck_a, cap_a if cap_a is not None else math.inf)
+        cap_b = min(deck_b, cap_b if cap_b is not None else math.inf)
+        if cap_a < math.inf:
             a_low, a_high = min(a_low, cap_a), min(a_high, cap_a)
-        if cap_b is not None:
+        if cap_b < math.inf:
             b_low, b_high = min(b_low, cap_b), min(b_high, cap_b)
         wall(a, b, a_low, a_high, b_low, b_high, toward_left,
-             cap_a is None and cap_b is None)
+             cap_a == math.inf and cap_b == math.inf)
 
     # Verge against the paving: the wall (a curb's face, or an embankment's
     # side) faces the street where the verge is higher, the verge where the
@@ -942,8 +950,12 @@ def _terraced_ground(plan):
         return grading.wall_foot(point[0], point[1]), False
     for a, b, level in iso_edges:
         (fa, under_a), (fb, under_b) = foot(a), foot(b)
-        wall(a, b, fa, z_of(a, level, 'verge'), fb, z_of(b, level, 'verge'), False,
-             not (under_a or under_b))
+        za, zb = z_of(a, level, 'verge'), z_of(b, level, 'verge')
+        # (Under a raised highway's deck it stops beneath the road too.)
+        deck_a, deck_b = decked(a), decked(b)
+        fa, za, fb, zb = min(fa, deck_a), min(za, deck_a), min(fb, deck_b), min(zb, deck_b)
+        wall(a, b, fa, za, fb, zb, False,
+             not (under_a or under_b) and deck_a == math.inf and deck_b == math.inf)
     # Verge against the ground beyond it: the retaining wall.
     for key in sorted(verge_edges):
         entries = verge_edges[key]
@@ -1143,6 +1155,63 @@ FREEWAY_MERGE = .3         # A ramp within this of the deck's level runs into it
 FREEWAY_LINE = .15         # Paint width.
 FREEWAY_DASH = (3.0, 9.0)  # Lane dash, gap.
 RAMP_TILT = 12.0           # A ramp's deck takes the street's cross-fall at its foot, level after this.
+DECK_GROUND = .3           # The ground stays this far under a deck's top.
+DECK_REACH = 12.0          # Beside a ramp the ground is cut back this far out.
+
+
+def deck_profiles(plan):
+    """The raised highway's decks as surfaces, for the mesh and for the
+    ground under them: [(side, [(x, z top, inner |y|, outer |y|, cross-fall at
+    the inner edge, at the outer)])], side 0 for the mainline, the stations
+    in x order."""
+    freeway = getattr(plan, 'freeway', None) or {}
+    if not freeway:
+        return []
+    half, ramp_half = freeway['half'], freeway['ramp_half']
+    decks = [(0, [(x, z, -half, half, 0.0, 0.0) for x, z in freeway['mainline']])]
+    road = plan.surface()
+    for ramp in freeway['ramps']:
+        side = ramp['side']
+        climb, taper = ramp['length'], ramp['taper']
+        stations = []
+        for x, y, z in ramp['points']:
+            along = abs(x - ramp['foot'])
+            width = 2 * ramp_half * max(0.0, min(1.0, (climb + taper - along) / taper))
+            inner, outer = side * half, side * (half + width)
+            # At its foot the deck takes the street's cross-fall (it meets
+            # the road there edge to edge), levelling out over RAMP_TILT.
+            share = max(0.0, 1.0 - along / RAMP_TILT)
+            centre = road(x, y)
+            stations.append((x, z, inner, outer) +
+                            tuple((road(x, edge) - centre) * share for edge in (inner, outer)))
+        decks.append((side, sorted(stations)))
+    return decks
+
+
+def _deck_cut(decks, x, y, beside=True):
+    """How high the ground may stand at (x, y) under the decks: DECK_GROUND
+    under one, and (``beside``) beside a ramp no higher than a cut slope back
+    up from its edge (math.inf where no deck is near)."""
+    best = math.inf
+    for side, stations in decks:
+        if not stations[0][0] <= x <= stations[-1][0]:
+            continue
+        k = max(0, min(len(stations) - 2, bisect.bisect_right([st[0] for st in stations], x) - 1))
+        a, b = stations[k], stations[k + 1]
+        t = (x - a[0]) / (b[0] - a[0]) if b[0] != a[0] else 0.0
+        z, inner, outer, ti, to = (a[i] + (b[i] - a[i]) * t for i in range(1, 6))
+        low, high = sorted((inner, outer))
+        if abs(outer - inner) < 1e-6:
+            continue
+        if low <= y <= high:
+            u = (y - inner) / (outer - inner)
+            best = min(best, z + ti + (to - ti) * u - DECK_GROUND)
+        elif side and beside:
+            gap = low - y if y < low else y - high
+            if gap < DECK_REACH:
+                edge_z = z + (ti if abs((low if y < low else high) - inner) < 1e-6 else to)
+                best = min(best, edge_z - DECK_GROUND + PAD_CUT_SLOPE * gap)
+    return best
 
 
 def _freeway_ground(plan):
@@ -1183,26 +1252,23 @@ def freeway_stations(plan):
         low, high = under(x, -half, half)
         bottom = z - FREEWAY_DEPTH
         open_ = bottom - high >= FREEWAY_OPEN
-        mainline.append((x, 0.0, z, -half, half, bottom if open_ else low - .5, open_, 0.0, 0.0))
+        # On fill (too near the ground to stand open) down into the ground,
+        # which is cut back under the deck where it stood higher.
+        mainline.append((x, 0.0, z, -half, half, bottom if open_ else min(low, z) - .5, open_,
+                         0.0, 0.0))
     ramps = []
-    road = plan.surface()
-    for ramp in freeway['ramps']:
-        side, sign = ramp['side'], ramp['reach']
-        climb, taper = ramp['length'], ramp['taper']
+    profiles = deck_profiles(plan)[1:]
+    for ramp, (side, profile) in zip(freeway['ramps'], profiles):
+        # (The profile runs in x order; the stations run from the foot.)
+        by_x = {round(st[0], 6): st for st in profile}
         stations = []
         for x, y, z in ramp['points']:
-            along = abs(x - ramp['foot'])
-            width = 2 * ramp_half * max(0.0, min(1.0, (climb + taper - along) / taper))
-            inner, outer = side * half, side * (half + width)
+            _, _, inner, outer, ti, to = by_x[round(x, 6)]
             low, high = under(x, inner, side * (half + 2 * ramp_half))
             bottom = z - FREEWAY_RAMP_DEPTH
             open_ = bottom - high >= FREEWAY_OPEN
-            # At its foot the deck takes the street's cross-fall (it meets
-            # the road there edge to edge), levelling out over RAMP_TILT.
-            share = max(0.0, 1.0 - along / RAMP_TILT)
-            centre = road(x, y)
-            tilts = tuple((road(x, edge) - centre) * share for edge in (inner, outer))
-            stations.append((x, y, z, inner, outer, bottom if open_ else low - .5, open_) + tilts)
+            stations.append((x, y, z, inner, outer, bottom if open_ else min(low, z) - .5, open_,
+                             ti, to))
         ramps.append(stations)
 
     def clear_of_streets(x, reach):
@@ -1532,6 +1598,8 @@ class Grading:
             self.spans = viaduct_spans(plan, self)
             self.field = Field(plan, [stair['segment'] for stair in self.stairs], self.spans)
         curb = settings.curb_height
+        # Under a raised highway's decks (and cut back beside its ramps).
+        self.decks = deck_profiles(plan)
         # The ground is graded up and down to each foundation (``_shaped``).
         self.pads = ([(footprint(lot.center, lot.width, lot.depth, lot.rotation),
                        curb + lot.level) for lot in plan.lots] +
@@ -1593,12 +1661,19 @@ class Grading:
             if level is None:
                 level = self.level_at(x, y)
             height = self._shaped(x, y, self.natural(x, y, level), level)
-            return min(height, cap - PAD_CLEAR)
+            return min(height, cap - PAD_CLEAR, self.under_decks(x, y))
         level = self.surface(x, y)
-        height = min(self._shaped(x, y, level + self.offset, 0), cap - PAD_CLEAR)
+        height = min(self._shaped(x, y, level + self.offset, 0), cap - PAD_CLEAR,
+                     self.under_decks(x, y))
         if self.field.value(x, y) <= self.walk + .5:
             height = max(height, level + CURB_BOTTOM_TERRAIN + .05)
         return height
+
+    def under_decks(self, x, y, beside=True):
+        """The most the ground may stand at (x, y) for a raised highway's
+        decks (math.inf away from them); ``beside`` False: only right under
+        one."""
+        return _deck_cut(self.decks, x, y, beside) if self.decks else math.inf
 
     def _shaped(self, x, y, height, level):
         """Natural ``height`` blended into the foundations on ``level`` round

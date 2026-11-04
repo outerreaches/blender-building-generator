@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.23.2: Ramps clear of the ground
+
+- On hills and terraces the ground no longer stands up through a raised
+  highway's ramps, and no retaining wall stands across a ramp's foot. The
+  ground under every deck is now graded to stay 0.3 m under its road (and
+  beside a ramp in a cutting it climbs back no steeper than 0.6), and the
+  terrace walls under a deck stop beneath it, with no parapet. Before, the
+  ground stood up to 1.5 m above a ramp's lower end, and a wall up to 1.1 m
+  high crossed its foot.
+
 ## v0.23.1: Ramps meet the streets road to road
 
 - Where a city street runs onto a raised highway's ramp, the road now

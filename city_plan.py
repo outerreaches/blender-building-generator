@@ -10,7 +10,7 @@ import json
 import math
 import random
 
-VERSION = 18
+VERSION = 19
 ROAD_WIDTHS = {"HIGHWAY": 20.0, "ARTERIAL": 12.0, "COLLECTOR": 8.0, "LOCAL": 6.0}
 ROAD_RANK = {name: i for i, name in enumerate(ROAD_WIDTHS)}
 # Corner radius at a route bend, before the curve_radius multiplier and clamping.
@@ -36,6 +36,22 @@ STYLE_PROFILE = {
                      setback=1, road=.5, curve=1.4, damage=.3, tract=1.6),
 }
 STYLES = tuple(STYLE_PROFILE)
+# Superblocks outside downtown: how a district lays out blocks joined across
+# a street that closed (or never ran), the largest group in blocks, and a
+# factor on the share of its local streets that close. PERIMETER rows line
+# the outside of the joined blocks round a courtyard; ESTATE slabs stand in
+# open ground; COMPOUND puts one big shed on the group.
+SUPERBLOCKS = {'OLD_TOWN': ('PERIMETER', (2, 2), 1.0),
+               'RESIDENTIAL': ('PERIMETER', (2, 2), .9),
+               'BRUTALIST': ('ESTATE', (2, 2), 1.1),
+               'INDUSTRIAL': ('COMPOUND', (2, 1), 1.0)}
+ESTATE_SLAB = (12.0, 16.0)   # Depth of an estate's slab blocks.
+ESTATE_OPEN = 14.0           # Least open ground between an estate's two rows.
+ESTATE_FILL = 1.6            # A slab stands with the district density times this.
+ESTATE_TOWER = (16.0, 20.0)  # A point tower's sides, in the ground between them,
+ESTATE_OPEN_TOWER = 10.0     # with this much open ground either side of it.
+ESTATE_LONGEST = 64.0        # Longest slab; longer rows split with a gap.
+ESTATE_GAP = (8.0, 12.0)
 # Points of interest (sites.py lays them out). ``blocks`` lists footprints in
 # blocks (along the street, away from it), preferred first; ``count`` is the
 # number per 100 built-up blocks and ``minimum`` how many any city gets when a
@@ -231,6 +247,7 @@ class CitySettings:
     points_of_interest: bool = True   # Sites (sites.py) and transit stops.
     highway_reach: float = 3000.0     # Highway beyond the city edge (m), fading out at its end.
     downtown_superblocks: float = .35  # Share of downtown local streets closed to join blocks.
+    district_superblocks: float = .5   # The same in old town, residential, brutalist, industrial.
     preset: str = "CITY"               # CITY, or SMALL_TOWN: no towers, no big sites.
     shape: str = "SQUARE"              # SQUARE fills the map; ORGANIC has an irregular edge.
     irregularity: float = .6           # How far an organic edge wanders.
@@ -255,6 +272,7 @@ class CitySettings:
                              ("damage", 0, 1), ("interior_ratio", 0, 1),
                              ("setback", 1, 8), ("wasteland", 0, 20000),
                              ("highway_reach", 0, 20000), ("downtown_superblocks", 0, 1),
+                             ("district_superblocks", 0, 1),
                              ("irregularity", 0, 1), ("relief", 0, 40), ("plateau_height", 0, 30),
                              ("sidewalk_width", 1.2, 5), ("curb_height", 0, .25)):
             value = getattr(self, name)
@@ -2069,6 +2087,11 @@ def generate_city(settings=CitySettings()):
                     frontier.append(other)
 
     _close_downtown_streets(settings, locations, roads, guard['keep'], corridor)
+    # Terrace ramps and stairs keep the streets at their ends.
+    ends = {tuple(n) for ramp in (terraces or {}).get('ramps', ()) for n in ramp['nodes']}
+    ends |= {n for key in guard['stairs'] for n in key}
+    _close_district_streets(settings, locations, roads, guard['keep'], corridor,
+                            _near_terraces(terraces), ends)
     culdesacs = _add_culdesacs(settings, locations, roads, guard)
     _finish_terraces(settings, terraces, roads, stairs, {loc.node for loc in locations})
     ramps = []
@@ -2427,9 +2450,13 @@ def _place_lots(settings, locations, roads, reserved=frozenset(), culdesacs=(), 
     for (a, b), tier in roads.items():
         for node in (a, b):
             nodes[node] = max(nodes.get(node, 0), ROAD_WIDTHS[tier] / 2)
+    avoid = footprints | set(tops) | set(walls) | _near_terraces(terraces)
+    grouped, taken = _superblock_lots(settings, locations, roads, reserved, avoid, nodes,
+                                      freeway, bulbs, ring_corners)
+    lots += grouped
     for x in range(-settings.radius, settings.radius):
         for y in range(-settings.radius, settings.radius):
-            if (x, y) in reserved:
+            if (x, y) in reserved or (x, y) in taken:
                 continue
             borders = {"S": edge((x, y), (x + 1, y)),
                        "N": edge((x, y + 1), (x + 1, y + 1)),
@@ -2537,6 +2564,234 @@ def _place_lots(settings, locations, roads, reserved=frozenset(), culdesacs=(), 
                     rotation = {"S": 0, "E": math.pi / 2, "N": math.pi, "W": -math.pi / 2}[side]
                     lots.append(_make_lot(settings, ident, rng, district, profile, (cx, cy),
                                           width, depth, rotation, borders[side]))
+    return lots
+
+
+# -- superblocks outside downtown --------------------------------------------
+
+def _superblock_groups(settings, locations, roads, reserved, avoid):
+    """Blocks of one district joined across streetless edges, as 2 x 2, 2 x 1
+    and 1 x 2 groups (largest first, then by seed) within the district's
+    largest group; none spans a raised highway's line."""
+    radius = settings.radius
+    apart = _corridor(settings) if settings.highway == 'RAISED' else set()
+    owner = {}
+    for x in range(-radius, radius):
+        for y in range(-radius, radius):
+            if (x, y) not in reserved:
+                district = _superblock_district(settings, locations, (x, y), avoid)
+                if district is not None:
+                    owner[(x, y)] = district
+    candidates = []
+    for (x, y), district in sorted(owner.items()):
+        longest = SUPERBLOCKS[district.style][1]
+        for wx, wy in ((2, 2), (2, 1), (1, 2)):
+            group = [(x + i, y + j) for i in range(wx) for j in range(wy)]
+            if not _fits(group, longest):
+                continue
+            if any(b not in owner or owner[b].id != district.id for b in group):
+                continue
+            if any(e in roads or e in apart for e in _inner_edges(x, y, wx, wy)):
+                continue
+            key = stream(settings.seed, "superblock", x, y, wx, wy).random()
+            candidates.append((-wx * wy, key, x, y, wx, wy))
+    candidates.sort()
+    taken, groups = set(), []
+    for _, _, x, y, wx, wy in candidates:
+        group = {(x + i, y + j) for i in range(wx) for j in range(wy)}
+        if group & taken:
+            continue
+        taken |= group
+        groups.append((x, y, wx, wy, owner[(x, y)]))
+    return groups
+
+
+def _superblock_lots(settings, locations, roads, reserved, avoid, nodes, freeway, bulbs,
+                     ring_corners):
+    """Lots of the old town, residential, brutalist and industrial superblocks.
+    Returns the lots and the blocks they took (the block pass skips them)."""
+    if settings.district_superblocks <= 0:
+        return [], set()
+    size = settings.block_size
+    lots, taken = [], set()
+    for x, y, wx, wy, district in _superblock_groups(settings, locations, roads, reserved, avoid):
+        profile = STYLE_PROFILE[district.style]
+        layout = SUPERBLOCKS[district.style][0]
+        edges = _side_edges(x, y, wx, wy)
+        streets = {side: [e for e in keys if roads.get(e) not in (None, "HIGHWAY")]
+                   for side, keys in edges.items()}
+        if not any(streets.values()):
+            continue
+        margins = {}
+        for side, keys in edges.items():
+            half = max(max(nodes.get(a, 0), nodes.get(b, 0)) for a, b in keys)
+            margins[side] = (half + settings.sidewalk_width + 2 + settings.setback +
+                             profile['setback'] + .5)
+            if freeway is not None and (side, y if side == "S" else y + wy - 1) in (
+                    ("S", 0), ("N", -1)):
+                margins[side] = max(margins[side], max(
+                    _freeway_margin(settings, freeway, x + i, 1 if side == "S" else -1)
+                    for i in range(wx)))
+        rect = (x * size + margins["W"], y * size + margins["S"],
+                (x + wx) * size - margins["E"], (y + wy) * size - margins["N"])
+        if min(rect[2] - rect[0], rect[3] - rect[1]) < 12:
+            continue
+        group = f"sb_{x}_{y}_{wx}{wy}"
+        rng = stream(settings.seed, "superblock", "layout", x, y, wx, wy)
+        if layout == 'ESTATE' and settings.terrain == 'TERRACED':
+            # A terraced city's pads take the level of the street they face:
+            # no slab stands back across open ground from it.
+            layout = 'PERIMETER'
+        if layout == 'ESTATE':
+            made = _estate_lots(settings, district, profile, rect, streets, group, rng)
+        else:
+            cells = profile['parcels']
+            nx, ny = (cells * wx, cells * wy) if layout == 'PERIMETER' else (1, 1)
+            made = _perimeter_lots(settings, district, profile, rect, streets, (nx, ny), group,
+                                   rng)
+        made = [lot for lot in made if _clear_of_bulbs(
+            _corners(lot.center, lot.width, lot.depth, lot.rotation), bulbs) and all(
+            _apart(_corners(lot.center, lot.width, lot.depth, lot.rotation), ring, BULB_GAP)
+            for ring in ring_corners)]
+        lots += made
+        taken |= {(x + i, y + j) for i in range(wx) for j in range(wy)}
+    return lots, taken
+
+
+def _uneven_cuts(lo, hi, count, gap, rng):
+    """``count`` intervals across [lo, hi] with ``gap`` between them, of
+    uneven widths (a superblock's plots are not a regular grid)."""
+    weights = [rng.uniform(.7, 1.3) for _ in range(count)]
+    span = hi - lo - gap * (count - 1)
+    cuts, at = [], lo
+    for weight in weights:
+        width = span * weight / sum(weights)
+        cuts.append((at, at + width))
+        at += width + gap
+    return cuts
+
+
+def _nearest_edge(keys, side, point, size):
+    axis = 0 if side in "SN" else 1
+    return min(keys, key=lambda e: (abs((e[0][axis] + e[1][axis]) * size / 2 - point[axis]), e))
+
+
+def _perimeter_lots(settings, district, profile, rect, streets, cells, group, rng):
+    """Plots round the edge of a superblock, each facing a street it lines;
+    the inner plots (no street) are the courtyard. A compound is one plot."""
+    x0, y0, x1, y1 = rect
+    nx, ny = cells
+    xs = _uneven_cuts(x0, x1, nx, 2.0, rng)
+    ys = _uneven_cuts(y0, y1, ny, 2.0, rng)
+    size = settings.block_size
+    lots = []
+    for ix, (cx0, cx1) in enumerate(xs):
+        for iy, (cy0, cy1) in enumerate(ys):
+            ident = f"lot_{math.floor(cx0 / size)}_{math.floor(cy0 / size)}_{group}_{ix}_{iy}"
+            item = stream(settings.seed, ident)
+            sides = [side for side, available in (("W", ix == 0), ("E", ix == nx - 1),
+                                                  ("S", iy == 0), ("N", iy == ny - 1))
+                     if available and streets[side]]
+            if not sides:
+                continue
+            cx, cy = (cx0 + cx1) / 2, (cy0 + cy1) / 2
+            density = min(1.0, density_at(settings, cx, cy) * profile['density'])
+            if item.random() > density:
+                continue
+            side = item.choice(sides)
+            cell_x, cell_y = cx1 - cx0, cy1 - cy0
+            sx = cell_x * item.uniform(*profile['footprint'])
+            sy = cell_y * item.uniform(*profile['footprint'])
+            if min(sx, sy) < 5:
+                continue
+            if side == "W":
+                cx = cx0 + sx / 2
+            elif side == "E":
+                cx = cx1 - sx / 2
+            elif side == "S":
+                cy = cy0 + sy / 2
+            else:
+                cy = cy1 - sy / 2
+            width, depth = (sy, sx) if side in "WE" else (sx, sy)
+            frontage = _nearest_edge(streets[side], side, (cx, cy), size)
+            lots.append(_make_lot(settings, ident, item, district, profile,
+                                  (round(cx, 3), round(cy, 3)), round(width, 3), round(depth, 3),
+                                  SIDE_ROTATION[side], frontage))
+    return lots
+
+
+def _estate_lots(settings, district, profile, rect, streets, group, rng):
+    """Slab blocks in open ground along a superblock's long axis: a row on
+    each long side facing its street (one down the middle of a shallow
+    group, facing the nearer); long rows split into slabs with a gap."""
+    x0, y0, x1, y1 = rect
+    along_x = x1 - x0 >= y1 - y0
+    low, high = ("S", "N") if along_x else ("W", "E")
+    if not streets[low] and not streets[high]:
+        return []
+    a0, a1 = (x0, x1) if along_x else (y0, y1)
+    b0, b1 = (y0, y1) if along_x else (x0, x1)
+    # One row down the middle of a shallow group, else one along each long
+    # side with open ground between (a row behind another would reach its
+    # street through it).
+    rows = 1 if b1 - b0 < 2 * ESTATE_SLAB[1] + ESTATE_OPEN else 2
+    depths = [rng.uniform(*ESTATE_SLAB) for _ in range(rows)]
+    if rows == 1:
+        starts = [(b0 + b1 - depths[0]) / 2]
+    else:
+        free = (b1 - b0 - sum(depths)) / (rows - 1)
+        starts, at = [], b0
+        for depth in depths:
+            starts.append(at)
+            at += depth + free
+    size = settings.block_size
+    density = min(1.0, density_at(settings, (x0 + x1) / 2, (y0 + y1) / 2) * profile['density'])
+    lots = []
+    for row, (start, depth) in enumerate(zip(starts, depths)):
+        middle = start + depth / 2
+        near = low if middle - b0 <= b1 - middle else high
+        front = near if streets[near] else (high if near == low else low)
+        count = max(1, math.ceil((a1 - a0) / ESTATE_LONGEST))
+        if count == 1 and a1 - a0 > 40 and rng.random() < .35:
+            count = 2
+        gap = rng.uniform(*ESTATE_GAP)
+        for index, (c0, c1) in enumerate(_uneven_cuts(a0, a1, count, gap, rng)):
+            # Slabs stop short of the row's ends at random: open ground between.
+            c0 += rng.uniform(0, 4)
+            c1 -= rng.uniform(0, 4)
+            if c1 - c0 < 14:
+                continue
+            ident = f"lot_{math.floor(c0 / size) if along_x else math.floor(start / size)}_" \
+                    f"{math.floor(start / size) if along_x else math.floor(c0 / size)}_" \
+                    f"{group}_r{row}s{index}"
+            item = stream(settings.seed, ident)
+            if item.random() >= min(1.0, density * ESTATE_FILL):
+                continue                    # An estate is mostly built.
+            ca, cb = (c0 + c1) / 2, middle
+            cx, cy = (ca, cb) if along_x else (cb, ca)
+            frontage = _nearest_edge(streets[front], front, (cx, cy), size)
+            lots.append(_make_lot(settings, ident, item, district, profile,
+                                  (round(cx, 3), round(cy, 3)), round(c1 - c0, 3), round(depth, 3),
+                                  SIDE_ROTATION[front], frontage))
+    # A point tower in the open ground between two rows, facing a street at
+    # one end of it (its approach runs between the rows).
+    if rows == 2:
+        gap0, gap1 = starts[0] + depths[0], starts[1]
+        ends = [side for side in ((("W", "E") if along_x else ("S", "N"))) if streets[side]]
+        if ends and gap1 - gap0 >= ESTATE_TOWER[1] + 2 * ESTATE_OPEN_TOWER:
+            front = rng.choice(ends)
+            across = rng.uniform(*ESTATE_TOWER)
+            deep = rng.uniform(*ESTATE_TOWER)
+            ca = (a0 + a1) / 2 + rng.uniform(-.15, .15) * (a1 - a0)
+            cb = (gap0 + gap1) / 2
+            cx, cy = (ca, cb) if along_x else (cb, ca)
+            ident = f"lot_{math.floor(cx / size)}_{math.floor(cy / size)}_{group}_tower"
+            item = stream(settings.seed, ident)
+            if item.random() < min(1.0, density * ESTATE_FILL):
+                frontage = _nearest_edge(streets[front], front, (cx, cy), size)
+                lots.append(_make_lot(settings, ident, item, district, profile,
+                                      (round(cx, 3), round(cy, 3)), round(across, 3),
+                                      round(deep, 3), SIDE_ROTATION[front], frontage))
     return lots
 
 
@@ -3362,6 +3617,89 @@ def _close_downtown_streets(settings, locations, roads, keep=frozenset(), apart=
             continue
         parent[find(a)] = find(b)
         budget -= 1
+
+
+def _near_terraces(terraces):
+    """Blocks of a terrace, its slopes, and the ring of blocks round them."""
+    cells = set().union(*(terrace_footprint(r) for r in (terraces or {}).get('regions', ())))
+    return {(x + dx, y + dy) for x, y in cells for dx in (-1, 0, 1) for dy in (-1, 0, 1)}
+
+
+def _superblock_district(settings, locations, block, avoid=frozenset()):
+    """The district of ``block`` if it can join a superblock, else None."""
+    if block in avoid:
+        return None
+    size = settings.block_size
+    district = district_at(settings, (block[0] + .5) * size, (block[1] + .5) * size, locations)
+    return district if district.style in SUPERBLOCKS else None
+
+
+def _fits(blocks, longest):
+    xs = [b[0] for b in blocks]
+    ys = [b[1] for b in blocks]
+    span = (max(xs) - min(xs) + 1, max(ys) - min(ys) + 1)
+    a, b = longest
+    return (span[0] <= a and span[1] <= b) or (span[0] <= b and span[1] <= a)
+
+
+def _close_district_streets(settings, locations, roads, keep=frozenset(), apart=frozenset(),
+                            avoid=frozenset(), ends=frozenset()):
+    """Join blocks of one old town, residential, brutalist or industrial
+    district into superblocks by closing the local streets between them.
+
+    Windows of 2 x 2, 2 x 1 and 1 x 2 blocks (within the district's largest
+    group, ``SUPERBLOCKS``) are taken in seeded order, each with the setting
+    times the district's factor as its chance; a window closes every street
+    inside it, or none if the network would come apart. Windows never
+    overlap, cross ``apart`` (a raised highway's line), keep a street in
+    ``keep``, come near a terrace (``avoid``) or close a street at one of
+    ``ends`` (a terrace ramp's or stair's nodes).
+    """
+    share = settings.district_superblocks
+    if share <= 0:
+        return
+    radius = settings.radius
+    owner = {}
+    for x in range(-radius, radius):
+        for y in range(-radius, radius):
+            district = _superblock_district(settings, locations, (x, y), avoid)
+            if district is not None:
+                owner[(x, y)] = district
+    windows = []
+    for (x, y), district in sorted(owner.items()):
+        _, longest, factor = SUPERBLOCKS[district.style]
+        for wx, wy in ((2, 2), (2, 1), (1, 2)):
+            group = [(x + i, y + j) for i in range(wx) for j in range(wy)]
+            if not _fits(group, longest):
+                continue
+            if any(b not in owner or owner[b].id != district.id for b in group):
+                continue
+            inner = _inner_edges(x, y, wx, wy)
+            if any(e in apart or e in keep or roads.get(e, "LOCAL") != "LOCAL" or
+                   set(e) & ends for e in inner):
+                continue
+            if not any(e in roads for e in inner):
+                continue                    # Already one block of streets round it.
+            key = stream(settings.seed, "district_superblocks", x, y, wx, wy).random()
+            windows.append((key, x, y, wx, wy, factor))
+    windows.sort()
+    taken = set()
+    for key, x, y, wx, wy, factor in windows:
+        group = {(x + i, y + j) for i in range(wx) for j in range(wy)}
+        if group & taken or key >= share * factor:
+            continue
+        closed = {e: roads.pop(e) for e in _inner_edges(x, y, wx, wy) if e in roads}
+        ends = {n for e in closed for n in e if any(n in road for road in roads)}
+        if not _all_connected(roads, ends):
+            roads.update(closed)
+            continue
+        taken |= group
+
+
+def _all_connected(roads, nodes):
+    """Whether ``nodes`` are all on one connected piece of ``roads``."""
+    nodes = sorted(nodes)
+    return all(_connected(roads, nodes[0], other) for other in nodes[1:])
 
 
 def _connected(roads, start, goal):

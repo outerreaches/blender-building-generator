@@ -19,7 +19,7 @@
 | v0.20 | Cinemas: palace, twin and multiplex filling their pads, stadium seating with seat markers; cul-de-sacs only among houses; one drive-in per city |
 | v0.21 | Rolling hills: streets graded to their tier's limit, level pads with plinths and cut slopes, retaining curbs, heights in the metadata, a heightmap export |
 | v0.22 | Terraced terrain: a built-up plateau and podiums of whole blocks at the city's edge, walled on some sides and falling naturally into the open ground on two or three others; edge streets along the top; ramps (on viaducts where high) and stairs up to them; retaining walls with parapets |
-| v0.23 | Raised highway: a straight viaduct across the city on piers, the streets passing under it; diamond interchanges whose ramps climb alongside the deck and taper into it; at grade again out in the wasteland. Stairs and walls in every standing building, gutted ones with rubble on the floors, column frames (v0.23.4) |
+| v0.23 | Raised highway: a straight viaduct across the city on piers, the streets passing under it; diamond interchanges whose ramps climb alongside the deck and taper into it; at grade again out in the wasteland. Stairs and walls in every standing building, gutted ones with rubble on the floors, column frames (v0.23.4); superblocks in the old town, residential, brutalist and industrial districts (v0.23.5) |
 
 See [CHANGELOG.md](CHANGELOG.md) for the details.
 

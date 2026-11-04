@@ -46,6 +46,7 @@ The original single-building and bulk operators remain available. Architecture u
 | Interior Ratio | Fraction of enterable buildings that get full interior layouts (default 0.25) |
 | Building Budget | Stable sampling cap on eligible lots; reports when capped |
 | Downtown Superblocks | Share of downtown local streets closed so blocks join into 2 x 1 and 2 x 2 superblocks (default 0.35) |
+| District Superblocks | Chance that blocks of an old town, residential, brutalist or industrial district join into a 2 x 1 or 2 x 2 [superblock](#district-superblocks) (default 0.5; 0 keeps every street and the block-by-block layout) |
 | Small Props | Model benches, gas pumps, lamps, bollards, bins, dumpsters, tables, play equipment, goals, booths, hydrants, cart corrals, tyre stacks and drive-in speaker posts (default on). Off: no meshes for them; the metadata still lists every one for the game to place |
 | Water | Model water in fountains and other basins (default off: they are dry, and the metadata's `water` markers say where the game adds its own) |
 | Metadata Space | Coordinate space of the city metadata: Unity (default) or Blender |
@@ -281,6 +282,34 @@ Each district changes all of the following, not just the material colour:
 | Suburban | Rows along its streets | 85–100% of a 10 m plot | ×1.6, whole blocks | 1 m | ×0.5 | ×1.4 | ×0.3 |
 
 "Footprint" is the fraction of the parcel the shell may occupy; the remainder becomes the yard, plaza or hardstanding. Industrial gets one wide shed per block. Suburbs are built in tracts: a block is built out or left empty (the density times 1.6 is the chance it is built), and a built block is lined with houses along each of its streets, on plots about 10 m wide with 3 m between houses and up to 11 m deep. The rows along the side streets fit between the end rows, and about one plot in ten stays empty. Local street growth multiplies the road-density probability, so downtown is a tighter grid while the industrial and suburban edges have fewer, longer blocks. Corner radii scale the per-tier fillet, which makes suburban bends wider and downtown corners tighter. Damage scales the city setting, so the suburbs stay mostly intact.
+
+### District superblocks
+
+Outside downtown, blocks of one old town, residential, brutalist or
+industrial district join into superblocks, so the districts do not read as
+a regular grid. Windows of 2 x 2, 2 x 1 and 1 x 2 blocks are taken in seeded
+order; each becomes a superblock with the **District Superblocks** chance
+(default 0.5) times the district's factor (old town 1.0, residential 0.9,
+brutalist 1.1, industrial 1.0; industrial joins at most 2 x 1). A window
+closes every local street inside it, or none if the road network would come
+apart; windows never overlap, cross the raised highway's line or come near a
+terrace. Blocks already joined because no street ran between them are laid
+out the same way. Each district lays its superblocks out in its own manner:
+
+- **Old town and residential: perimeter blocks.** Plots line the outside of
+  the joined blocks, each facing the street it stands on, in uneven widths;
+  on a 2 x 2 the inner plots are a courtyard.
+- **Brutalist: estates.** Slab blocks 12-16 m deep stand along each long
+  side, facing its street, with open ground between them (one slab row down
+  the middle of a 2 x 1). Rows longer than 64 m (and some over 40 m) split
+  into slabs with an 8-12 m gap, and slabs stop short of the ends at random.
+  On a 2 x 2 a point tower 16-20 m square stands in the open ground between
+  the rows, facing a street at one end of it. (In a terraced city, where a
+  pad takes the level of the street it faces, brutalist superblocks are
+  perimeter blocks instead.)
+- **Industrial: compounds.** One big shed on the joined blocks.
+
+Lots of a superblock have ids with `_sb_<x>_<y>_<wx><wy>_` in them.
 
 ### Dense downtown
 
@@ -657,7 +686,7 @@ For scale: a radius-8 city with every building detailed has about 490 buildings 
 
 ## Plan data
 
-A JSON text datablock (`<collection>_plan.json`) stores the versioned plan. Coordinates are relative to the collection's stored `origin`; road nodes multiply by `block_size`, while lot positions/dimensions and path points are metres. Schema version 18 adds `highway` to the settings (`RAISED` or `GRADE`), `freeway` to the plan (a raised highway's layout and heights; empty at grade), `deck` to an outer road leaving a raised deck and `freeway` (the interchanges it leaves and rejoins at) to a driving circuit on one. Version 17 grades the wild land round a terraced city with it: `terraces` gains `wild` (blocks of it beyond the map's edge) and its `ground` covers them. Version 16 raised every corner of a terrace's blocks (the streets round its edge run along the top) and keeps terraces in the downtown and residential districts at the city's edge. Version 15 gave a ramp one road class and its junctions' heights along its curved route. Version 14 added each terrace's natural sides: `slopes` (`axis`, downhill `sign`, crest lattice `line`, `cells`) and `corners` (a `cell` joining two slopes, with each slope's `line` and `sign` along `x` and `y`). Version 13 added `plateau_height` and `podiums` to the settings and `terraces` to the plan: `regions` (each terrace's `cells`, `step` and `kind`), `ramps` (lattice `nodes` from the top down and each one's `raises` above the hills), `stairs` (`low` and `high` lattice nodes, `width`) and `ground` (the hills' node heights under the terraces; `heights` are then the road level). Version 12 added `terrain` and `relief` to the settings, `heights` (each lattice node's graded height, where it is not zero) to the plan, and `level` (pad or road height) to every lot, site and stop. Version 11 added `shape` and `irregularity` to the settings. Version 10 added `bulb` to each lot: the cul-de-sac node a house round a turning circle faces (empty for the rest). Those houses are turned to face the circle, so a lot's `rotation` is no longer always a quarter turn. Version 9 added `preset` to the settings (`CITY` or `SMALL_TOWN`). Version 8 added `culdesacs` (turning-circle node and radius). Version 7 added `party_walls` and `group` to each lot (downtown towers built against neighbours). Version 6 added `outer_roads`. Version 5 added `pois` (kind, centre, width along the frontage, depth, rotation, frontage edge, blocks, seed, condition, damage, approach) and `shelters` (position, rotation, variant, road edge); a site's layout is chosen by `sites.compose` from its seed. Version 4 added `kind`, `condition`, `interiors` and `damage` to each lot alongside the version-3 `paths`: one entry per continuous same-tier route with its lattice `nodes`, flattened metre-space `points` and `width`. Locations and lots carry their district `style`; the per-style profile table is code (`STYLE_PROFILE`), not part of the file. No legacy-plan importer is included.
+A JSON text datablock (`<collection>_plan.json`) stores the versioned plan. Coordinates are relative to the collection's stored `origin`; road nodes multiply by `block_size`, while lot positions/dimensions and path points are metres. Schema version 19 adds `district_superblocks` to the settings. Version 18 adds `highway` to the settings (`RAISED` or `GRADE`), `freeway` to the plan (a raised highway's layout and heights; empty at grade), `deck` to an outer road leaving a raised deck and `freeway` (the interchanges it leaves and rejoins at) to a driving circuit on one. Version 17 grades the wild land round a terraced city with it: `terraces` gains `wild` (blocks of it beyond the map's edge) and its `ground` covers them. Version 16 raised every corner of a terrace's blocks (the streets round its edge run along the top) and keeps terraces in the downtown and residential districts at the city's edge. Version 15 gave a ramp one road class and its junctions' heights along its curved route. Version 14 added each terrace's natural sides: `slopes` (`axis`, downhill `sign`, crest lattice `line`, `cells`) and `corners` (a `cell` joining two slopes, with each slope's `line` and `sign` along `x` and `y`). Version 13 added `plateau_height` and `podiums` to the settings and `terraces` to the plan: `regions` (each terrace's `cells`, `step` and `kind`), `ramps` (lattice `nodes` from the top down and each one's `raises` above the hills), `stairs` (`low` and `high` lattice nodes, `width`) and `ground` (the hills' node heights under the terraces; `heights` are then the road level). Version 12 added `terrain` and `relief` to the settings, `heights` (each lattice node's graded height, where it is not zero) to the plan, and `level` (pad or road height) to every lot, site and stop. Version 11 added `shape` and `irregularity` to the settings. Version 10 added `bulb` to each lot: the cul-de-sac node a house round a turning circle faces (empty for the rest). Those houses are turned to face the circle, so a lot's `rotation` is no longer always a quarter turn. Version 9 added `preset` to the settings (`CITY` or `SMALL_TOWN`). Version 8 added `culdesacs` (turning-circle node and radius). Version 7 added `party_walls` and `group` to each lot (downtown towers built against neighbours). Version 6 added `outer_roads`. Version 5 added `pois` (kind, centre, width along the frontage, depth, rotation, frontage edge, blocks, seed, condition, damage, approach) and `shelters` (position, rotation, variant, road edge); a site's layout is chosen by `sites.compose` from its seed. Version 4 added `kind`, `condition`, `interiors` and `damage` to each lot alongside the version-3 `paths`: one entry per continuous same-tier route with its lattice `nodes`, flattened metre-space `points` and `width`. Locations and lots carry their district `style`; the per-style profile table is code (`STYLE_PROFILE`), not part of the file. No legacy-plan importer is included.
 
 ## Code and verification
 
@@ -669,7 +698,7 @@ The project's tests (not yet published here) cover planning, district assignment
 
 See [ROADMAP.md](ROADMAP.md) for what is planned.
 
-1. **Parcels and block structure:** parcels are still axis-aligned sub-cells of a square lattice, so block edges and building rows remain rectilinear even though the streets curve. Downtown blocks are now built out with party-walled towers and superblocks, and the suburbs set houses well back, but L/U/courtyard footprints, curved frontages and irregular block subdivision are the next step.
+1. **Parcels and block structure:** parcels are still axis-aligned sub-cells of a square lattice, so block edges and building rows remain rectilinear even though the streets curve. Downtown blocks are now built out with party-walled towers and superblocks, the other districts join blocks into superblocks of their own, and the suburbs set houses well back, but L/U/courtyard footprints, curved frontages and irregular block subdivision are the next step.
 2. **Vertical routes and terrain:** rail and subway lines, tunnel entrances and an optional river or dried coastline with a port (see ROADMAP "Later"). The raised highway is the only road bridging others; it still runs straight along the lattice.
 3. **Asset variety:** the six archetypes cover massing and roofs, and v0.11 adds the common sites (hospital, schools, stations, malls, parking); a courthouse or city hall, auto repair, an enclosed mall, authored facade kits, rooftop clutter and per-district palettes remain.
 4. **Game delivery:** chunk/LOD export, collision proxies, navigation checks, vehicle swept-clearance tests and connected ruin/vegetation dressing.

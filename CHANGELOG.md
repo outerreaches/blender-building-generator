@@ -1,5 +1,20 @@
 # Changelog
 
+## v0.23.5: District superblocks
+
+- **Less of a grid.** Old town, residential, brutalist and industrial blocks
+  now join into 2 x 1 and 2 x 2 superblocks, as downtown's do: the local
+  streets between them close (the network always stays connected), and
+  blocks that never had a street between them are joined the same way. The
+  new **District Superblocks** setting (default 0.5) is the chance a window
+  of blocks joins; 0 keeps the old block-by-block layout.
+- **Laid out by district.** Old town and residential superblocks are
+  perimeter blocks: plots of uneven widths line the outside, each facing its
+  street, round a courtyard on a 2 x 2. Brutalist ones are estates: long
+  slab blocks along each street with open ground between, and a point
+  tower in it on a 2 x 2. Industrial ones are compounds with one big shed.
+- Plan schema 19 (`district_superblocks` in the settings).
+
 ## v0.23.4: Stairs and walls in every building
 
 - **No more solid floors.** A building without a fitted interior (three in

@@ -33,7 +33,9 @@ sized for the game's 2 m player capsule.
   stairs), curved roads with filleted junctions and
   connected driving circuits, footways and curbs, built-out suburbs with
   houses round their cul-de-sacs, a dense downtown of party-walled towers
-  and superblocks, and a raised highway across the city on piers, with
+  and superblocks, superblocks in the other districts too (perimeter blocks
+  round courtyards, brutalist estates, industrial compounds), and a raised
+  highway across the city on piers, with
   diamond interchanges, coming down to run out into the wasteland. A **Small
   Town** preset builds a rural town instead: an old-town main street, low
   houses round it and only the sites a town has.

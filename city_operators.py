@@ -499,6 +499,11 @@ class MESH_OT_generate_city(bpy.types.Operator):
     downtown_superblocks: FloatProperty(name='Downtown Superblocks', default=.35, min=0, max=1,
                                         description='Share of downtown local streets closed so '
                                                     'blocks join into towers on 2x1 and 2x2 superblocks')
+    district_superblocks: FloatProperty(name='District Superblocks', default=.5, min=0, max=1,
+                                        description='Chance that blocks of an old town, residential, '
+                                                    'brutalist or industrial district join into a 2x1 '
+                                                    'or 2x2 superblock (perimeter rows round a courtyard, '
+                                                    'estate slabs, a compound); 0 keeps every street')
     small_props: BoolProperty(name='Small Props', default=True,
                               description='Model benches, gas pumps, lamps, bollards, bins, dumpsters, tables, '
                                           'play equipment, goals, booths, hydrants and cart corrals. Off: the game '
@@ -533,7 +538,8 @@ class MESH_OT_generate_city(bpy.types.Operator):
             ('Terrain', ('terrain', 'relief', 'plateau_height', 'podiums')),
             ('Density and Access', ('curve_radius', 'core_radius', 'core_density', 'outskirts_density', 'road_density', 'setback', 'sidewalk_width', 'curb_height', 'wasteland', 'highway', 'highway_reach')),
             ('Buildings', ('style', 'damage', 'max_buildings', 'downtown_superblocks',
-                           'points_of_interest', 'small_props', 'water', 'detail')),
+                           'district_superblocks', 'points_of_interest', 'small_props', 'water',
+                           'detail')),
             ('Game Data', ('metadata_space', 'interior_metadata')),
         ):
             group = layout.box()

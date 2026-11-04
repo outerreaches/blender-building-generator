@@ -21,11 +21,12 @@ FINE_GRID = .6          # Slab contouring step where damage cuts through.
 class Building:
     """Result of the pipeline: mesh plus what downstream code needs to know."""
 
-    def __init__(self, mesh, spec, plan, field):
+    def __init__(self, mesh, spec, plan, field, fill_top=None):
         self.mesh = mesh
         self.spec = spec
         self.plan = plan
         self.field = field
+        self.fill_top = fill_top    # Highest point of a rubble fill (None: no fill).
 
     @property
     def damage_min_height(self):
@@ -67,6 +68,14 @@ def build_building(params):
     rng = random.Random((spec.seed * 2246822519) ^ 0x5E11)
     _trim_broken_windows(spec, field)
     _damage_openings(spec, field, params, rng)
+    # The fill is laid out first (same draws as before) so the storeys it
+    # buries lose their stairs, walls and slab openings.
+    fill = MeshData()
+    rubble.interior_fill(fill, rng, spec, field, params)
+    fill_top = None
+    if fill.verts and params.get('interior_fill', 'NONE') in ('FILLED', 'PARTIAL'):
+        fill_top = fill.bounds()[1][2]
+        plan = layouts.above(plan, spec, fill_top)
     mesh = MeshData()
     roof_intact = _roof_intact(spec, field)
     _walls(mesh, spec, field, roof_intact)
@@ -77,7 +86,7 @@ def build_building(params):
     _interiors(mesh, spec, field, plan)
     _terraces(mesh, spec, field, plan)
     _ramps(mesh, spec, field)
-    rubble.interior_fill(mesh, rng, spec, field, params)
+    mesh.extend(fill)
     rubble.exterior_piles(mesh, rng, spec, params)
     for x, y, rx, ry, peak, base in field.debris:
         x, y, rx, ry = _clear_of_party_walls(spec, x, y, rx, ry)
@@ -89,7 +98,9 @@ def build_building(params):
                      base=base - .03 if base > 0 else base)
     if params.get('interior_mound'):
         rubble.interior_mound(mesh, rng, spec)
-    return Building(mesh, spec, plan, field)
+    if params.get('floor_rubble'):
+        rubble.floor_debris(mesh, random.Random((spec.seed * 40503) ^ 0xDEB5), spec, field, plan)
+    return Building(mesh, spec, plan, field, fill_top)
 
 
 def _inside_storey(spec, floor, x, y, rx, ry):
@@ -790,6 +801,10 @@ def _interiors(mesh, spec, field, plan):
             ceiling = level.ceiling
         for wall in level_plan.walls:
             _partition(mesh, field, wall, level.z, ceiling)
+        for x, y, size in level_plan.columns:
+            # A square column is a wall as thick as it is long.
+            _partition(mesh, field, layouts.Wall((x - size / 2, y), (x + size / 2, y), size),
+                       level.z, ceiling)
         if level_plan.stair is not None and not last:
             boxes, *_ = layouts.stair_steps(level_plan.stair, level.height)
             for x0, y0, z0, x1, y1, z1 in boxes:

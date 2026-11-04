@@ -15,7 +15,7 @@ from .streets import (Grading, build_freeway_mesh, build_ground_mesh, build_oute
                       build_stair_mesh, build_street_mesh, build_viaduct_mesh, build_wall_mesh,
                       footprint, freeway_markings, junctions, lot_approach, lot_yard,
                       outer_road_dashes, pavement_height, site_footprint)
-from .styles import STYLE_ITEMS, STYLE_COLORS, building_recipe
+from .styles import NO_STRUCTURE, STYLE_ITEMS, STYLE_COLORS, building_recipe
 from .city_export import store_city_metadata
 from .building_assets import (addon_version, create_rubble, create_shell, create_shelter,
                               create_site, create_site_preview, material)
@@ -627,6 +627,7 @@ class MESH_OT_generate_city(bpy.types.Operator):
                               col, material(f'City_{lot.style}', STYLE_COLORS[lot.style]))
                 obj['condition'] = lot.condition
                 obj['interiors'] = lot.interiors
+                obj['structure'] = 'FITTED' if lot.interiors else params.get('structure', 'NONE')
                 obj.location = (origin.x + lot.center[0], origin.y + lot.center[1],
                                 origin.z + self.curb_height + lot.level)
                 obj.rotation_euler.z = lot.rotation
@@ -644,7 +645,8 @@ class MESH_OT_generate_city(bpy.types.Operator):
                 if height is None:
                     height = (2.2 if lot.condition == 'COLLAPSED'
                               else lot.floors * params['floor_height'])
-                meta.add_lot(lot, obj.name, entrances, height, floors, facts.get('interior'))
+                meta.add_lot(lot, obj.name, entrances, height, floors, facts.get('interior'),
+                             params.get('structure', 'NONE'))
                 context.window_manager.progress_update(index + 1)
             if plan.pois or plan.shelters:
                 build_sites(plan, root, origin, self.detail, self.small_props, meta, self.water,
@@ -689,6 +691,14 @@ class MESH_OT_building_style(bpy.types.Operator):
     seed: IntProperty(name='Seed', default=42)
     damage: FloatProperty(name='Damage', default=.35, min=0, max=1)
     interiors: BoolProperty(name='Interiors', default=False)
+    structure: EnumProperty(
+        name='Structure', description='Stairs and walls of a building without interiors',
+        items=[('AUTO', 'Auto', 'Chosen by the condition and seed'),
+               ('PARTITIONS', 'Partitions', "Stairs and the program's walls"),
+               ('BEARING', 'Bearing Walls', 'Gutted to its cores, corridors and the walls '
+                'between flats, with rubble on the floors'),
+               ('NONE', 'None', 'Empty floors with no stairs')],
+        default='AUTO')
     lobby: EnumProperty(name='Lobby', items=[('AUTO', 'Auto', 'Chosen by the style and seed'),
                                              ('NONE', 'None', ''), ('GRAND', 'Grand Lobby', ''),
                                              ('RETAIL', 'Retail Podium', ''), ('ARCADE', 'Arcade', ''),
@@ -711,6 +721,9 @@ class MESH_OT_building_style(bpy.types.Operator):
             params = building_recipe(self.style, self.width, self.depth, self.floors,
                                      self.seed, self.damage, self.interiors,
                                      self.condition)
+            if (self.structure != 'AUTO' and not self.interiors and
+                    self.condition not in NO_STRUCTURE):
+                params.update(structure=self.structure, floor_rubble=self.structure == 'BEARING')
             if self.lobby != 'AUTO' and self.condition != 'WALL_RING':
                 params['lobby'] = self.lobby
                 if self.lobby != 'NONE':
@@ -724,6 +737,7 @@ class MESH_OT_building_style(bpy.types.Operator):
             obj.data.materials[0] = material(f'City_{self.style}', STYLE_COLORS[self.style])
             obj['architecture_style'] = self.style
             obj['asset_seed'] = self.seed
+            obj['structure'] = 'FITTED' if self.interiors else params.get('structure', 'NONE')
             return {'FINISHED'}
         except Exception as exc:
             remove_generated_collection(collection)

@@ -226,6 +226,7 @@ namespace Ares.CityGen
         public int floors;
         public float damage;
         public bool interiors;
+        public string structure;  // FITTED, PARTITIONS, BEARING (gutted, rubble on the floors) or NONE.
         public string[] party_walls;
         public string group;
         public int seed;

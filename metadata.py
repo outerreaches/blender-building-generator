@@ -232,10 +232,13 @@ class CityMetadata:
 
     # -- collection ------------------------------------------------------
     def add_lot(self, lot, obj_name, entrances=(), height=None, enterable_floors=None,
-                interior=None):
+                interior=None, structure='NONE'):
+        """``structure``: the recipe's (PARTITIONS, BEARING or NONE) for a lot
+        without a fitted interior; a fitted one is listed as FITTED."""
         entry = {'id': lot.id, 'object': obj_name, 'kind': 'building', 'style': lot.style,
                  'district': lot.district, 'condition': lot.condition, 'floors': lot.floors,
                  'damage': _r(lot.damage), 'interiors': lot.interiors,
+                 'structure': 'FITTED' if lot.interiors else structure,
                  'party_walls': list(lot.party_walls), 'group': lot.group or '', 'seed': lot.seed}
         entry.update(self._building(self.lot_transform(lot), lot.width, lot.depth, entrances,
                                     interior, obj_name))

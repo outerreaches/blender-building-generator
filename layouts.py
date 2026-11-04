@@ -73,6 +73,8 @@ class LevelPlan:
     doors: list = field(default_factory=list)      # (room, parent, axis, line, centre, width)
     roots: list = field(default_factory=list)
     issues: list = field(default_factory=list)
+    fallen: list = field(default_factory=list)     # (axis, line, lo, hi): partitions gone (gutted storeys)
+    columns: list = field(default_factory=list)    # (x, y, size): free-standing columns on open floors.
 
 
 @dataclass
@@ -80,6 +82,7 @@ class Plan:
     levels: list
     doors: list = None   # Street doors [(side, centre, width)]; None keeps the spec's.
     notes: list = field(default_factory=list)
+    framed: bool = False  # A column frame carries the open floors (offices, sheds).
 
 
 # -- sizes -------------------------------------------------------------------
@@ -626,8 +629,9 @@ def _ring(tiling, rect, core_rect, kind):
     tiling.add(f'{kind}R', kind, (cx1, cy0, x1, cy1), group=kind)
 
 
-def plan_office(spec, rng, fit_out=True):
-    """Office floors around a central core; the ground floor is a lobby."""
+def plan_office(spec, rng, fit_out=True, layouts=('open', 'cellular', 'mixed')):
+    """Office floors around a central core; the ground floor is a lobby.
+    ``layouts`` are the floor layouts the seed picks from."""
     floors = len(spec.levels)
     elevators = 0 if floors < 4 else 2 if floors < 12 else 3 if floors < 20 else 4
     core = _tower_core(spec, elevators)
@@ -638,7 +642,7 @@ def plan_office(spec, rng, fit_out=True):
     flip = rng.random() < .5
     stair_x = (cx1 - short_side, cx1) if flip else (cx0, cx0 + short_side)
     bank_x = (cx0, cx1 - short_side) if flip else (cx0 + short_side, cx1)
-    style = rng.choice(('open', 'cellular', 'mixed')) if fit_out else 'open'
+    style = rng.choice(layouts) if fit_out else 'open'
     door = _front_door(spec)
     levels = []
     doors = None
@@ -665,7 +669,7 @@ def plan_office(spec, rng, fit_out=True):
         else:
             _ring(tiling, rect, core_rect, 'open')
         levels.append(tiling.level())
-    return Plan(levels, doors)
+    return Plan(levels, doors, framed=True)
 
 
 def _office_ground(tiling, spec, rect, core_rect, door, fit_out):
@@ -682,17 +686,18 @@ def _office_ground(tiling, spec, rect, core_rect, door, fit_out):
     # their own street doors.
     piers = spec.piers(0)['front']
     la, lb = _snap_span(piers, cx0, cx1, 4.0, (door[0] + door[1]) / 2, ends=False) or (cx0, cx1)
-    depths = [p for p in spec.piers(0)['left'] if y0 + 4.0 <= p <= cy0]
+    # The shops stop a corridor short of the core, so a hall runs across its
+    # whole face: every lift and the stair open onto one room.
+    depths = [p for p in spec.piers(0)['left'] if y0 + 4.0 <= p <= cy0 - dims.CORRIDOR]
     if not depths:
         _ring(tiling, rect, core_rect, 'lobby')
         return None
     sy = max(depths)
-    tiling.add('lobbyF', 'lobby', (la, y0, lb, cy0), group='lobby')
+    tiling.add('lobbyF', 'lobby', (la, y0, lb, sy), group='lobby')
+    tiling.add('lobbyM', 'lobby', (x0, sy, x1, cy0), group='lobby')
     tiling.add('lobbyB', 'lobby', (x0, cy1, x1, y1), group='lobby')
-    tiling.add('lobbyL', 'lobby', (x0, sy, la, cy1), group='lobby')
-    tiling.add('lobbyR', 'lobby', (lb, sy, x1, cy1), group='lobby')
-    tiling.add('lobbyC', 'lobby', (la, cy0, cx0, cy1), group='lobby')
-    tiling.add('lobbyD', 'lobby', (cx1, cy0, lb, cy1), group='lobby')
+    tiling.add('lobbyC', 'lobby', (x0, cy0, cx0, cy1), group='lobby')
+    tiling.add('lobbyD', 'lobby', (cx1, cy0, x1, cy1), group='lobby')
     tiling.add('shopL', 'shop', (x0, y0, la, sy), 'lobbyF')
     tiling.add('shopR', 'shop', (lb, y0, x1, sy), 'lobbyF')
     return [('front', (la + lb) / 2, max(door[2], dims.ENTRANCE_WIDTH)),
@@ -779,7 +784,7 @@ def plan_warehouse(spec, rng):
             tiling.add('stair', 'stair', stair_rect, None, wall=dims.CORE_WALL,
                        stair=('y', -1, dims.STAIR_FLIGHT))
         levels.append(tiling.level())
-    return Plan(levels)
+    return Plan(levels, framed=True)
 
 
 def _back_stair(spec, rect, heights, flight):
@@ -1322,21 +1327,42 @@ PLANNERS = {
 # -- planning entry point ----------------------------------------------------
 
 def plan_building(spec, profile=None, rng=None):
-    """Plan every storey of ``spec``. Returns a Plan (no levels: no interior)."""
+    """Plan every storey of ``spec``. Returns a Plan (no levels: no interior).
+
+    A building without a fitted interior (profile NONE) can still have its
+    ``structure`` planned: 'PARTITIONS' builds its program's stairs and walls,
+    'BEARING' only the walls that carry it (see ``gut``), with no fixtures.
+    """
     params = spec.params
     profile = profile or params.get('building_profile', 'NONE')
     rng = rng or random.Random((spec.seed * 1103515245) ^ 0x1A70)
+    structure = params.get('structure', 'NONE') if profile in (None, 'NONE') else 'NONE'
+    if structure != 'NONE':
+        profile = params.get('structure_profile') or 'RESIDENTIAL'
     tower_core = bool(params.get('skyscraper') and spec.has_slabs and
-                      params.get('interior_fill', 'NONE') == 'NONE')
+                      (params.get('interior_fill', 'NONE') == 'NONE' or structure != 'NONE'))
     if not spec.has_slabs and len(spec.levels) > 1:
         return Plan([])
     if tower_core:
-        planner = plan_core_only if profile in (None, 'NONE') else plan_office
+        planner = plan_core_only if profile in (None, 'NONE') or structure == 'BEARING' \
+            else plan_office
     else:
         planner = PLANNERS.get(profile)
     if planner is None:
         return Plan([])
-    plan = planner(spec, rng)
+    if structure == 'PARTITIONS' and planner is plan_office:
+        # Unfitted office floors keep their offices: off a corridor where the
+        # plate allows, else cellular round the core.
+        plan = None if tower_core else plan_civic(spec, rng)
+        if plan is None or not any(room.kind == 'office' for level in plan.levels
+                                   for room in level.rooms):
+            plan = plan_office(spec, rng, layouts=('cellular',))
+    else:
+        plan = planner(spec, rng)
+    if structure == 'BEARING':
+        for level in plan.levels:
+            level.fixtures = []         # Nothing left of the counters and desks.
+            gut(level)
     entrances = _entrance_rooms(spec, plan)
     for level in plan.levels:
         roots = entrances if level.index == 0 else [r.name for r in level.rooms if r.kind == 'stair']
@@ -1356,6 +1382,136 @@ def plan_building(spec, profile=None, rng=None):
                     holes.append(_clear(room, level.rect))
         level.holes = holes
         previous = level
+    if plan.framed:
+        _place_columns(spec, plan)
+    return plan
+
+
+COLUMN_KINDS = ('open', 'lobby', 'plant', 'floor')   # Open floors the frame shows on.
+COLUMN_CLEAR = .6      # Kept clear round rooms that are not open floor (cores, offices).
+COLUMN_DOOR = 1.4      # Kept clear either side of a doorway.
+COLUMN_FACADE = 1.2    # The facade carries the edge: no column this close to it.
+COLUMN_SPAN = 6.0      # Open floors narrower than this span without columns.
+
+
+def _place_columns(spec, plan):
+    """Columns of the frame on a framed building's open floors.
+
+    An open floor deeper than ``COLUMN_SPAN`` gets a row of columns down its
+    middle (more rows on a wide hall) at bays near ``dims.COLUMN_BAY``: the
+    ring round a tower core, an office floor, a shed's hall. Typical storeys
+    share their rooms, so the columns stand over each other. A column keeps
+    clear of cores and closed rooms, walls, doorways, slab openings, fixtures,
+    the facade and the street doors.
+    """
+    size = dims.COLUMN
+    street = plan.doors
+    if street is None:
+        street = [(side, spec.door_centre(side, door), door[2])
+                  for side in ('front', 'back', 'left', 'right') for door in spec.door_bays(side)]
+    for level in plan.levels:
+        clear = []
+        for room in level.rooms:
+            if room.kind not in COLUMN_KINDS:
+                clear.append(_grown(room.rect, COLUMN_CLEAR + size / 2))
+        for wall in level.walls:
+            (ax, ay), (bx, by) = wall.start, wall.end
+            clear.append(_grown((min(ax, bx), min(ay, by), max(ax, bx), max(ay, by)),
+                                wall.thickness / 2 + size / 2 + .3))
+        for _, _, axis, line, centre, width in level.doors:
+            half = width / 2 + size / 2 + .3
+            reach = COLUMN_DOOR + size / 2
+            clear.append((centre - half, line - reach, centre + half, line + reach) if axis == 'x'
+                         else (line - reach, centre - half, line + reach, centre + half))
+        clear += [_grown(hole, .5 + size / 2) for hole in level.holes]
+        clear += [_grown(fixture[:4], .5 + size / 2) for fixture in level.fixtures]
+        rx0, ry0, rx1, ry1 = spec.interior_rect(level.index)
+        if level.index == 0:
+            for side, centre, width in street:
+                half, deep = width / 2 + size / 2 + .5, 3.0 + size / 2
+                clear.append({'front': (centre - half, ry0, centre + half, ry0 + deep),
+                              'back': (centre - half, ry1 - deep, centre + half, ry1),
+                              'left': (rx0, centre - half, rx0 + deep, centre + half),
+                              'right': (rx1 - deep, centre - half, rx1, centre + half)}[side])
+        inner = (rx0 + COLUMN_FACADE, ry0 + COLUMN_FACADE, rx1 - COLUMN_FACADE, ry1 - COLUMN_FACADE)
+        for room in level.rooms:
+            x0, y0, x1, y1 = room.rect
+            if room.kind not in COLUMN_KINDS or min(x1 - x0, y1 - y0) < COLUMN_SPAN:
+                continue
+
+            def centres(lo, hi, span):
+                count = max(1, round((hi - lo) / span))
+                return [lo + (hi - lo) * (k + .5) / count for k in range(count)]
+            along_x = x1 - x0 >= y1 - y0
+            longs = centres(x0, x1, dims.COLUMN_BAY) if along_x else centres(y0, y1, dims.COLUMN_BAY)
+            short = (y0, y1) if along_x else (x0, x1)
+            rows = centres(*short, 2 * dims.COLUMN_BAY)
+            for u in longs:
+                for v in rows:
+                    x, y = (u, v) if along_x else (v, u)
+                    if not (inner[0] <= x <= inner[2] and inner[1] <= y <= inner[3]):
+                        continue
+                    if any(c[0] < x < c[2] and c[1] < y < c[3] for c in clear):
+                        continue
+                    level.columns.append((x, y, size))
+
+
+def _grown(rect, by):
+    return (rect[0] - by, rect[1] - by, rect[2] + by, rect[3] + by)
+
+
+CIRCULATION = ('corridor', 'lobby', 'hall', 'landing')
+
+
+def gut(level):
+    """Strip a storey to the walls that carry it.
+
+    Stair and lift cores keep their walls, and so do the circulation spine
+    (corridors, halls, landings, lobbies), the walls between flats and those
+    of rooms let off a corridor (separate tenancies). Everything else on the
+    storey becomes one open space: the rooms join a group, so no partition is
+    built between them. The shared edges that lose their partition are kept
+    in ``level.fallen`` (where the debris lies).
+    """
+    lookup = {room.name: room for room in level.rooms}
+    before = {room.name: room.group for room in level.rooms}
+    for room in level.rooms:
+        if room.wall >= dims.CORE_WALL - EPS or room.kind in ('stair', 'shaft'):
+            continue
+        if room.unit is not None:
+            room.group = f'unit:{room.unit}'
+        elif room.kind in CIRCULATION:
+            continue
+        elif room.group is None and getattr(lookup.get(room.parent), 'kind', None) == 'corridor':
+            continue
+        else:
+            room.group = 'gutted'
+    for room in level.rooms:
+        parent = lookup.get(room.parent)
+        if parent is not None and room.group is not None and parent.group == room.group:
+            room.parent = None          # Open to it now: no door, no wall.
+    fallen = []
+    for i, a in enumerate(level.rooms):
+        for b in level.rooms[i + 1:]:
+            if a.group is None or a.group != b.group:
+                continue
+            if before[a.name] is not None and before[a.name] == before[b.name]:
+                continue
+            shared = _shared_segment(a.rect, b.rect)
+            if shared is not None:
+                fallen.append(shared)
+    level.fallen = fallen
+
+
+def above(plan, spec, top):
+    """Drop the storeys a rubble fill reaching ``top`` buries; the lowest
+    storey left keeps no opening down into the fill."""
+    kept = [level for level in plan.levels if spec.levels[level.index].z >= top - EPS]
+    if len(kept) == len(plan.levels):
+        return plan
+    if kept:
+        kept[0].holes = []
+    plan.levels = kept
     return plan
 
 

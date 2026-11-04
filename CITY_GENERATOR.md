@@ -344,13 +344,13 @@ minimum damage and the geometry treatment:
 
 | Condition | Treatment |
 | --- | --- |
-| Intact | Clean shell; interior only when the lot is in the interior budget |
+| Intact | Clean shell; a fitted interior when the lot is in the interior budget |
 | Weathered | Fine irregular collapsed top (median-smoothed, slope-limited, no needles); interiors only below the damage line |
 | Semi-collapsed | One of seven collapse archetypes by seed (corner, stepped, shear, cleave, sawtooth, gutted, blowout; see ARCHITECTURE.md). Facades break in diagonals, steps or blast holes, slabs step back along broken edges, debris where the building came down |
-| Rubble-filled | Interior packed solid; a jagged ground-floor breach and a crater expose the fill; no interior layout |
-| Partial-filled | Lower floors packed with rubble, upper floors open; jagged breach and crater; no interior layout |
+| Rubble-filled | Interior packed solid up to the break; a jagged ground-floor breach and a crater expose the fill; storeys above the fill are gutted |
+| Partial-filled | Lower floors packed with rubble, upper floors gutted; jagged breach and crater |
 | Lower floors only | Full damage so the cut lands in the first few storeys; enterable |
-| Shell | No roof; floor slabs exposed; a collapse cut with debris; no interior |
+| Shell | No roof; floor slabs exposed; a collapse cut with debris; gutted |
 | Wall ring | Low perimeter walls (2–4 storeys), no roof or upper slabs, rubble mound inside |
 | Collapsed | No shell; a low faceted rubble mound on the pad |
 
@@ -359,6 +359,28 @@ weathered, semi-collapsed, lower floors) that get a full interior layout. The
 flag is stored per lot in the plan, so a regenerated city is deterministic.
 Rubble-filled, partial-filled, shell, wall-ring and collapsed lots never get
 interiors; the filled states are solid or half-solid by design.
+
+A building without a fitted interior still has its structure: its
+program's stair to every storey (with the opening in each floor above) and
+either its partitions (flats, house rooms, offices off a corridor) or only
+its bearing walls (the stair and lift cores, the corridor spine and the walls
+between flats). Gutted buildings have rubble on the floors: low ridges where
+the partitions came down, heaps against the walls and pieces strewn over each
+room, clear of stairs, doorways, corridors and the space inside street doors.
+Which one is seeded per lot by condition:
+
+| Condition | Partitions | Gutted |
+| --- | --- | --- |
+| Intact | 70% | 30% |
+| Weathered | 50% | 50% |
+| Semi-collapsed, lower floors only | 35% | 65% |
+| Shell; the storeys above a rubble fill | | all |
+| Wall ring, collapsed | (no floors) | |
+
+Storeys a rubble fill buries get no stairs or walls. Offices, towers and sheds
+show their frame either way: rows of columns down the middle of open floors
+deeper than 6 m, about 7.5 m apart. The metadata lists each building's
+`structure` (`FITTED`, `PARTITIONS`, `BEARING` or `NONE`).
 
 Condition weights per district (percent; `CONDITION_WEIGHTS` in `city_plan.py`):
 
@@ -593,7 +615,7 @@ the same way.
 | `driving_loops`, `outer_roads` | The driving circuits; the highways beyond the city edge (start, forward, length, fade) |
 | `freeway` | A raised highway (null at grade): width, interchanges (cross-street node and position), the deck's centreline at road level (`mainline`, every 8 m) and its two `touchdown` ends, each ramp (kind `on` or `off`, interchange, side, width, climb and taper lengths, centreline from the cross street) and the pier feet |
 | `terraces`, `ramps`, `stairs` | Terraced terrain: each terrace's kind (`plateau`, `podium`), rise, lattice blocks on top and `slope_blocks` (its natural sides); each ramp's terrace, lattice nodes from the top down, their positions and `viaducts` (deck ends at road level and pier feet); each stair's terrace, top and foot (the middle of the top and bottom steps' outer edges, at the footways), width, step count and riser. Empty on other terrain |
-| `buildings` | One per lot: object name, style, district, condition, damage, floors, height, interiors, enterable floors, party walls, block group, footprint (position at the base, forward = front, width, depth), and `entrances` (each street door's position, outward forward and width) |
+| `buildings` | One per lot: object name, style, district, condition, damage, floors, height, interiors, `structure` (`FITTED`, `PARTITIONS`, `BEARING` or `NONE`), enterable floors, party walls, block group, footprint (position at the base, forward = front, width, depth), and `entrances` (each street door's position, outward forward and width) |
 | `sites` | Points of interest: grounds object, kind, variant, condition, pad; their buildings with the same fields as above |
 | `rooms` (per building) | Rooms to furnish: name, kind (bedroom, living, kitchen, bath, hall, corridor, lobby, office, open, shop, storage, bar, plant, stair, landing), floor, flat or shop unit, open-plan group, centre of the clear floor, clear width, depth and height, the share of floor still standing and still roofed, `doors` (position, normal into the room, width, height, the room on the other side or `street`), `windows` (sill centre, outward normal, width, sill and head above the floor, broken) and `wall_runs` (blank wall at least 2 m high: start, end, normal into the room) |
 | `lifts` (per building) | One per shaft: centre at its lowest stop, clear size, height, the floors it still serves, a door per floor (position, normal out of the shaft, size) and the `car` at the lowest of them |

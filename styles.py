@@ -33,6 +33,12 @@ STYLE_COLORS = {'DOWNTOWN': (.42, .47, .52, 1), 'OLD_TOWN': (.48, .30, .20, 1),
                 'RESIDENTIAL': (.62, .58, .44, 1), 'BRUTALIST': (.48, .48, .46, 1),
                 'INDUSTRIAL': (.32, .39, .42, 1), 'SUBURBAN': (.66, .55, .42, 1)}
 LOBBIES = ('GRAND', 'RETAIL', 'ARCADE', 'PILOTIS')
+# Odds that a building without a fitted interior keeps its partitions; the
+# rest are gutted to their bearing walls, with rubble on the floors. Shells
+# and the floors above a rubble fill are always gutted; wall rings and
+# collapsed lots have no floors to plan.
+PARTITION_ODDS = {'INTACT': .7, 'WEATHERED': .5, 'SEMI_COLLAPSED': .35, 'LOWER_FLOORS': .35}
+NO_STRUCTURE = ('WALL_RING', 'COLLAPSED')
 
 
 def _pick(rng, weighted):
@@ -141,11 +147,24 @@ def building_recipe(style, width, depth, floors, seed, damage=0, interiors=False
                        flat_roof=False, roof_kind='GABLE', roof_height=2.4,
                        roof_overhang=.5)
     apply_condition(profile, condition, floors, seed)
+    profile.update(structure_profile=INTERIOR_PROFILE.get(style, 'RESIDENTIAL'),
+                   **structure(profile['building_profile'], condition, seed))
     margin = 2 * (profile['wall_thickness'] + .35)
     module = profile['window_width'] + profile['window_spacing']
     profile['windows_per_floor'] = max(1, int(round((width - margin) / module)))
     profile['ground_floor_window_count'] = max(1, int((width - 3) / 3))
     return profile
+
+
+def structure(building_profile, condition, seed):
+    """Stairs and walls of a building without a fitted interior: 'PARTITIONS'
+    (its program's rooms and walls) or 'BEARING' (cores, corridors and the
+    walls between flats, rubble where the rest came down). A fitted interior
+    or a lot with no floors left gets 'NONE'."""
+    if building_profile != 'NONE' or condition in NO_STRUCTURE:
+        return {'structure': 'NONE', 'floor_rubble': False}
+    kept = random.Random(f'structure:{seed}').random() < PARTITION_ODDS.get(condition, 0.0)
+    return {'structure': 'PARTITIONS' if kept else 'BEARING', 'floor_rubble': not kept}
 
 
 def apply_condition(profile, condition, floors, seed):

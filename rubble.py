@@ -168,3 +168,153 @@ def collapsed_lot(mesh, rng, width, depth):
         mound(mesh, rng, rng.uniform(-.24, .24) * width, rng.uniform(-.24, .24) * depth,
               width * scale * rng.uniform(.3, .5), depth * scale * rng.uniform(.3, .5),
               rng.uniform(.5, 1.1), segments=12)
+
+
+# -- gutted floors -----------------------------------------------------------
+
+REACH = 1.16          # A mound's rim jitters out to 1.15 radii.
+DEBRIS_CLEAR = .3     # Kept clear round stairs, shafts, slab openings and walls.
+DOOR_CLEAR = 1.3      # Kept clear either side of a doorway.
+STREET_CLEAR = 2.0    # Kept clear inside a street door.
+RIDGE_STEP = 2.4      # Spacing of the low ridges along a fallen partition.
+SLAB_CLEARANCE = .3   # As shell.SLAB_CLEARANCE: where a slab still stands.
+WALKWAYS = ('corridor', 'hall', 'landing')   # Kept clear of debris.
+FLOOR_HEAPS = 10      # Most heaps and strewn pieces on one floor (big tower
+FLOOR_PIECES = 40     # plates would otherwise carry thousands of faces).
+
+
+def floor_debris(mesh, rng, spec, field, plan):
+    """Rubble on gutted floors: low broken ridges where the partitions came
+    down (``LevelPlan.fallen``), heaps against the walls still standing and
+    broken pieces strewn over each room.
+
+    Stairs, lift shafts, columns, slab openings, doorways, corridors and the
+    space inside street doors stay clear, and no debris lies where the floor
+    has broken away.
+    """
+    for lp in plan.levels:
+        level = spec.levels[lp.index]
+        x0, y0, x1, y1 = spec.interior_rect(lp.index)
+        inner = (x0 + .05, y0 + .05, x1 - .05, y1 - .05)
+        clear = _kept_clear(spec, lp)
+        # Leave the collapse's own debris on this floor alone.
+        clear += [(x - rx * REACH, y - ry * REACH, x + rx * REACH, y + ry * REACH)
+                  for x, y, rx, ry, _, base in field.debris if abs(base - level.z) < .5]
+        placed = []
+
+        def put(cx, cy, rx, ry, peak, segments=8, rings=2):
+            box = (cx - rx * REACH, cy - ry * REACH, cx + rx * REACH, cy + ry * REACH)
+            if not (inner[0] <= box[0] and inner[1] <= box[1] and
+                    box[2] <= inner[2] and box[3] <= inner[3]):
+                return
+            if any(_overlap(box, other) for other in clear + placed):
+                return
+            if field.damaged:
+                points = [(cx, cy)] + [(x, y) for x in (box[0], box[2]) for y in (box[1], box[3])]
+                for x, y in points:
+                    if field.in_blast(x, y, level.z + .3):
+                        return
+                    if lp.index > 0 and field.slab_value(x, y, level.z, SLAB_CLEARANCE) < .2:
+                        return
+            placed.append(box)
+            # Sunk into the slab deeper than the damage debris: the underside
+            # shares no plane with the slab, the partitions or another mound.
+            mound(mesh, rng, cx, cy, rx, ry, peak, segments=segments, rings=rings,
+                  base=level.z - .05)
+            return True
+
+        def strew(cx, cy, radius, height):
+            box = (cx - radius, cy - radius, cx + radius, cy + radius)
+            if not (inner[0] <= box[0] and inner[1] <= box[1] and
+                    box[2] <= inner[2] and box[3] <= inner[3]):
+                return
+            if any(_overlap(box, other) for other in clear + placed):
+                return
+            if field.damaged and (field.in_blast(cx, cy, level.z + .3) or (
+                    lp.index > 0 and field.slab_value(cx, cy, level.z, SLAB_CLEARANCE) < .2)):
+                return
+            placed.append(box)
+            pile(mesh, rng, cx, cy, radius, height, base=level.z - .05)
+            return True
+
+        for axis, line, lo, hi in lp.fallen:
+            count = max(1, int((hi - lo) / RIDGE_STEP))
+            for k in range(count):
+                along, across = rng.uniform(.45, .8), rng.uniform(.28, .42)
+                peak = rng.uniform(.16, .32)
+                u = lo + (k + .5) * (hi - lo) / count + rng.uniform(-.3, .3)
+                off = line + rng.uniform(-.12, .12)
+                if rng.random() < .3:
+                    continue
+                if axis == 'x':
+                    put(u, off, along, across, peak, segments=8, rings=2)
+                else:
+                    put(off, u, across, along, peak, segments=8, rings=2)
+        rooms = [room for room in lp.rooms if room.kind not in ('stair', 'shaft') + WALKWAYS]
+        rng.shuffle(rooms)
+        budget = {'heaps': FLOOR_HEAPS, 'pieces': FLOOR_PIECES}
+        for room in rooms:
+            rx0, ry0, rx1, ry1 = room.rect
+            area = (rx1 - rx0) * (ry1 - ry0)
+            # Heaps against the walls: debris collects where it fell.
+            for _ in range(min(5, 1 + int(area / 22))):
+                size = min(rng.uniform(.6, 1.3), (rx1 - rx0) / 4.5, (ry1 - ry0) / 4.5)
+                rx, ry = size * rng.uniform(.8, 1.2), size * rng.uniform(.8, 1.2)
+                peak = rng.uniform(.35, .8)
+                side = rng.randrange(4)
+                pad_x, pad_y = rx * REACH + .2, ry * REACH + .2
+                if rx1 - rx0 <= 2 * pad_x or ry1 - ry0 <= 2 * pad_y:
+                    continue
+                cx = rng.uniform(rx0 + pad_x, rx1 - pad_x)
+                cy = rng.uniform(ry0 + pad_y, ry1 - pad_y)
+                cx, cy = ((rx0 + pad_x, cy), (rx1 - pad_x, cy),
+                          (cx, ry0 + pad_y), (cx, ry1 - pad_y))[side]
+                if budget['heaps'] > 0 and put(cx, cy, rx, ry, peak):
+                    budget['heaps'] -= 1
+            # Broken pieces strewn over the floor.
+            for _ in range(min(24, int(area / 2.5))):
+                radius = rng.uniform(.14, .34)
+                height = rng.uniform(.08, .26)
+                cx = rng.uniform(rx0 + .3, rx1 - .3)
+                cy = rng.uniform(ry0 + .3, ry1 - .3)
+                if budget['pieces'] > 0 and strew(cx, cy, radius, height):
+                    budget['pieces'] -= 1
+
+
+def _kept_clear(spec, lp):
+    clear = []
+    for room in lp.rooms:
+        if room.kind in ('stair', 'shaft'):
+            clear.append(_grow(room.rect, DEBRIS_CLEAR))
+    for hole in lp.holes:
+        clear.append(_grow(hole, DEBRIS_CLEAR))
+    for x, y, size in lp.columns:
+        clear.append(_grow((x - size / 2, y - size / 2, x + size / 2, y + size / 2), .1))
+    for _, _, axis, line, centre, width in lp.doors:
+        half = width / 2 + .3
+        if axis == 'x':
+            clear.append((centre - half, line - DOOR_CLEAR, centre + half, line + DOOR_CLEAR))
+        else:
+            clear.append((line - DOOR_CLEAR, centre - half, line + DOOR_CLEAR, centre + half))
+    for wall in lp.walls:
+        (ax, ay), (bx, by) = wall.start, wall.end
+        clear.append(_grow((min(ax, bx), min(ay, by), max(ax, bx), max(ay, by)),
+                           wall.thickness / 2 + .05))
+    if lp.index == 0:
+        for side, centre, width in spec.entrances():
+            half = width / 2 + .3
+            clear.append({'front': (centre - half, -1.0, centre + half, STREET_CLEAR),
+                          'back': (centre - half, spec.depth - STREET_CLEAR, centre + half,
+                                   spec.depth + 1.0),
+                          'left': (-1.0, centre - half, STREET_CLEAR, centre + half),
+                          'right': (spec.width - STREET_CLEAR, centre - half, spec.width + 1.0,
+                                    centre + half)}[side])
+    return clear
+
+
+def _grow(rect, by):
+    return (rect[0] - by, rect[1] - by, rect[2] + by, rect[3] + by)
+
+
+def _overlap(a, b):
+    return a[0] < b[2] and b[0] < a[2] and a[1] < b[3] and b[1] < a[3]

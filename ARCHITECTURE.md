@@ -152,7 +152,7 @@ Programs tile each storey with rectangles and name each room's parent:
 | Residential | Double-loaded corridor, stair core, lobby at the street door; flats with hall, bath, kitchen, living room, bedroom. Walk-up plan on small plates |
 | Storefront | Stair hall between two shops with back stores (own street and back doors); flats above |
 | House | Hall and stair; living room, kitchen (back door), WC; bedrooms and bath above |
-| Office | Central core (stair, 0-4 lifts, WC); lobby or retail podium on the ground floor; open plan or perimeter offices above; plant floors |
+| Office | Central core (stair, 0-4 lifts, WC); lobby or retail podium on the ground floor (a hall across the core's face behind the shops); open plan or perimeter offices above; plant floors; columns on open floors |
 | Warehouse | Open hall, office and WC at a front corner, back stair |
 | Bar | Bar room with counter, kitchen behind, private rooms upstairs |
 | Mall | Anchor stores at both ends (sales floor, stock behind), a concourse between them lined with shop units, an entrance hall and a food court; concourse, hall, food court and anchors are one open space |
@@ -169,6 +169,17 @@ one to its best neighbour in the same unit or onto circulation; a unit that
 is a single room may stand alone. Designed street doors never share a facade
 bay; a door with no free span left is dropped. Plans that cannot fit a stair keep only the
 ground floor and say so in `plan.notes` and the object's `plan_notes`.
+
+Without a fitted interior (`building_profile` NONE) a building's `structure`
+is still planned with its style's program (`structure_profile`): `PARTITIONS`
+keeps the rooms, walls and fixtures; `BEARING` drops the fixtures and runs `gut` on
+each storey, which joins every room that is not a core, circulation, part of
+another flat or a tenancy off a corridor into one open group, so no partition
+is built between them, and records the edges that lost one in
+`LevelPlan.fallen` for `rubble.floor_debris`. Storeys a rubble fill buries are
+dropped after the fill is laid out (`layouts.above`). Framed plans (offices,
+sheds) place columns on open floors deeper than `COLUMN_SPAN`, built like
+square partitions so damage clips them.
 
 Furniture, railings, lift doors and cars, and fixtures (counters, reception
 desks) are game assets, so none of them is modelled. `interior.py` lists where

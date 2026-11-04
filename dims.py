@@ -35,6 +35,8 @@ SLAB = .25                # Floor slab thickness.
 ROOF_SLAB = .3
 PARTITION = .15           # Interior wall thickness.
 CORE_WALL = .25           # Stair/elevator core wall thickness.
+COLUMN = .5               # Interior column of a framed building (square).
+COLUMN_BAY = 7.5          # Target column spacing on open floors.
 GROUND_SLAB = .1          # Ground-floor slab, sunk into the foundation.
 
 # Rooms

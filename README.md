@@ -21,7 +21,8 @@ sized for the game's 2 m player capsule.
   warehouses, bars, hotels, malls and cinemas with stadium seating. Every
   room can be reached through a door the player fits, stairs can be climbed
   (stacked flights keep their headroom), and towers get stair-and-lift
-  cores.
+  cores. Buildings without a fit-out still have their stairs and walls,
+  or are gutted to their bearing walls with rubble on the floors.
 - **Damage that holds together.** Nine conditions from intact to collapsed,
   seven collapse archetypes, blast holes, rubble fills and mounds. Broken
   tops keep the window grid. Every wall, slab, partition and stair is a
@@ -148,6 +149,7 @@ a failed run removes its own objects.
 | **Condition** | Intact | Intact, Weathered, Semi Collapsed, Rubble Filled, Partial Filled, Lower Floors, Shell, Wall Ring or Collapsed |
 | **Damage** | 0.35 | How far the damage goes; each condition also sets a minimum |
 | **Interiors** | Off | Full floor plans, for conditions that can be entered |
+| **Structure** | Auto | Without interiors: Partitions (stairs and the program's walls), Bearing Walls (gutted, rubble on the floors) or None (empty floors); Auto picks by condition and seed |
 | **Lobby** | Auto | Override the tower lobby: None, Grand Lobby, Retail Podium, Arcade or Pilotis |
 | **Seed** | 42 | Varies massing, openings and damage |
 

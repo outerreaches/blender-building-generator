@@ -1,5 +1,38 @@
 # Changelog
 
+## v0.23.4: Stairs and walls in every building
+
+- **No more solid floors.** A building without a fitted interior (three in
+  four by the default Interior Ratio) used to get no plan at all: no stairs,
+  no openings in its floors, no walls, so a residential block was a stack of
+  empty, sealed slabs. Every standing building with floors now has its
+  program's stair to each storey, with the opening in the slab above it.
+- **Walls inside, by condition.** Without a fit-out a building keeps either
+  its partitions (flats, offices off a corridor, house rooms) or only its
+  bearing walls: the stair and lift cores, the corridor spine and the walls
+  between flats. The gutted ones have rubble on the floors where the rest
+  came down: low broken ridges along the fallen partitions, heaps against
+  the walls and pieces strewn over each room, kept clear of stairs,
+  doorways, corridors and the space inside street doors. Intact buildings
+  keep their partitions seven times in ten, weathered half the time,
+  semi-collapsed and lower-floors ruins about a third; shells and the floors
+  above a rubble fill are always gutted. Generate Building by Style has a
+  **Structure** option to pick one.
+- **Above the fill.** Rubble-filled and partial-filled buildings now plan
+  the storeys clear of their fill (stairs, walls, rubble); the storeys it
+  buries get none, and no stair opening looks down into it. Towers keep
+  their core above a fill.
+- **Columns.** Offices, towers and sheds show their frame: rows of columns
+  down the middle of open floors deeper than 6 m, about 7.5 m apart, clear
+  of the core, doorways and street doors. Fitted plans get them too.
+- **Retail lobbies.** In a tower with a retail podium the lobby's side bands
+  ran over the core, so the ground-floor stair (and sometimes a lift) had no
+  door. The lobby now runs across the whole face of the core, with the
+  shops a corridor short of it.
+- **Metadata.** Each building lists its `structure`: `FITTED`, `PARTITIONS`,
+  `BEARING` or `NONE` (also on the object); rooms of unfitted buildings are
+  listed like the tower cores were.
+
 ## v0.23.3: Streets whole beside the ramps
 
 - Streets near a raised highway's ramps had holes in their paving (only

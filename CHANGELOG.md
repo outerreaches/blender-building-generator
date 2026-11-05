@@ -1,5 +1,33 @@
 # Changelog
 
+## v0.24.0: Building footprints
+
+- **L, T, U and courtyard buildings.** A building can be made of rectangular
+  wings: an L, a T, a U, or four wings round a courtyard. Old town,
+  residential, brutalist and industrial buildings take a shape that fits
+  their lot (picked by style and seed); downtown towers, houses and
+  party-walled buildings stay rectangular. Some old town, residential and
+  brutalist blocks are now one building over the whole block, rarely a box.
+- **Built like the boxes.** Every edge of the outline is a facade with its
+  windows, doors and weathering; walls meet cleanly at inside corners,
+  floors and roofs leave the notch or court open, cornices and pilasters
+  stop at inside corners, and a long facade has a pier wherever a wing's
+  wall meets it. Damage, collapses, rubble fills and floor debris work on
+  every shape. Every solid stays closed, with no z-fighting.
+- **Interiors across the wings.** A corridor runs along each wing and they
+  join into one network; the stair stands in the main bar's back row, the
+  lobby at the street door, and flats, offices, shops or an open hall fill
+  the wings. A courtyard has a door out from the corridor. Every storey is
+  reached by the stair; partitions meet facades only at piers. Fitted
+  interiors, partitions and gutted structures all apply, and the metadata
+  lists the rooms as for any building.
+- **Metadata.** Each building lists its `footprint` (`RECT`, `L`, `T`, `U`
+  or `O`) and its `wings`; `CityMetadata.cs` has both.
+- Foundations still cover the lot's rectangle (a notch or court is a paved
+  yard at floor level); the v0.25 cross-sections grade round the outline.
+- **Roadmap:** cross-sections move to v0.25, levels to v0.26, the
+  free-flowing freeway to v0.27 and the megacity to v0.28.
+
 ## v0.23.6: Courtyards, estate grounds and uneven plots
 
 - **Yards.** The open ground inside the superblocks is no longer bare.

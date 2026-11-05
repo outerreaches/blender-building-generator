@@ -295,7 +295,7 @@ def _wall_runs(spec, field, lp, level, rect, clear, outer, door_spans, gaps):
                 if f_axis != axis or abs(f_line - line) > .05:
                     continue
                 profile = field.wall_profile(facade.origin, facade.direction, facade.ua, facade.ub,
-                                             side=facade.side)
+                                             side=facade.side, along=facade.along)
                 pieces.append((lo, hi, _above(lambda m: geom2d.interp(profile, to_u(m)),
                                               level.z + WALL_STANDS, lo, hi)))
         else:

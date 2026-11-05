@@ -15,7 +15,7 @@ import math
 import random
 from dataclasses import dataclass, field
 
-from . import dims
+from . import dims, footprint
 from .meshdata import MAT_DOOR_FRAME, MAT_WALLS, MAT_WINDOW_FRAME
 from .solids import Opening
 
@@ -60,6 +60,9 @@ class Facade:
     bays: list = field(default_factory=list)   # Bay boundaries (pier centres) in u.
     openings: list = field(default_factory=list)
     segments: list = field(default_factory=list)  # (ua, ub, top): wall pieces along u.
+    along: float = 0.0     # Where u = 0 falls on its side's damage profile.
+    concave: tuple = (False, False)   # The outline turns in at its start / end.
+    court: bool = False    # Faces into an enclosed courtyard.
 
     def point(self, u):
         return (self.origin[0] + self.direction[0] * u, self.origin[1] + self.direction[1] * u)
@@ -108,6 +111,14 @@ class BuildingSpec:
         # Sides built against a neighbour (row and block buildings): blank and
         # without projecting details wherever the wall stands on the lot line.
         self.party = frozenset(p.get('party_walls', ()) or ())
+        # A non-rectangular footprint: rectangular wings tiling the outline
+        # (footprint.py). One tier, no lobby; see docs/design/footprints.md.
+        wings = [tuple(float(v) for v in w) for w in (p.get('footprint') or ())]
+        self.wings = wings if len(wings) > 1 else [(0.0, 0.0, self.width, self.depth)]
+        self.compound = len(wings) > 1
+        if self.compound:
+            self.party = frozenset()
+            self.lobby = 'NONE'
         self.levels = self._levels()
         self.top = self.levels[-1].ceiling      # Roof surface / eaves.
         self.tiers = self._tiers()
@@ -118,6 +129,7 @@ class BuildingSpec:
         self.base_doors = p.get('doors')
         for index, tier in enumerate(self.tiers):
             tier.facades = self._facades(index, tier)
+        self.interior_rects = (footprint.interior(self.wings, self.t) if self.compound else None)
         self._segment_shared_lines()
         self._place_columns()
         self.build_openings()
@@ -163,6 +175,8 @@ class BuildingSpec:
     def _level_rect(self, level, levels):
         p = self.params
         x0, y0, x1, y1 = 0.0, 0.0, self.width, self.depth
+        if self.compound:
+            return (x0, y0, x1, y1)     # No setbacks, arcades or patios.
         top_index = len(levels) - 1
         if level.index == 0 and self.lobby == 'ARCADE' and len(levels) > 1:
             y0 = float(p.get('arcade_depth', 2.8))
@@ -217,6 +231,8 @@ class BuildingSpec:
 
     # -- facades ---------------------------------------------------------
     def _facades(self, tier_index, tier):
+        if self.compound:
+            return self._outline_facades(tier_index, tier)
         x0, y0, x1, y1 = tier.rect
         t = self.t
         w, d = x1 - x0, y1 - y0
@@ -235,6 +251,75 @@ class BuildingSpec:
                     facade.bays = inherited
             facades.append(facade)
         return facades
+
+    def _outline_facades(self, tier_index, tier):
+        """One facade per edge of a compound outline (several per side, those
+        round a court facing into it)."""
+        facades = []
+        zones = footprint.zones(self.wings, self.t)
+        for edge in footprint.edges(self.wings):
+            ua, ub = footprint.wall_extent(edge, self.t)
+            facade = Facade(edge.side, tier_index, edge.origin, edge.direction, edge.length,
+                            ua, ub, tier.base, tier.top)
+            joints = self._joints(edge, zones)
+            if joints:
+                facade.bays = self._joined_bays(edge.side, edge.length, joints)
+            else:
+                facade.bays = self._bays(edge.side, edge.length,
+                                         fixed=edge.length >= self.width - 1e-6)
+            facade.concave = edge.concave
+            facade.court = edge.court
+            ox, oy = edge.origin
+            facade.along = {'front': ox, 'right': oy, 'back': self.width - ox,
+                            'left': self.depth - oy}[edge.side]
+            facades.append(facade)
+        return facades
+
+    def _joints(self, edge, zones):
+        """Positions (u) along an outline edge where the wall between two
+        planning zones meets it: the facade gets a pier there."""
+        along_x = edge.side in ('front', 'back')
+        nx, ny = edge.normal
+        line = (edge.origin[1] - ny * self.t) if along_x else (edge.origin[0] - nx * self.t)
+        axis = 0 if along_x else 1
+        start = edge.origin[axis]
+        sign = edge.direction[axis]
+        margin = self.t + .35 + 1.0
+        found = set()
+        for zone in zones:
+            x0, y0, x1, y1 = zone.rect
+            touches = (abs(y0 - line) < 1e-6 or abs(y1 - line) < 1e-6) if along_x else \
+                (abs(x0 - line) < 1e-6 or abs(x1 - line) < 1e-6)
+            if not touches:
+                continue
+            for value in ((x0, x1) if along_x else (y0, y1)):
+                u = (value - start) * sign
+                if margin < u < edge.length - margin:
+                    found.add(round(u, 6))
+        return sorted(found)
+
+    def _joined_bays(self, side, length, joints):
+        """Bays laid out segment by segment between joints, a pier at each."""
+        margin = self.t + .35
+        module = self._module()
+        cuts = [0.0] + list(joints) + [length]
+        bays = []
+        for index, (a, b) in enumerate(zip(cuts, cuts[1:])):
+            lo = a + (margin if index == 0 else 0.0)
+            hi = b - (margin if index == len(cuts) - 2 else 0.0)
+            usable = hi - lo
+            if usable <= 1e-6:
+                continue
+            fit = max(1, int((usable + 1e-6) // max(1.0, self._window_size()[0] + dims.MIN_PIER)))
+            count = max(1, min(fit, int(round(usable / module))))
+            for k in range(count + 1):
+                value = lo + usable * k / count
+                if not bays or value - bays[-1] > 1e-6:
+                    bays.append(value)
+        return bays
+
+    def facades_on(self, side, tier=0):
+        return [f for f in self.tiers[tier].facades if f.side == side]
 
     def _segment_shared_lines(self):
         """Stop a terrace parapet where the storey above continues the same wall.
@@ -293,8 +378,10 @@ class BuildingSpec:
         width = self._window_size()[0]
         return width + max(float(p.get('window_spacing', .8)), dims.MIN_PIER)
 
-    def _bays(self, side, length):
-        """Bay boundaries across a facade, symmetric about its middle."""
+    def _bays(self, side, length, fixed=True):
+        """Bay boundaries across a facade, symmetric about its middle.
+        ``fixed`` lets ``windows_per_floor`` set the count on the front and back
+        (a compound outline's shorter facades take the module instead)."""
         p = self.params
         margin = self.t + .35
         usable = length - 2 * margin
@@ -302,7 +389,7 @@ class BuildingSpec:
             return [length / 2 - .5, length / 2 + .5] if length > 1.2 else [0.0, length]
         module = self._module()
         fit = max(1, int((usable + 1e-6) // max(1.0, self._window_size()[0] + dims.MIN_PIER)))
-        if side in ('front', 'back') and p.get('windows_per_floor'):
+        if side in ('front', 'back') and fixed and p.get('windows_per_floor'):
             count = int(p['windows_per_floor'])
         else:
             count = max(1, int(round(usable / module)))
@@ -445,7 +532,8 @@ class BuildingSpec:
             return .15, clear, widest, glazed
         if mode == 'OPEN' and windowed:
             return self._upper_glazing(facade, level)
-        if mode in ('STOREFRONT', 'STOREFRONT_WIDE') and facade.side == 'front':
+        if mode in ('STOREFRONT', 'STOREFRONT_WIDE') and facade.side == 'front' and (
+                not self.compound or facade is self.ground_facade('front')):
             sill = float(p.get('storefront_sill_height', .3))
             head = min(clear, sill + float(p.get('storefront_window_height', 2.2)))
             if mode == 'STOREFRONT_WIDE':
@@ -475,6 +563,8 @@ class BuildingSpec:
                 side, centre, width = item[:3]
                 if side != facade.side:
                     continue
+                if self.compound and self._facade_at(side, centre, item) is not facade:
+                    continue            # The door is on another facade of this side.
                 offset = facade.point(0)[axis]
                 u = abs(centre - offset)
                 door = self._door_bays(facade, u / facade.length, width,
@@ -482,6 +572,8 @@ class BuildingSpec:
                 if door is not None:
                     taken.update(range(door[0], door[1] + 1))
                 result.append(door)
+        elif level.index == 0 and self.compound and facade is not self.ground_facade(facade.side):
+            pass                    # Street and back doors are on the main facades.
         elif level.index == 0:
             width = float(p.get('door_width', 1.2))
             height = float(p.get('door_height', 2.4))
@@ -571,6 +663,19 @@ class BuildingSpec:
         t = self.t
         return (x0 + t, y0 + t, x1 - t, y1 - t)
 
+    def outline_holes(self):
+        """What a compound building's slabs leave out of ``interior_rect``: the
+        notch or court and the walls round it (rectangles); none for a box."""
+        if not self.compound:
+            return []
+        if getattr(self, '_outline_holes', None) is None:
+            self._outline_holes = footprint.complement(self.interior_rect(0), self.interior_rects)
+        return self._outline_holes
+
+    def interior_parts(self, level_index):
+        """The storey's floor inside its walls as rectangles."""
+        return list(self.interior_rects) if self.compound else [self.interior_rect(level_index)]
+
     def tier_of(self, level_index):
         for index, tier in enumerate(self.tiers):
             if tier.first <= level_index <= tier.last:
@@ -583,16 +688,23 @@ class BuildingSpec:
         Returns {side: [positions]}: x positions on front/back, y on left/right.
         """
         tier = self.tiers[self.tier_of(level_index)]
-        level = self.levels[level_index]
         result = {}
         for facade in tier.facades:
-            axis = 0 if facade.side in ('front', 'back') else 1
-            # A pier swallowed by a wide opening (a two-bay door) is no pier.
-            spans = [(o.u0, o.u1) for o in facade.openings
-                     if level.z - 1e-6 <= min(z for _, z in o.bottom) < level.ceiling]
-            result[facade.side] = sorted(facade.point(u)[axis] for u in facade.bays
-                                         if not any(a - .05 < u < b + .05 for a, b in spans))
+            if self.compound and facade is not self.ground_facade(facade.side):
+                continue            # A compound outline's main facades (zones see all).
+            result[facade.side] = self.facade_piers(level_index, facade)
         return result
+
+    def facade_piers(self, level_index, facade):
+        """Building coordinates along ``facade`` (x on front/back, y on the
+        sides) where a partition may meet it on a storey."""
+        level = self.levels[level_index]
+        axis = 0 if facade.side in ('front', 'back') else 1
+        # A pier swallowed by a wide opening (a two-bay door) is no pier.
+        spans = [(o.u0, o.u1) for o in facade.openings
+                 if level.z - 1e-6 <= min(z for _, z in o.bottom) < level.ceiling]
+        return sorted(facade.point(u)[axis] for u in facade.bays
+                      if not any(a - .05 < u < b + .05 for a, b in spans))
 
     def solid_spans(self, side, levels=None):
         """Stretches of a tier-0 facade free of openings on every given storey.
@@ -606,7 +718,8 @@ class BuildingSpec:
         # Every tier's openings on this side count: upper tiers (arcades,
         # setbacks, patios) have their own facades.
         for tier in self.tiers:
-            other = next(f for f in tier.facades if f.side == side)
+            other = (facade if self.compound else
+                     next(f for f in tier.facades if f.side == side))
             for opening in other.openings:
                 z = min(v for _, v in opening.bottom)
                 level = next((lv for lv in self.levels if lv.z - 1e-6 <= z < lv.ceiling), None)
@@ -628,7 +741,29 @@ class BuildingSpec:
         return spans
 
     def ground_facade(self, side):
-        return next(f for f in self.tiers[0].facades if f.side == side)
+        """The side's main facade: the only one on a box; on a compound
+        outline the longest (the outermost of equals)."""
+        if not self.compound:
+            return next(f for f in self.tiers[0].facades if f.side == side)
+        return max(self.facades_on(side), key=lambda f: (round(f.length, 6), -self._depth_in(f)))
+
+    def _depth_in(self, facade):
+        """How far in from the bounding rectangle's side a facade stands."""
+        ox, oy = facade.origin
+        return {'front': oy, 'right': self.width - ox, 'back': self.depth - oy,
+                'left': ox}[facade.side]
+
+    def _facade_at(self, side, centre, item=()):
+        """The facade of ``side`` whose extent holds ``centre`` (a coordinate
+        along it); an explicit facade index (``item[4]``) wins; else the main."""
+        options = self.facades_on(side)
+        if len(item) > 4 and item[4] is not None and 0 <= item[4] < len(options):
+            return options[item[4]]
+        axis = 0 if side in ('front', 'back') else 1
+        main = self.ground_facade(side)
+        holding = [f for f in options if min(f.point(0)[axis], f.point(f.length)[axis]) - 1e-6 <=
+                   centre <= max(f.point(0)[axis], f.point(f.length)[axis]) + 1e-6]
+        return main if main in holding or not holding else holding[0]
 
     def door_bays(self, side):
         """Default ground doors on a side: [(first_bay, last_bay, width, height, kind)]."""

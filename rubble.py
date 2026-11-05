@@ -96,10 +96,29 @@ def _fill_rect(spec, tier):
     return (x0 + inset, y0 + inset, x1 - inset, y1 - inset)
 
 
+def _outline_fill(mesh, spec, height):
+    """A compound building's fill: one solid over its interior region, kept
+    off the walls (a level top)."""
+    inset = .03
+    x0, y0, x1, y1 = spec.interior_rect(0)
+    rect = (x0 + inset, y0 + inset, x1 - inset, y1 - inset)
+    holes = [(h[0] - inset, h[1] - inset, h[2] + inset, h[3] + inset) for h in spec.outline_holes()]
+    holes = [(max(rect[0], h[0]), max(rect[1], h[1]), min(rect[2], h[2]), min(rect[3], h[3]))
+             for h in holes]
+    holes = [h for h in holes if h[2] - h[0] > 1e-3 and h[3] - h[1] > 1e-3]
+    xs = sorted({rect[0], rect[2]} | {v for h in holes for v in (h[0], h[2])})
+    ys = sorted({rect[1], rect[3]} | {v for h in holes for v in (h[1], h[3])})
+    solids.slab_solid(mesh, xs, ys, 0.0, height, lambda x, y: 1.0, MAT_RUBBLE, holes)
+
+
 def _tiered_fill(mesh, rng, spec, height, cap=None):
     """Fill up to ``height`` inside each tier's own walls: a podium's fill
     stops in the slab under the set-back tower, which carries on narrower.
     With ``cap``, the top piece gets a tilted, uneven surface."""
+    if spec.compound:
+        if height > .3:
+            _outline_fill(mesh, spec, height)
+        return
     tiers = spec.tiers
     for index, tier in enumerate(tiers):
         base = 0.0 if index == 0 else spec.levels[tier.first].z - spec.slab / 2
@@ -149,7 +168,7 @@ def corner_mound(mesh, rng, spec, corner):
 
 def interior_mound(mesh, rng, spec):
     """Mound inside a standing wall ring, visible from above."""
-    x0, y0, x1, y1 = spec.interior_rect(0)
+    x0, y0, x1, y1 = max(spec.interior_parts(0), key=lambda r: (r[2] - r[0]) * (r[3] - r[1]))
     peak = min(spec.top * .55, rng.uniform(1.8, 3.6))
     # The rim jitters out to 1.15 radii: keep it inside the walls.
     mound(mesh, rng, (x0 + x1) / 2, (y0 + y1) / 2, max(1.5, (x1 - x0) / 2 / 1.16 - .3),
@@ -194,8 +213,8 @@ def floor_debris(mesh, rng, spec, field, plan):
     """
     for lp in plan.levels:
         level = spec.levels[lp.index]
-        x0, y0, x1, y1 = spec.interior_rect(lp.index)
-        inner = (x0 + .05, y0 + .05, x1 - .05, y1 - .05)
+        parts = [(r[0] + .05, r[1] + .05, r[2] - .05, r[3] - .05)
+                 for r in spec.interior_parts(lp.index)]
         clear = _kept_clear(spec, lp)
         # Leave the collapse's own debris on this floor alone.
         clear += [(x - rx * REACH, y - ry * REACH, x + rx * REACH, y + ry * REACH)
@@ -204,8 +223,7 @@ def floor_debris(mesh, rng, spec, field, plan):
 
         def put(cx, cy, rx, ry, peak, segments=8, rings=2):
             box = (cx - rx * REACH, cy - ry * REACH, cx + rx * REACH, cy + ry * REACH)
-            if not (inner[0] <= box[0] and inner[1] <= box[1] and
-                    box[2] <= inner[2] and box[3] <= inner[3]):
+            if not _within(box, parts):
                 return
             if any(_overlap(box, other) for other in clear + placed):
                 return
@@ -225,8 +243,7 @@ def floor_debris(mesh, rng, spec, field, plan):
 
         def strew(cx, cy, radius, height):
             box = (cx - radius, cy - radius, cx + radius, cy + radius)
-            if not (inner[0] <= box[0] and inner[1] <= box[1] and
-                    box[2] <= inner[2] and box[3] <= inner[3]):
+            if not _within(box, parts):
                 return
             if any(_overlap(box, other) for other in clear + placed):
                 return
@@ -310,6 +327,11 @@ def _kept_clear(spec, lp):
                           'right': (spec.width - STREET_CLEAR, centre - half, spec.width + 1.0,
                                     centre + half)}[side])
     return clear
+
+
+def _within(box, parts):
+    return any(p[0] <= box[0] and p[1] <= box[1] and box[2] <= p[2] and box[3] <= p[3]
+               for p in parts)
 
 
 def _grow(rect, by):

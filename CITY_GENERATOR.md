@@ -329,6 +329,39 @@ each yard and its markers are listed in the metadata (`yards`).
 Ordinary blocks (outside superblocks) also cut their 2 x 2 plots at uneven
 widths (0.7-1.3 of the average), so no two blocks repeat the same grid.
 
+### Building footprints
+
+Buildings are not all boxes. A building's footprint can be made of
+rectangular wings (`footprint` in the recipe; design note
+[docs/design/footprints.md](docs/design/footprints.md)):
+
+| Shape | Wings | Styles |
+| --- | --- | --- |
+| L | a main bar along the street and a wing at the back, flush with one side | residential, old town, brutalist, industrial |
+| T | a wing off the middle of the bar's back | brutalist |
+| U | a wing at each end of the bar's back | residential, old town, brutalist, industrial |
+| O | front and back bars and two side wings round a courtyard | residential, old town |
+
+- **Where.** A shape is picked by style and seed on a lot that fits it (an L
+  from 22 m on its least side, a T from 26, a U from 28, a courtyard from
+  32; wings 11-13 m wide for flats, 12-15 brutalist, 14-20 industrial).
+  Lots that small stay rectangular, and so do downtown towers, houses and
+  anything built against a party wall. Some old town (35%), residential
+  (30%) and brutalist (35%) blocks are built as one building over the whole
+  block (lot ids ending `_blk`), which is rarely a plain box.
+- **Shell.** Every edge of the outline is a facade (a courtyard's face into
+  it); walls meet at inside corners without overlapping; floors and the flat
+  roof leave the notch or court open; cornices and pilasters stop short of
+  inside corners; a long facade has a pier wherever a wing's wall meets it.
+- **Interiors.** A corridor runs along each wing and they join up: a spine
+  along the bar, a branch up each wing carried through the bar's row to the
+  spine. The stair stands in the main bar's back row, the lobby at the
+  street door; flats, offices, shops (old town) or an open hall (sheds) fill
+  the rows. A courtyard is reached from the corridor through a door in its
+  court facade. Fitted interiors, partitions and gutted structures all
+  apply. Foundations still cover the lot's rectangle, so a notch or a court
+  is a paved yard at floor level.
+
 ### Dense downtown
 
 Downtown blocks are built out to a building line 0.5 m behind the footway and
@@ -662,7 +695,7 @@ the same way.
 | `driving_loops`, `outer_roads` | The driving circuits; the highways beyond the city edge (start, forward, length, fade) |
 | `freeway` | A raised highway (null at grade): width, interchanges (cross-street node and position), the deck's centreline at road level (`mainline`, every 8 m) and its two `touchdown` ends, each ramp (kind `on` or `off`, interchange, side, width, climb and taper lengths, centreline from the cross street) and the pier feet |
 | `terraces`, `ramps`, `stairs` | Terraced terrain: each terrace's kind (`plateau`, `podium`), rise, lattice blocks on top and `slope_blocks` (its natural sides); each ramp's terrace, lattice nodes from the top down, their positions and `viaducts` (deck ends at road level and pier feet); each stair's terrace, top and foot (the middle of the top and bottom steps' outer edges, at the footways), width, step count and riser. Empty on other terrain |
-| `buildings` | One per lot: object name, style, district, condition, damage, floors, height, interiors, `structure` (`FITTED`, `PARTITIONS`, `BEARING` or `NONE`), enterable floors, party walls, block group, footprint (position at the base, forward = front, width, depth), and `entrances` (each street door's position, outward forward and width) |
+| `buildings` | One per lot: object name, style, district, condition, damage, floors, height, interiors, `structure` (`FITTED`, `PARTITIONS`, `BEARING` or `NONE`), `footprint` (`RECT`, `L`, `T`, `U` or `O`) and `wings` (two opposite ground corners per wing, building space), enterable floors, party walls, block group, footprint (position at the base, forward = front, width, depth), and `entrances` (each street door's position, outward forward and width) |
 | `sites` | Points of interest: grounds object, kind, variant, condition, pad; their buildings with the same fields as above |
 | `yards` | Courtyards and estate grounds: grounds object, kind (`COURTYARD` or `GROUNDS`), variant, district, seed, pad centre and size; their trees, benches, lamps and play equipment are markers whose `site` is the yard's id |
 | `rooms` (per building) | Rooms to furnish: name, kind (bedroom, living, kitchen, bath, hall, corridor, lobby, office, open, shop, storage, bar, plant, stair, landing), floor, flat or shop unit, open-plan group, centre of the clear floor, clear width, depth and height, the share of floor still standing and still roofed, `doors` (position, normal into the room, width, height, the room on the other side or `street`), `windows` (sill centre, outward normal, width, sill and head above the floor, broken) and `wall_runs` (blank wall at least 2 m high: start, end, normal into the room) |

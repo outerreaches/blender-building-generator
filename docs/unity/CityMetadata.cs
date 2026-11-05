@@ -228,6 +228,8 @@ namespace Ares.CityGen
         public float damage;
         public bool interiors;
         public string structure;  // FITTED, PARTITIONS, BEARING (gutted, rubble on the floors) or NONE.
+        public string footprint;  // RECT, L, T, U or O (courtyard).
+        public float[] wings;     // Two opposite ground corners (x, y, z) per wing, building space.
         public string[] party_walls;
         public string group;
         public int seed;

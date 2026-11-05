@@ -107,7 +107,10 @@ def _inside_storey(spec, floor, x, y, rx, ry):
     """Debris on an upper floor stays inside that storey's walls rather than
     hanging out of a blast hole (or past a set-back tower's facade)."""
     level = min(spec.levels, key=lambda lv: abs(lv.z - floor))
-    x0, y0, x1, y1 = spec.interior_rect(level.index)
+    # In the interior rectangle it falls in, or the nearest (a compound
+    # footprint's notch or court is outside).
+    x0, y0, x1, y1 = min(spec.interior_parts(level.index), key=lambda r: (
+        max(r[0] - x, 0.0, x - r[2]) + max(r[1] - y, 0.0, y - r[3]), -(r[2] - r[0]) * (r[3] - r[1])))
     reach = 1.16           # rubble.mound jitters its rim out to 1.15 radii.
     rx = min(rx, (x1 - x0) / 2 / reach)
     ry = min(ry, (y1 - y0) / 2 / reach)
@@ -160,7 +163,7 @@ def _trim_broken_windows(spec, field):
     for tier in spec.tiers:
         for facade in tier.facades:
             profile = field.wall_profile(facade.origin, facade.direction, facade.ua, facade.ub,
-                                         side=facade.side)
+                                         side=facade.side, along=facade.along)
             spans = sorted((o.u0, o.u1) for o in facade.openings)
             kept, notched = [], []
             for opening in facade.openings:
@@ -423,7 +426,7 @@ def _walls(mesh, spec, field, roof_intact):
     for tier in spec.tiers:
         for facade in tier.facades:
             profile = field.wall_profile(facade.origin, facade.direction, facade.ua, facade.ub,
-                                         side=facade.side)
+                                         side=facade.side, along=facade.along)
             for ua, ub, height in facade.segments:
                 top = [(ua, height), (ub, height)]
                 if gable and tier is spec.tiers[-1] and facade.side in ('left', 'right'):
@@ -491,7 +494,7 @@ def _slabs(mesh, spec, field, plan):
     for level in spec.levels:
         if level.index == 0:
             rect = spec.interior_rect(0)
-            slab(mesh, field, rect, -dims.GROUND_SLAB, 0.0, clearance=-10.0)
+            slab(mesh, field, rect, -dims.GROUND_SLAB, 0.0, spec.outline_holes(), clearance=-10.0)
             continue
         if not spec.has_slabs:
             continue
@@ -505,6 +508,7 @@ def _slabs(mesh, spec, field, plan):
                   if index == level.index]
         holes += [tuple(ramp['rect']) for ramp in spec.params.get('ramps', ()) or ()
                   if ramp['level'] + 1 == level.index]
+        holes += spec.outline_holes()
         slab(mesh, field, rect, level.z - spec.slab, level.z, holes)
 
 
@@ -521,8 +525,8 @@ def _roof(mesh, spec, field, intact, params):
     top = spec.top
     if spec.roof_kind in ('FLAT', 'GABLE', 'HIP', 'MANSARD'):
         # Flat roof slab, or the ceiling under a pitched roof.
-        slab(mesh, field, rect, top - spec.roof_slab, top, material=MAT_ROOF if spec.roof_kind == 'FLAT'
-             else MAT_FLOOR, clearance=0.0)
+        slab(mesh, field, rect, top - spec.roof_slab, top, spec.outline_holes(),
+             material=MAT_ROOF if spec.roof_kind == 'FLAT' else MAT_FLOOR, clearance=0.0)
     if not intact:
         return
     if spec.roof_kind == 'GABLE':
@@ -534,7 +538,7 @@ def _roof(mesh, spec, field, intact, params):
     box = params.get('roof_box')
     if box and spec.roof_kind == 'FLAT':
         fw, fd, height = box
-        x0, y0, x1, y1 = tier.rect
+        x0, y0, x1, y1 = spec.wings[0] if spec.compound else tier.rect
         w, d = (x1 - x0) * fw, (y1 - y0) * fd
         cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
         solids.box(mesh, cx - w / 2, cy - d / 2, top, cx + w / 2, cy + d / 2, top + height, MAT_WALLS)
@@ -602,7 +606,7 @@ def _facade_details(mesh, spec, field, params):
 
 def _profile_min(facade, field, u0, u1, tier_top):
     profile = field.wall_profile(facade.origin, facade.direction, facade.ua, facade.ub,
-                                 side=facade.side)
+                                 side=facade.side, along=facade.along)
     interp = geom2d.interp
     samples = [interp(profile, u0 + (u1 - u0) * k / 4) for k in range(5)]
     samples += [z for u, z in profile if u0 <= u <= u1]
@@ -621,7 +625,10 @@ def _pilasters(mesh, spec, field, tier, params):
             continue
         positions = set()
         if style in ('CORNERS', 'CORNERS_CENTER', 'FULL'):
-            positions.update((width / 2, facade.length - width / 2))
+            # (None in a concave corner: the two would overlap there.)
+            positions.update(u for u, inner in ((width / 2, facade.concave[0]),
+                                                (facade.length - width / 2, facade.concave[1]))
+                             if not inner)
         if style in ('CORNERS_CENTER', 'FULL'):
             positions.add(facade.length / 2)
         if style in ('BETWEEN_WINDOWS', 'FULL'):
@@ -658,11 +665,17 @@ def _cornices(mesh, spec, field):
             if spec.is_party(facade, tier):
                 continue
             profile = field.wall_profile(facade.origin, facade.direction, 0.0, facade.length,
-                                         side=facade.side)
+                                         side=facade.side, along=facade.along)
             if facade.side in turns:
                 start, end = turns[facade.side]
                 ends = (0.0 if start in spec.party else -depth,
                         facade.length + (0.0 if end in spec.party else depth))
+                # Into a concave corner the side's band carries on to the
+                # corner: this one stops its own depth short of it.
+                if facade.concave[0]:
+                    ends = (depth, ends[1])
+                if facade.concave[1]:
+                    ends = (ends[0], facade.length - depth)
             else:
                 ends = (0.0, facade.length)
             for a, b in _intact_runs(profile, ends, z1):

@@ -1343,6 +1343,11 @@ def plan_building(spec, profile=None, rng=None):
                       (params.get('interior_fill', 'NONE') == 'NONE' or structure != 'NONE'))
     if not spec.has_slabs and len(spec.levels) > 1:
         return Plan([])
+    if getattr(spec, 'compound', False) and profile not in (None, 'NONE'):
+        from . import compound
+        program = profile if profile in compound.PROGRAMS else 'RESIDENTIAL'
+        plan = compound.plan_compound(spec, rng, program)
+        return _finish_plan(spec, plan, structure)
     if tower_core:
         planner = plan_core_only if profile in (None, 'NONE') or structure == 'BEARING' \
             else plan_office
@@ -1359,6 +1364,12 @@ def plan_building(spec, profile=None, rng=None):
             plan = plan_office(spec, rng, layouts=('cellular',))
     else:
         plan = planner(spec, rng)
+    return _finish_plan(spec, plan, structure)
+
+
+def _finish_plan(spec, plan, structure):
+    """Gut, resolve, derive walls, doors and stairs, then slab openings and
+    columns, for every storey of a program's plan."""
     if structure == 'BEARING':
         for level in plan.levels:
             level.fixtures = []         # Nothing left of the counters and desks.
@@ -1529,9 +1540,17 @@ def _entrance_rooms(spec, plan):
                 doors.append((side, spec.door_centre(side, door), door[2]))
     x0, y0, x1, y1 = ground.rect
     names = []
-    for side, centre, _ in doors:
+    for door in doors:
+        side, centre = door[0], door[1]
         point = {'front': (centre, y0 + .01), 'back': (centre, y1 - .01),
                  'left': (x0 + .01, centre), 'right': (x1 - .01, centre)}[side]
+        if getattr(spec, 'compound', False):
+            # Just inside the facade the door is on.
+            facade = spec._facade_at(side, centre, door)
+            nx, ny = facade.normal
+            line = facade.origin[1] if side in ('front', 'back') else facade.origin[0]
+            inner = line - (ny if side in ('front', 'back') else nx) * (spec.t + .01)
+            point = (centre, inner) if side in ('front', 'back') else (inner, centre)
         room = room_at(ground, *point)
         if room is not None and room.name not in names:
             names.append(room.name)

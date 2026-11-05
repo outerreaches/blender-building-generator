@@ -233,9 +233,10 @@ class CityMetadata:
 
     # -- collection ------------------------------------------------------
     def add_lot(self, lot, obj_name, entrances=(), height=None, enterable_floors=None,
-                interior=None, structure='NONE'):
+                interior=None, structure='NONE', footprint=('RECT', None)):
         """``structure``: the recipe's (PARTITIONS, BEARING or NONE) for a lot
-        without a fitted interior; a fitted one is listed as FITTED."""
+        without a fitted interior; a fitted one is listed as FITTED.
+        ``footprint``: the recipe's (shape, wings in building coordinates)."""
         entry = {'id': lot.id, 'object': obj_name, 'kind': 'building', 'style': lot.style,
                  'district': lot.district, 'condition': lot.condition, 'floors': lot.floors,
                  'damage': _r(lot.damage), 'interiors': lot.interiors,
@@ -243,6 +244,12 @@ class CityMetadata:
                  'party_walls': list(lot.party_walls), 'group': lot.group or '', 'seed': lot.seed}
         entry.update(self._building(self.lot_transform(lot), lot.width, lot.depth, entrances,
                                     interior, obj_name))
+        shape, wings = footprint
+        entry['footprint'] = shape
+        # Two opposite corners of each wing at ground level, in building space.
+        entry['wings'] = _flat(self.space.local((x - lot.width / 2, y - lot.depth / 2, 0.0))
+                               for wing in (wings or ((0.0, 0.0, lot.width, lot.depth),))
+                               for x, y in ((wing[0], wing[1]), (wing[2], wing[3])))
         entry['height'] = _r(height or 0.0)
         entry['enterable_floors'] = int(enterable_floors or 0)
         self.buildings.append(entry)

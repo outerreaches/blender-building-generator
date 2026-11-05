@@ -36,6 +36,17 @@ LOBBIES = ('GRAND', 'RETAIL', 'ARCADE', 'PILOTIS')
 # A pilotis storey is recessed about 3 m all round: on a narrower building no
 # stair would fit inside it, so its upper floors could not be reached.
 PILOTIS_LEAST = 14.5
+# Footprint shapes by style (weights; footprint.wings_for), the width of the
+# wings off the main bar, and the least lot side for a shape (smaller lots
+# stay rectangular). Downtown towers and houses are rectangles.
+SHAPES = {'RESIDENTIAL': {'RECT': 4.5, 'L': 2.5, 'U': 1.5, 'O': 1.5},
+          'OLD_TOWN': {'RECT': 4.5, 'L': 3.0, 'U': 1.0, 'O': 1.5},
+          'BRUTALIST': {'RECT': 4.0, 'L': 2.0, 'T': 2.5, 'U': 1.5},
+          'INDUSTRIAL': {'RECT': 6.0, 'L': 3.0, 'U': 1.0}}
+ARMS = {'RESIDENTIAL': (11.0, 13.0), 'OLD_TOWN': (10.0, 12.5), 'BRUTALIST': (12.0, 15.0),
+        'INDUSTRIAL': (14.0, 20.0)}
+SHAPE_LEAST = {'L': 22.0, 'T': 26.0, 'U': 28.0, 'O': 32.0}
+BIG, BIG_BOX = 30.0, .15     # Lots this big take a plain box this much less often.
 # Odds that a building without a fitted interior keeps its partitions; the
 # rest are gutted to their bearing walls, with rubble on the floors. Shells
 # and the floors above a rubble fill are always gutted; wall rings and
@@ -53,10 +64,49 @@ def _pick(rng, weighted):
     return weighted[-1][0]
 
 
+def _footprint_module():
+    try:
+        from . import footprint
+    except ImportError:         # Loaded on its own (tests): the sibling file.
+        import importlib.util
+        import os
+        path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'footprint.py')
+        spec = importlib.util.spec_from_file_location('footprint', path)
+        footprint = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(footprint)
+    return footprint
+
+
+def footprint_for(style, width, depth, seed, party_walls=(), shape=None):
+    """(shape, wings) of a district building's footprint: a seeded shape by
+    style that fits the lot (``shape`` forces one), else a rectangle."""
+    footprint = _footprint_module()
+    rng = random.Random(f'footprint:{style}:{seed}')
+    weights = SHAPES.get(style)
+    if shape is None:
+        if not weights or party_walls:
+            return 'RECT', None
+        # A building over a whole block is rarely a plain box.
+        fitting = [(name, w * (BIG_BOX if name == 'RECT' and min(width, depth) >= BIG else 1.0))
+                   for name, w in weights.items()
+                   if name == 'RECT' or min(width, depth) >= SHAPE_LEAST[name]]
+        shape = _pick(rng, fitting)
+    if shape == 'RECT':
+        return 'RECT', None
+    low, high = ARMS.get(style, (11.0, 13.0))
+    arm = rng.uniform(low, high)
+    main = arm + rng.uniform(0.0, 2.0)
+    wings = footprint.wings_for(shape, width, depth, arm, main, mirror=rng.random() < .5)
+    if len(wings) < 2:
+        return 'RECT', None
+    return shape, [tuple(round(v, 3) for v in w) for w in wings]
+
+
 def building_recipe(style, width, depth, floors, seed, damage=0, interiors=False,
-                    condition='INTACT', party_walls=()):
+                    condition='INTACT', party_walls=(), shape=None):
     """Generator parameters for a district building. ``party_walls`` lists the
-    sides (front/back/left/right) built against a neighbour."""
+    sides (front/back/left/right) built against a neighbour; ``shape`` forces
+    a footprint shape (RECT, L, T, U or O; by default chosen by style)."""
     if style not in STYLE_COLORS:
         raise ValueError(f'Unknown building style: {style}')
     rng = random.Random((seed * 69069) ^ zlib.crc32(style.encode()) ^ 0x57E1)
@@ -153,6 +203,11 @@ def building_recipe(style, width, depth, floors, seed, damage=0, interiors=False
     apply_condition(profile, condition, floors, seed)
     profile.update(structure_profile=INTERIOR_PROFILE.get(style, 'RESIDENTIAL'),
                    **structure(profile['building_profile'], condition, seed))
+    kind, wings = footprint_for(style, width, depth, seed, party_walls, shape)
+    profile['footprint_shape'] = kind
+    if wings:
+        # One tier, flat-roofed: no lobby, setbacks or patio on a compound.
+        profile.update(footprint=wings, lobby='NONE', setbacks=[], has_patio=False)
     margin = 2 * (profile['wall_thickness'] + .35)
     module = profile['window_width'] + profile['window_spacing']
     profile['windows_per_floor'] = max(1, int(round((width - margin) / module)))

@@ -143,6 +143,18 @@ party-walled downtown towers in every condition.
 
 The ground storey never breaks (`min_height`), so entrances stay usable.
 
+## Compound footprints
+
+`params['footprint']` lists rectangular wings tiling a non-rectangular
+outline (`footprint.py`: `edges`, `wall_extent`, `interior`, `zones`). The
+spec traces the outline into facades (several per side, `court` ones facing
+a courtyard, `concave` ends at inside corners, `along` placing each on its
+side's damage profile) and keeps one tier. Slabs, roof and fills cover the
+interior region (`interior_rects`), cutting `outline_holes` out of the
+bounding rectangle. `compound.plan_compound` plans the wings' zones with
+joined corridors (see the design note); the plan then goes through the same
+resolve, structure, holes and columns steps as any other.
+
 ## Interiors
 
 Programs tile each storey with rectangles and name each room's parent:

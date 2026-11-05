@@ -186,14 +186,18 @@ class BreakField:
                                    max(z_lo, blast.z0), min(z_hi, blast.z1)))
         return result
 
-    def wall_profile(self, origin, direction, ua, ub, side=None):
+    def wall_profile(self, origin, direction, ua, ub, side=None, along=0.0):
         """Top of an exterior wall along its outer line, as [(u, z)].
 
         ``side`` names the facade (front/right/back/left) whose ragged
-        profile applies; u is measured from that facade's start corner.
+        profile applies; u is measured from that facade's start corner, which
+        stands ``along`` from the start of its side's profile (facades of a
+        non-rectangular footprint share their side's weathering line).
         """
         if side is not None and self.ragged is not None:
-            profile = self._clip(self.ragged[side], ua, ub)
+            profile = self._clip(self.ragged[side], ua + along, ub + along)
+            if along:
+                profile = [(u - along, z) for u, z in profile]
         else:
             profile = [(ua, self.top), (ub, self.top)]
         for crater in self.craters:

@@ -45,6 +45,10 @@ SUPERBLOCKS = {'OLD_TOWN': ('PERIMETER', (2, 2), 1.0),
                'RESIDENTIAL': ('PERIMETER', (2, 2), .9),
                'BRUTALIST': ('ESTATE', (2, 2), 1.1),
                'INDUSTRIAL': ('COMPOUND', (2, 1), 1.0)}
+# Ordinary blocks built as one building over the whole block, by style (the
+# recipe gives it an L, U or courtyard footprint); the block's least side.
+BLOCK_BUILDINGS = {'RESIDENTIAL': .3, 'OLD_TOWN': .35, 'BRUTALIST': .35}
+BLOCK_LEAST = 28.0
 ESTATE_SLAB = (12.0, 16.0)   # Depth of an estate's slab blocks.
 ESTATE_OPEN = 14.0           # Least open ground between an estate's two rows.
 ESTATE_FILL = 1.6            # A slab stands with the district density times this.
@@ -2540,6 +2544,28 @@ def _place_lots(settings, locations, roads, reserved=frozenset(), culdesacs=(), 
                     lots.append(_make_lot(settings, ident, rng, district, profile, center,
                                           width, depth, SIDE_ROTATION[side], borders[side]))
                 continue
+            chance = BLOCK_BUILDINGS.get(district.style, 0.0)
+            if chance and stream(settings.seed, "block_building", x, y).random() < chance and \
+                    min(high_x - low_x, high_y - low_y) >= BLOCK_LEAST:
+                # One building over the whole block (an L round the corner, a U,
+                # a courtyard block), facing its best street.
+                sides = [side for side in "SNWE" if borders[side] in roads and
+                         roads[borders[side]] != "HIGHWAY" and borders[side] not in walled]
+                cx, cy = (low_x + high_x) / 2, (low_y + high_y) / 2
+                density = min(1.0, density_at(settings, cx, cy) * profile['density'])
+                if sides and stream(settings.seed, "block_density", x, y).random() <= density:
+                    side = min(sides, key=lambda k: (ROAD_RANK[roads[borders[k]]], "SNWE".index(k)))
+                    sx, sy = high_x - low_x, high_y - low_y
+                    box = _corners((cx, cy), sx, sy, 0.0)
+                    if _clear_of_bulbs(box, bulbs) and all(_apart(box, ring, BULB_GAP)
+                                                           for ring in ring_corners):
+                        ident = f"lot_{x}_{y}_blk"
+                        width, depth = (sy, sx) if side in "WE" else (sx, sy)
+                        lots.append(_make_lot(settings, ident, stream(settings.seed, ident),
+                                              district, profile, (round(cx, 3), round(cy, 3)),
+                                              round(width, 3), round(depth, 3),
+                                              SIDE_ROTATION[side], borders[side]))
+                        continue
             cells = profile['parcels']
             # Plots of uneven widths: blocks do not repeat one 2 x 2 grid.
             cuts = stream(settings.seed, "parcel_cuts", x, y)

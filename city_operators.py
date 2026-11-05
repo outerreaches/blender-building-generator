@@ -672,6 +672,7 @@ class MESH_OT_generate_city(bpy.types.Operator):
                 obj['condition'] = lot.condition
                 obj['interiors'] = lot.interiors
                 obj['structure'] = 'FITTED' if lot.interiors else params.get('structure', 'NONE')
+                obj['footprint_shape'] = params.get('footprint_shape', 'RECT')
                 obj.location = (origin.x + lot.center[0], origin.y + lot.center[1],
                                 origin.z + self.curb_height + lot.level)
                 obj.rotation_euler.z = lot.rotation
@@ -690,7 +691,8 @@ class MESH_OT_generate_city(bpy.types.Operator):
                     height = (2.2 if lot.condition == 'COLLAPSED'
                               else lot.floors * params['floor_height'])
                 meta.add_lot(lot, obj.name, entrances, height, floors, facts.get('interior'),
-                             params.get('structure', 'NONE'))
+                             params.get('structure', 'NONE'),
+                             (params.get('footprint_shape', 'RECT'), params.get('footprint')))
                 context.window_manager.progress_update(index + 1)
             if plan.pois or plan.shelters:
                 build_sites(plan, root, origin, self.detail, self.small_props, meta, self.water,

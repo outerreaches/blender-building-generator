@@ -17,6 +17,8 @@ sized for the game's 2 m player capsule.
 - **Six district styles.** Downtown towers (lobbies, retail podiums,
   arcades, pilotis, setbacks, crowns), old town, residential and brutalist
   blocks, industrial sheds and suburban houses.
+- **Not just boxes.** L, T, U and courtyard buildings made of wings, whole
+  blocks built as one building, corridors running along every wing.
 - **Real interiors.** Floor plans for apartments, shops, offices, houses,
   warehouses, bars, hotels, malls and cinemas with stadium seating. Every
   room can be reached through a door the player fits, stairs can be climbed

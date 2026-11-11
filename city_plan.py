@@ -10,7 +10,7 @@ import json
 import math
 import random
 
-VERSION = 20
+VERSION = 21
 ROAD_WIDTHS = {"HIGHWAY": 20.0, "ARTERIAL": 12.0, "COLLECTOR": 8.0, "LOCAL": 6.0}
 ROAD_RANK = {name: i for i, name in enumerate(ROAD_WIDTHS)}
 # Corner radius at a route bend, before the curve_radius multiplier and clamping.
@@ -263,6 +263,7 @@ class CitySettings:
     relief: float = 30.0               # Hills: metres from the lowest to the highest.
     plateau_height: float = 9.0        # Terraced: the plateau's rise (0: none).
     podiums: int = 1                   # Terraced: low podiums of a few blocks.
+    rural_streets: str = "AUTO"        # Shoulders and ditches: ON, OFF, or AUTO (on hills).
 
     def validate(self):
         for name, lo, hi in (("radius", 2, 25), ("primary_count", 1, 16),
@@ -295,6 +296,8 @@ class CitySettings:
             raise ValueError("Unknown terrain")
         if self.highway not in HIGHWAYS:
             raise ValueError("Unknown highway")
+        if self.rural_streets not in RURAL_STREETS:
+            raise ValueError("Unknown rural streets setting")
 
 
 @dataclass(frozen=True)
@@ -407,6 +410,8 @@ class CityPlan:
     # 'mainline': [[x, z]], 'touchdown': [x west, x east], 'ramps': [...]}.
     freeway: dict = field(default_factory=dict)
     yards: list = field(default_factory=list)        # Yard: courtyards and estate grounds.
+    wild: int = 0         # Blocks of graded wild land round the map (``heights`` reach into it).
+    rural: list = field(default_factory=list)   # [[a, b]] streets with shoulders and ditches.
 
     def to_json(self):
         return json.dumps({"version": VERSION, **asdict(self)}, sort_keys=True, indent=2)
@@ -417,7 +422,7 @@ class CityPlan:
         heights = {(x, y): z for x, y, z in self.heights}
         if self.terraces:
             return RoadSurface(self.settings, heights, self.roads, self.terraces)
-        return Surface(self.settings, heights)
+        return Surface(self.settings, heights, self.wild)
 
     def ground_surface(self):
         """Natural ground level (before pads): the road-level surface on hills;
@@ -432,10 +437,11 @@ def edge(a, b):
 
 
 # Terrain. FLAT keeps every height at zero. ROLLING lifts the lattice nodes on
-# smooth seeded hills (``relief`` metres from the lowest to the highest), held
-# at zero along the map's edge so the wasteland and the highways leaving the
-# city stay level. The nodes are then graded: no street is steeper than its
-# tier allows and site blocks are level. Between the nodes the ground is a
+# smooth seeded hills (``relief`` metres from the lowest to the highest), which
+# carry on into WILD_CELLS blocks of wild land round the map and level off
+# there into the flat far wasteland; the highway leaves through them, graded
+# as a highway. The nodes are then graded: no street is steeper than its tier
+# allows and site blocks are level. Between the nodes the ground is a
 # smoothstep blend of the block's four corners (``Surface``), so a street's
 # profile eases out flat at both junctions and is at most SMOOTHSTEP_PEAK times
 # steeper than the straight grade between them.
@@ -446,14 +452,16 @@ OPEN_GRADE = .12         # Lattice edges without a street.
 SITE_DROP = .25          # Most a site block's corners may differ (m).
 TERRAIN_WAVE = 7.0       # Blocks per noise cell of the hills (first octave).
 TERRAIN_EDGE = 2.0       # Blocks over which the hills fade to the level edge.
-# Terraced cities stand in hilly wild land: WILD_CELLS blocks of it round the
-# map, fading to level over its last WILD_FADE blocks (then the flat far
-# wasteland); a highway leaves along a level valley floor. A terrace is a
-# bench on the lower flank of a hill: beyond its natural sides the land
-# rises on past the terrace's top to a crest, then falls away. HILL_KNOTS:
-# (blocks from the terrace's top, share of its rise), straight between.
+# Cities on terrain stand in hilly wild land: WILD_CELLS blocks of it round
+# the map, fading to level over its last WILD_FADE blocks (then the flat far
+# wasteland); a terraced city's highway leaves along a level valley floor.
+# A terrace is a bench on the lower flank of a hill: beyond its natural sides
+# the land rises on past the terrace's top to a crest, then falls away.
+# HILL_KNOTS: (blocks from the terrace's top, share of its rise), straight
+# between.
 WILD_CELLS = 20
 WILD_FADE = 4.0
+WILD_EASE = 2.0          # Blocks past the map over which ROLLING hills turn from smoothsteps to a spline.
 HILL_KNOTS = ((0.0, 1.0), (1.0, 1.2), (3.0, 1.6), (8.0, 0.0))
 
 
@@ -466,14 +474,26 @@ def hill_rise(blocks):
 SMOOTHSTEP_PEAK = 1.5    # Steepest slope of a smoothstep over its mean slope.
 
 
+def _catmull_rom(t):
+    """Weights of four evenly spaced values for a Catmull-Rom spline at t in [0, 1]
+    between the middle two."""
+    t2, t3 = t * t, t * t * t
+    return ((-t3 + 2 * t2 - t) / 2, (3 * t3 - 5 * t2 + 2) / 2,
+            (-3 * t3 + 4 * t2 + t) / 2, (t3 - t2) / 2)
+
+
 class Surface:
     """Road-level height of the graded city above the flat city (metres):
-    the node heights blended across each block with smoothsteps; zero off the
-    lattice and everywhere on a flat city."""
+    the node heights blended across each block with smoothsteps (so a
+    street's profile eases out flat at its junctions); in the ``wild`` blocks
+    of wild land round the map a smooth spline through them instead (the
+    smoothsteps would step every hillside at each lattice line), eased in
+    over WILD_EASE blocks. Zero off the lattice and on a flat city."""
 
-    def __init__(self, settings, heights):
+    def __init__(self, settings, heights, wild=0):
         self.size = settings.block_size
-        self.radius = settings.radius
+        self.city = settings.radius
+        self.radius = settings.radius + wild
         self.heights = heights
 
     def __call__(self, x, y):
@@ -486,8 +506,16 @@ class Surface:
         fu, fv = u - i, v - j
         su, sv = fu * fu * (3 - 2 * fu), fv * fv * (3 - 2 * fv)
         h = self.heights
-        return ((h.get((i, j), 0.0) * (1 - su) + h.get((i + 1, j), 0.0) * su) * (1 - sv) +
-                (h.get((i, j + 1), 0.0) * (1 - su) + h.get((i + 1, j + 1), 0.0) * su) * sv)
+        blend = ((h.get((i, j), 0.0) * (1 - su) + h.get((i + 1, j), 0.0) * su) * (1 - sv) +
+                 (h.get((i, j + 1), 0.0) * (1 - su) + h.get((i + 1, j + 1), 0.0) * su) * sv)
+        beyond = max(abs(u), abs(v)) - self.city
+        if beyond <= 0:
+            return blend
+        wu, wv = _catmull_rom(fu), _catmull_rom(fv)
+        spline = sum(wu[a] * wv[b] * h.get((i - 1 + a, j - 1 + b), 0.0)
+                     for a in range(4) for b in range(4))
+        t = min(1.0, beyond / WILD_EASE)
+        return blend + (spline - blend) * t * t * (3 - 2 * t)
 
 
 def _terrain_heights(settings, extra=0):
@@ -1333,7 +1361,7 @@ def _wild_land(settings, terraces):
                 rise = region['step'] * hill_rise(distance)
                 if rise > targets.get(node, 0.0):
                     targets[node] = rise
-    pins = {(x, y) for x in range(-reach, reach + 1) for y in (-1, 0, 1) if abs(x) >= radius}
+    pins = _valley(settings)
     free = set()
     for region in terraces.get('regions', ()):
         tops = {n for c in region['cells'] for n in _cell_corners(tuple(c))}
@@ -1343,6 +1371,22 @@ def _wild_land(settings, terraces):
                     if (key[0] in tops) != (key[1] in tops):
                         free.add(key)
     return targets, pins, free
+
+
+def _valley(settings):
+    """Nodes pinned level beyond the map's edge: a terraced city's highway
+    leaves along a valley floor across the wild land."""
+    radius, reach = settings.radius, settings.radius + WILD_CELLS
+    return {(x, y) for x in range(-reach, reach + 1) for y in (-1, 0, 1) if abs(x) >= radius}
+
+
+def _wild_highway(settings):
+    """Lattice edges a ROLLING city's highway runs along across the wild
+    land: it is graded as a highway there, through the hills (in cuttings
+    and on embankments, ``streets.Grading``)."""
+    radius, reach = settings.radius, settings.radius + WILD_CELLS
+    return {edge((x, 0), (x + 1, 0)): 'HIGHWAY' for x in range(-reach, reach)
+            if x >= radius or x + 1 <= -radius}
 
 
 def _terrace_raises(terraces):
@@ -1702,6 +1746,47 @@ def density_at(settings, x, y):
 # In a small town the centre's district (its old-town main street) reaches
 # less far than the others.
 TOWN_CENTRE_WEIGHT = 1.7
+
+
+# Cross-sections: streets in the suburbs and on the outskirts (and in a small
+# town, out of its old town) have a gravel shoulder flush with the road and a
+# ditch beyond it instead of a curb and footway (``streets.ditches``), as the
+# ``rural_streets`` setting says.
+RURAL_STREETS = ('AUTO', 'ON', 'OFF')   # AUTO: on Rolling Hills (a flat city stays as it was).
+RURAL_STYLES = {'CITY': ('SUBURBAN', 'INDUSTRIAL'),
+                'SMALL_TOWN': ('SUBURBAN', 'INDUSTRIAL', 'RESIDENTIAL')}
+RURAL_TIERS = ('LOCAL', 'COLLECTOR')
+
+
+def _rural_streets(settings, locations, roads, terraces):
+    """Lattice edges of the streets with a rural section: local and collector
+    streets whose blocks either side are in rural districts, out past the
+    city's edge or off the map (none on a terraced city, whose footways meet
+    its retaining walls; with ``rural_streets`` AUTO, none on a flat one)."""
+    mode = settings.rural_streets
+    if terraces or mode == 'OFF' or (mode == 'AUTO' and settings.terrain == 'FLAT'):
+        return []
+    size, radius = settings.block_size, settings.radius
+    styles = RURAL_STYLES.get(settings.preset, RURAL_STYLES['CITY'])
+
+    def rural_block(bx, by):
+        if max(bx, by) >= radius or min(bx, by) < -radius:
+            return True
+        x, y = (bx + .5) * size, (by + .5) * size
+        if not in_city(settings, x, y):
+            return True
+        return district_at(settings, x, y, locations).style in styles
+    found = []
+    for (a, b), tier in sorted(roads.items()):
+        if tier not in RURAL_TIERS:
+            continue
+        if a[1] == b[1]:
+            blocks = ((min(a[0], b[0]), a[1] - 1), (min(a[0], b[0]), a[1]))
+        else:
+            blocks = ((a[0] - 1, min(a[1], b[1])), (a[0], min(a[1], b[1])))
+        if all(rural_block(*block) for block in blocks):
+            found.append([list(a), list(b)])
+    return found
 
 
 def district_at(settings, x, y, locations):
@@ -2125,6 +2210,7 @@ def generate_city(settings=CitySettings()):
                      {loc.node for loc in locations}, guard['avoid'])
         ramps = freeway_ramps(settings, layout, roads)
     road_list = [Road(a, b, tier) for (a, b), tier in sorted(roads.items())]
+    rural = _rural_streets(settings, locations, roads, terraces)
     paths = _build_paths(settings, roads, locations, ramp_bends(terraces))
     decks = ramps if raised else None
     pois = (_place_pois(settings, locations, roads, paths, culdesacs, terraces, decks)
@@ -2146,14 +2232,14 @@ def generate_city(settings=CitySettings()):
     if settings.terrain != 'FLAT':
         flat = [edge(tuple(a), tuple(b)) for ramp in terraces.get('ramps', ())
                 for a, b in zip(ramp['nodes'], ramp['nodes'][1:])]
-        wild = {}
+        wild, beyond = dict(extra=WILD_CELLS), _wild_highway(settings)
         if terraces:
             targets, pins, free = _wild_land(settings, terraces)
-            wild = dict(extra=WILD_CELLS, targets=targets, pins=pins, free=free)
+            wild, beyond = dict(extra=WILD_CELLS, targets=targets, pins=pins, free=free), {}
         # Under a raised highway the ground is graded as for one at grade.
-        graded = {**roads, **{key: 'HIGHWAY' for key in corridor}}
+        graded = {**roads, **{key: 'HIGHWAY' for key in corridor}, **beyond}
         heights = _grade(settings, graded, pois, flat, _terrace_benches(terraces), **wild)
-        surface = Surface(settings, heights)
+        surface = Surface(settings, heights, WILD_CELLS)
 
         def front_point(item):
             # The middle of the front (the pad's street side).
@@ -2234,7 +2320,7 @@ def generate_city(settings=CitySettings()):
     return CityPlan(settings, locations, road_list, paths, lots, eligible, driving_loops,
                     pois, shelters, outer, culdesacs,
                     [[x, y, z] for (x, y), z in sorted(heights.items())], terraces, freeway,
-                    yards)
+                    yards, WILD_CELLS if heights else 0, rural)
 
 
 # Suburban cul-de-sacs: a short street from the network to an inner lattice
@@ -3481,7 +3567,10 @@ def _freeway_geometry(settings, ramps, ground, street, crossings=()):
     count = int(min(far, extent + 1200) / FREEWAY_STEP)
     xs = [k * FREEWAY_STEP for k in range(-count, count + 1)]
     lateral = (-FREEWAY_HALF - 1, -FREEWAY_HALF / 2, 0.0, FREEWAY_HALF / 2, FREEWAY_HALF + 1)
-    below = [max(max(ground(x, y), street(x, y)) for y in lateral) for x in xs]
+    # (Beyond the city: the highway's own level, which the ground meets in
+    # cuttings and on embankments.)
+    below = [max(max(ground(x, y), street(x, y)) for y in lateral) if abs(x) <= extent
+             else street(x, 0.0) for x in xs]
     need = [z + FREEWAY_CLEAR if abs(x) <= extent else z for x, z in zip(xs, below)]
     deck = [max(n - FREEWAY_GRADE * abs(x - x2) for x2, n in zip(xs, need)) for x in xs]
     # Crests and sags rounded off (vertical curves): the profile widened by

@@ -39,6 +39,8 @@ namespace Ares.CityGen
         public Ramp[] ramps;
         public Stair[] stairs;
         public Freeway freeway;         // A raised highway (null when it runs at grade).
+        public Ditch[] ditches;         // Along the rural streets, beyond their gravel shoulders.
+        public Culvert[] culverts;      // Where each ditch ends (two per ditch).
         public Building[] buildings;
         public Site[] sites;
         public Yard[] yards;
@@ -76,6 +78,8 @@ namespace Ares.CityGen
         public bool water_modelled;     // False: basins are dry; fill them from "water" markers.
         public string terrain;          // FLAT, ROLLING or TERRACED; heights are in every position.
         public float relief;            // Hills: the setting, metres low to high.
+        public float wild_extent;       // Hills: half-side of the graded wild land round the map (0: none); level beyond.
+        public string rural_streets;    // AUTO (on hills), ON or OFF: shoulders and ditches on suburban streets.
         public float plateau_height;    // Terraced: the plateau's rise (setting).
         public int podiums;             // Terraced: how many podiums were asked for.
         public string highway;          // RAISED (on a viaduct) or GRADE.
@@ -98,6 +102,7 @@ namespace Ares.CityGen
         public float width;       // Carriageway width; footways run along both sides.
         public int[] nodes;       // Lattice nodes along the route.
         public float[] points;    // Centreline at carriageway level.
+        public int[] rural_edges; // k: nodes k to k+1 have a gravel shoulder and ditches, no curbs.
     }
 
     [Serializable]
@@ -373,6 +378,30 @@ namespace Ares.CityGen
         public float depth;
     }
 
+    // A V-ditch beside a rural street: start and end along its bottom (the
+    // ground's level there, less depth), `outward` from the street to it.
+    [Serializable]
+    public class Ditch
+    {
+        public string id;
+        public float[] start;
+        public float[] end;
+        public float width;
+        public float depth;
+        public float[] outward;
+    }
+
+    // A culvert's headwall across a ditch's end: position at the bottom of
+    // its face (the pipe's opening), `facing` into the ditch.
+    [Serializable]
+    public class Culvert
+    {
+        public string id;
+        public string ditch;
+        public float[] position;
+        public float[] facing;
+    }
+
     [Serializable]
     public class Site : Pose
     {
@@ -427,6 +456,8 @@ namespace Ares.CityGen
         public int buildings;
         public int sites;
         public int yards;
+        public int ditches;
+        public int culverts;
         public int transit_stops;
         public MarkerCount[] markers;
     }

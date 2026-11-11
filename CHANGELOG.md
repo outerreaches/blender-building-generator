@@ -1,5 +1,55 @@
 # Changelog
 
+## v0.25.0: Cross-sections
+
+- **Forecourts that follow the street.** On hills a building's paved
+  forecourt now follows the street-level surface back from the footway, so
+  forecourts side by side meet level; only an apron at the facade (1.5 m or
+  more, no steeper than 1:2) climbs or drops to the floor. Party-walled
+  towers on a sloping street no longer stand on stepped bases, and the
+  ground is graded to the forecourts too: before, about a third of the
+  forecourts on a hilly city had the ground showing through them (up to
+  0.8 m).
+- **Wild hills round Rolling Hills cities.** The hills carry on for 20 blocks
+  past the map's edge, as round a Terraced city, then level off into the far
+  wasteland. The map's edge is no longer held level, so every Rolling city's
+  heights change. Out there the land is a smooth spline through the graded
+  heights: the city's smoothstep blend, which eases each street out flat at
+  its junctions, would step every hillside at each lattice line. The wild
+  land's ground is coarser (a quarter block) and meets the city's with no
+  cracks.
+- **Highway cuttings and embankments.** A Rolling city's highway leaves
+  through the hills, graded as a highway (4%), instead of along a level
+  valley: its outer road follows its own level, and the ground meets its
+  edges and climbs at 1:2 into cuttings or falls at 1:2 down embankments.
+  In a cutting a 6 m ditch runs at the foot of the slope. A raised highway
+  comes down onto that level. (A Terraced city's highway still leaves along
+  its valley floor.)
+- **Rural streets** (new **Rural Streets** setting: Auto, On, Off). Local
+  streets and collectors in the suburbs, in industrial districts and out
+  past the city's edge (in a small town, every street out of its old town)
+  have a gravel shoulder flush with the road instead of a curb and footway,
+  and a V-ditch beyond it, 3 m wide and 0.7 m deep, cut into the ground
+  exactly along the shoulder's edge. A footway meeting a shoulder rises
+  from it over 2 m. Auto, the default, turns them on with Rolling Hills, so
+  a flat city stays as it was; a Terraced city's footways meet its retaining
+  walls and keep their curbs.
+- **Culverts and driveways.** Each ditch stops clear of the junctions and of
+  anything in its way at a culvert: a concrete headwall across it with a
+  pipe's dark opening at the bottom (`City_Culverts`). A house on a rural
+  street has a lawn in front and a driveway (3.5 m; 8 m to an industrial
+  building) from the shoulder over a culvert to its front, instead of a
+  forecourt paved across the whole plot.
+- **Metadata.** `city.rural_streets` and `city.wild_extent`; each road's
+  `rural_edges`; `ditches` (along each one's bottom: start, end, width,
+  depth, outward) and `culverts` (at each pipe's opening, facing into its
+  ditch), with their counts. `CityMetadata.cs` has them all.
+- Plan schema 21: `rural_streets` in the settings; `wild` and the wild
+  land's heights (Rolling); `rural`, the rural streets' lattice edges.
+- Compound buildings' foundations still cover their lot's rectangle (a
+  notch or court is a paved yard at floor level); grading round the outline
+  is moved to later.
+
 ## v0.24.0: Building footprints
 
 - **L, T, U and courtyard buildings.** A building can be made of rectangular

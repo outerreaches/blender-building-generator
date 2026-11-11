@@ -82,8 +82,8 @@ rectangle programs assume one plate, and their corridors would not meet):
   industrial L sheds with an office wing. Downtown towers and houses stay
   rectangular for now.
 - Lots keep their rectangle: foundations and pads cover the bounding
-  rectangle, so a notch or a court is a paved yard at floor level (graded
-  round the true outline with the v0.25 cross-sections).
+  rectangle, so a notch or a court is a paved yard at floor level (grading
+  round the true outline is planned for later).
 - The metadata lists each building's `footprint` (shape and wings).
 
 ## Phases

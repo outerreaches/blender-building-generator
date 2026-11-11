@@ -63,6 +63,21 @@ OUTER_CUT = 40.0      # The street mesh hands over to the outer road this far ou
 OUTER_RAMP = 2.0      # Footways ramp down to the shoulders over this length.
 OUTER_SOLID_ROW = 30.0  # Metres between cross-sections of an outer road...
 OUTER_FADE_ROW = 4.0    # ...and where it breaks up.
+# On hills an outer road follows its own level (graded as a highway through
+# the wild land) at stations OUTER_STATION apart, the cross-fall it has at
+# the city's edge eased out over OUTER_TWIST; the ground meets its edges
+# (out to the ground grid's next line) and climbs or drops from them at
+# OUTER_SLOPE (1:2) to the hills: cuttings and embankments. The wild land's
+# ground is fine-grained OUTER_CORRIDOR either side of it.
+OUTER_STATION = 10.0
+OUTER_TWIST = 30.0
+OUTER_SLOPE = .5
+OUTER_CORRIDOR = 60.0
+# In a cutting a ditch (width, depth) runs at the foot of the cut slope, faded
+# in as the cutting deepens past OUTER_DITCH_CUT; its lines fall on the
+# ground grid's.
+OUTER_DITCH = (6.0, .8)
+OUTER_DITCH_CUT = (.1, .5)
 TAIL_END = 'cut'        # A raised highway ramp's run at grade meets its deck.
 
 
@@ -120,6 +135,567 @@ def lot_yard(lot, plan):
     shift = (lot.depth / 2 - end) / 2          # Local y of the combined centre.
     centre = (lot.center[0] - shift * s, lot.center[1] + shift * c)
     return footprint(centre, lot.width, depth, lot.rotation)
+
+
+BULB_PATH = 3.0          # Width of the path from a house round a turning circle to its footway.
+DRIVEWAY = 3.5           # ...and of the driveway over a rural street's ditch (by style).
+DRIVEWAYS = {'INDUSTRIAL': 8.0}
+# A rural street (``plan.rural``): a gravel shoulder flush with the road where
+# a footway would be, then a V-ditch DITCH_WIDTH wide and DITCH_DEPTH deep.
+# Each ditch stops DITCH_END short of where a cross street's would be and at
+# a pad in its way (a driveway, a site's approach), at a culvert's headwall
+# (HEADWALL: thickness, height over the ground) with a pipe's opening
+# (CULVERT_PIPE: width, height); none shorter than DITCH_LEAST.
+DITCH_WIDTH = 3.0
+DITCH_DEPTH = .7
+RURAL_RAMP = 2.0         # A footway rises from a rural shoulder's level over this.
+DITCH_END = 1.0
+DITCH_LEAST = 4.0
+HEADWALL = (.3, .15)
+CULVERT_PIPE = (.6, .45)
+
+
+class Sections:
+    """The streets' cross-sections: which have a rural one (``plan.rural``),
+    and how high the footway stands over the road (none on a rural
+    street's shoulder)."""
+
+    def __init__(self, plan):
+        self.plan = plan
+        self.size = plan.settings.block_size
+        self.nodes = flush_junctions(plan)
+        self.edges = {tuple(sorted((tuple(a), tuple(b)))) for a, b in getattr(plan, 'rural', ())}
+        rows = []
+        if self.edges:
+            for path in plan.paths:
+                half = path['width'] / 2
+                for a, b in zip(path['points'], path['points'][1:]):
+                    if self.edge_of((a[0] + b[0]) / 2, (a[1] + b[1]) / 2) in self.edges:
+                        rows.append((a[0], a[1], b[0], b[1], half))
+            # A turning circle at the end of a rural street is one too.
+            for bulb in getattr(plan, 'culdesacs', ()):
+                node = tuple(bulb['node'])
+                if any(node in edge for edge in self.edges):
+                    x, y = node[0] * self.size, node[1] * self.size
+                    rows.append((x, y, x, y, bulb['radius']))
+        self.field = Field(plan) if rows else None
+        self.rural = Field(plan, rows=rows) if rows else None
+
+    def edge_of(self, x, y):
+        """The lattice edge nearest a point on a street's centreline."""
+        u, v = x / self.size, y / self.size
+        if abs(v - round(v)) <= abs(u - round(u)):
+            k = math.floor(u)
+            return ((k, round(v)), (k + 1, round(v)))
+        k = math.floor(v)
+        return ((round(u), k), (round(u), k + 1))
+
+    def rural_at(self, x, y):
+        """Whether the street nearest (x, y) is a rural one."""
+        return self.rural is not None and self.rural.value(x, y) <= self.field.value(x, y) + 1e-6
+
+    def pavement(self, x, y):
+        """Footway height over the road at (x, y) (``pavement_height``): none
+        on a rural shoulder, and rising from it over RURAL_RAMP where a
+        footway meets one."""
+        if self.rural is None:
+            return pavement_height(self.plan, x, y, self.nodes)
+        beyond = self.rural.value(x, y) - self.field.value(x, y)
+        if beyond <= 1e-6:
+            return 0.0
+        return pavement_height(self.plan, x, y, self.nodes) * min(1.0, beyond / RURAL_RAMP)
+
+
+def sections(plan):
+    """The plan's ``Sections`` (made once)."""
+    found = plan.__dict__.get('_sections')
+    if found is None:
+        found = plan.__dict__['_sections'] = Sections(plan)
+    return found
+
+
+def approach_reach(lot, plan):
+    """Half the width of a lot's approach from its footway: a path to a
+    turning circle, a driveway over a rural street's ditch; None: the lot's
+    whole width."""
+    if lot.bulb:
+        return BULB_PATH / 2
+    if tuple(sorted(tuple(n) for n in lot.frontage)) in sections(plan).edges:
+        return min(lot.width, DRIVEWAYS.get(lot.style, DRIVEWAY)) / 2
+    return None
+FORECOURT_APRON = 1.5    # Shortest apron from a forecourt to its building's floor.
+FORECOURT_GRADE = .5     # Steepest an apron climbs or drops (1:2).
+FORECOURT_STEP = 3.0     # Most metres between a forecourt's samples.
+
+
+class Forecourt:
+    """The paving from a footway to a building's front on terrain, in the
+    lot's frame (x along the front, y toward the back: the door faces -y).
+
+    It follows the street-level surface back from the footway (at the
+    footway's own height at its front edge), so forecourts side by side meet
+    level; only an apron at the building, FORECOURT_APRON long or more,
+    climbs or drops to the floor, no steeper than FORECOURT_GRADE (the whole
+    of a forecourt too short for that). ``top`` is triangulated as ``mesh``.
+    """
+
+    def __init__(self, center, rotation, xs, profile, front, back, floor):
+        """``profile(x, y)``: the surface the outer part follows."""
+        self.center, self.rotation = center, rotation
+        self.xs, self.floor = list(xs), floor
+        apron = FORECOURT_APRON
+        for _ in range(12):
+            start = back - apron
+            if start <= front + 1e-6:
+                break
+            rise = max(abs(profile(x, start) - floor) for x in self.xs)
+            need = max(FORECOURT_APRON, rise / FORECOURT_GRADE)
+            if abs(need - apron) < 1e-3:
+                break
+            apron = need
+        start = back - apron
+        if start <= front + 1e-6:
+            self.ys = [front]
+        else:
+            count = max(1, math.ceil((start - front) / FORECOURT_STEP))
+            self.ys = [front + (start - front) * k / count for k in range(count + 1)]
+        self.rows = [[profile(x, y) for x in self.xs] for y in self.ys]
+        self.ys.append(back)
+        self.rows.append([floor] * len(self.xs))
+        self.polygon = [self.world(x, y) for x, y in ((xs[0], front), (xs[-1], front),
+                                                      (xs[-1], back), (xs[0], back))]
+
+    def world(self, x, y):
+        c, s = math.cos(self.rotation), math.sin(self.rotation)
+        return (self.center[0] + x * c - y * s, self.center[1] + x * s + y * c)
+
+    def local(self, x, y):
+        c, s = math.cos(self.rotation), math.sin(self.rotation)
+        dx, dy = x - self.center[0], y - self.center[1]
+        return dx * c + dy * s, dy * c - dx * s
+
+    def top(self, x, y):
+        """Top at a local point (or at the nearest point of the forecourt)."""
+        xs, ys = self.xs, self.ys
+        x, y = min(max(x, xs[0]), xs[-1]), min(max(y, ys[0]), ys[-1])
+        i = min(max(bisect.bisect_right(xs, x) - 1, 0), len(xs) - 2)
+        r = min(max(bisect.bisect_right(ys, y) - 1, 0), len(ys) - 2)
+        u = (x - xs[i]) / (xs[i + 1] - xs[i])
+        v = (y - ys[r]) / (ys[r + 1] - ys[r])
+        z00, z10 = self.rows[r][i], self.rows[r][i + 1]
+        z01, z11 = self.rows[r + 1][i], self.rows[r + 1][i + 1]
+        if u >= v:
+            return z00 + u * (z10 - z00) + v * (z11 - z10)
+        return z00 + u * (z11 - z01) + v * (z01 - z00)
+
+    def at(self, x, y):
+        """Top at the forecourt's nearest point to a world point."""
+        return self.top(*self.local(x, y))
+
+    def lowest(self, x0, y0, x1, y1):
+        """The lowest top over a world box (inf off the forecourt): of its
+        triangles, each clipped to the box (to the box's bounds in the
+        forecourt's frame, if that is turned other than square to it)."""
+        corners = [self.local(x, y) for x in (x0, x1) for y in (y0, y1)]
+        lx0, lx1 = min(p[0] for p in corners), max(p[0] for p in corners)
+        ly0, ly1 = min(p[1] for p in corners), max(p[1] for p in corners)
+        xs, ys, rows = self.xs, self.ys, self.rows
+        best = math.inf
+        for r in range(max(bisect.bisect_right(ys, ly0) - 1, 0),
+                       min(bisect.bisect_left(ys, ly1), len(ys) - 1)):
+            for i in range(max(bisect.bisect_right(xs, lx0) - 1, 0),
+                           min(bisect.bisect_left(xs, lx1), len(xs) - 1)):
+                a, b = (xs[i], ys[r], rows[r][i]), (xs[i + 1], ys[r], rows[r][i + 1])
+                c, d = (xs[i + 1], ys[r + 1], rows[r + 1][i + 1]), (xs[i], ys[r + 1], rows[r + 1][i])
+                for polygon in ([a, b, c], [a, c, d]):
+                    for axis, value, below in ((0, lx0, False), (0, lx1, True),
+                                               (1, ly0, False), (1, ly1, True)):
+                        polygon = _halfplane(polygon, axis, value, below) if polygon else polygon
+                    if polygon:
+                        best = min(best, min(p[2] for p in polygon))
+        return best
+
+    def mesh(self, base):
+        """The forecourt as a closed solid down to ``base`` (lot frame)."""
+        xs, ys, n = self.xs, self.ys, len(self.xs)
+        vertices = [(x, y, z) for y, row in zip(ys, self.rows) for x, z in zip(xs, row)]
+        b = len(vertices)
+        vertices += [(xs[0], ys[0], base), (xs[-1], ys[0], base),
+                     (xs[-1], ys[-1], base), (xs[0], ys[-1], base)]
+        faces = []
+        for r in range(len(ys) - 1):
+            for i in range(n - 1):
+                a, c = r * n + i, (r + 1) * n + i
+                faces += [(a, a + 1, c + 1), (a, c + 1, c)]
+        last = (len(ys) - 1) * n
+        faces.append((b, b + 3, b + 2, b + 1))
+        faces.append((b, b + 1) + tuple(range(n - 1, -1, -1)))
+        faces.append((b + 1, b + 2) + tuple(r * n + n - 1 for r in range(len(ys) - 1, -1, -1)))
+        faces.append((b + 2, b + 3) + tuple(last + i for i in range(n)))
+        faces.append((b + 3, b) + tuple(r * n for r in range(len(ys))))
+        return vertices, faces
+
+
+def forecourt(lot, plan, surface, nodes=None):
+    """A lot's ``Forecourt`` on terrain (``surface``: the street level), or
+    None where its building stands at the footway. It narrows to a path or
+    a driveway where ``approach_reach`` says so."""
+    end = lot_approach(lot, plan)
+    back = -lot.depth / 2
+    if -end >= back - .05:
+        return None
+    reach = approach_reach(lot, plan) or lot.width / 2
+    nodes = flush_junctions(plan) if nodes is None else nodes
+    pavement = sections(plan).pavement
+    count = max(1, math.ceil(2 * reach / FORECOURT_STEP))
+    xs = [-reach + 2 * reach * k / count for k in range(count + 1)]
+    c, s = math.cos(lot.rotation), math.sin(lot.rotation)
+    # Where the footway drops flush toward a junction, its kinks too.
+    a = (lot.center[0] - reach * c + end * s, lot.center[1] - reach * s - end * c)
+    b = (lot.center[0] + reach * c + end * s, lot.center[1] + reach * s - end * c)
+    for t in _pavement_breaks(plan, nodes, a, b):
+        x = -reach + 2 * reach * t
+        if min(abs(x - v) for v in xs) > .05:
+            bisect.insort(xs, x)
+    curb = {}
+
+    def profile(x, y):
+        wx, wy = lot.center[0] + x * c - y * s, lot.center[1] + x * s + y * c
+        if x not in curb:
+            # The footway's own height above the street where the forecourt
+            # meets it (flush at a junction's corner), carried back.
+            fx, fy = lot.center[0] + x * c + end * s, lot.center[1] + x * s - end * c
+            curb[x] = pavement(fx, fy)
+        return surface(wx, wy) + curb[x]
+    return Forecourt(lot.center, lot.rotation, xs, profile, -end, back,
+                     plan.settings.curb_height + lot.level)
+
+
+def _pavement_breaks(plan, nodes, a, b):
+    """Fractions along a straight footway edge a-b (along the lattice) where
+    ``pavement_height`` changes slope: a flush junction's ramp ends, and
+    where the nearest side of its square turns."""
+    size, walk = plan.settings.block_size, plan.settings.sidewalk_width
+    axis = 0 if abs(b[0] - a[0]) >= abs(b[1] - a[1]) else 1
+    if abs(b[1 - axis] - a[1 - axis]) > 1e-6 or abs(b[axis] - a[axis]) < 1e-6:
+        return []
+    found = []
+    for node, half in nodes.items():
+        n = (node[0] * size, node[1] * size)
+        across = abs(a[1 - axis] - n[1 - axis])
+        start = half + walk
+        if across > start + 2 + size:
+            continue
+        for v in (start, start + 2, across):
+            for at in (n[axis] - v, n[axis] + v):
+                t = (at - a[axis]) / (b[axis] - a[axis])
+                if 1e-6 < t < 1 - 1e-6:
+                    found.append(t)
+    return found
+
+
+def approach_polygon(lot, plan):
+    """World corners of a lot's approach from its footway to its front (as
+    ``forecourt``), or None where it stands at the footway."""
+    end, back = lot_approach(lot, plan), -lot.depth / 2
+    if -end >= back - .05:
+        return None
+    reach = approach_reach(lot, plan) or lot.width / 2
+    c, s = math.cos(lot.rotation), math.sin(lot.rotation)
+    return [(lot.center[0] + x * c - y * s, lot.center[1] + x * s + y * c)
+            for x, y in ((-reach, -end), (reach, -end), (reach, back), (-reach, back))]
+
+
+class Ditch:
+    """One run of a rural street's ditch, along one side of it: the street
+    runs along ``axis`` (0: x) on ``line`` (its centreline's other
+    coordinate), ``half`` wide each way; the ditch lies on ``side`` (+1 or
+    -1) of it from ``start`` to ``end`` along it, from the shoulder's outer
+    edge (``inner``) past its bottom to ``outer``."""
+
+    def __init__(self, axis, line, half, side, start, end, walk):
+        self.axis, self.line, self.half, self.side = axis, line, half, side
+        self.start, self.end = start, end
+        self.inner = line + side * (half + walk)
+        self.bottom = line + side * (half + walk + DITCH_WIDTH / 2)
+        self.outer = line + side * (half + walk + DITCH_WIDTH)
+
+    def depth(self, x, y):
+        """How far the ditch sinks the ground at (x, y) (none off it)."""
+        a, b = (x, y) if self.axis == 0 else (y, x)
+        t = (b - self.inner) * self.side / DITCH_WIDTH
+        if not (self.start - 1e-9 <= a <= self.end + 1e-9 and -1e-9 <= t <= 1 + 1e-9):
+            return 0.0
+        return DITCH_DEPTH * max(0.0, 1 - abs(2 * t - 1))
+
+    def contains(self, x, y):
+        a, b = (x, y) if self.axis == 0 else (y, x)
+        lo, hi = sorted((self.inner, self.outer))
+        return self.start < a < self.end and lo < b < hi
+
+    def rect(self, margin=0.0):
+        """World rectangle of the ditch (grown by ``margin``)."""
+        lo, hi = sorted((self.inner, self.outer))
+        a0, a1, b0, b1 = self.start - margin, self.end + margin, lo - margin, hi + margin
+        return (a0, b0, a1, b1) if self.axis == 0 else (b0, a0, b1, a1)
+
+    def cuts(self):
+        """Lines (axis, value) the ground is cut along: the bottom, the outer
+        edge and the two ends (the inner edge is the footway's iso-line)."""
+        across = 1 - self.axis
+        return ((across, self.bottom), (across, self.outer),
+                (self.axis, self.start), (self.axis, self.end))
+
+
+def ditches(plan):
+    """The ditches along the rural streets (``Ditch``; made once): each side
+    of a street between its junctions, stopping short of each junction's
+    corners and of any pad, approach or pier in the ditch's way."""
+    found = plan.__dict__.get('_ditches')
+    if found is not None:
+        return found
+    found = []
+    section = sections(plan)
+    if section.edges:
+        size, walk = plan.settings.block_size, plan.settings.sidewalk_width
+        halves = junctions(plan)
+        bulbs = {tuple(b['node']): b['radius'] for b in getattr(plan, 'culdesacs', ())}
+        widths = {}
+        for path in plan.paths:
+            nodes = [tuple(n) for n in path['nodes']]
+            for a, b in zip(nodes, nodes[1:]):
+                widths[tuple(sorted((a, b)))] = path['width'] / 2
+        blocks = [footprint(lot.center, lot.width, lot.depth, lot.rotation) for lot in plan.lots]
+        blocks += [polygon for polygon in (approach_polygon(lot, plan) for lot in plan.lots)
+                   if polygon]
+        blocks += [site_footprint(poi) for poi in plan.pois]
+        blocks += [footprint(yard.center, yard.width, yard.depth, 0.0)
+                   for yard in getattr(plan, 'yards', ())]
+        if getattr(plan, 'freeway', None):
+            for x, y, along, across, *_rest in freeway_stations(plan)['piers']:
+                cap = max(across, _rest[-1]) / 2
+                blocks.append([(x - along / 2, y - cap), (x + along / 2, y - cap),
+                               (x + along / 2, y + cap), (x - along / 2, y + cap)])
+
+        def zone(node):
+            # Clear of a cross street's footway and ditch, and of a turning
+            # circle's footway.
+            return max(halves.get(node, 0.0) + DITCH_WIDTH, bulbs.get(node, 0.0)) + walk + DITCH_END
+        for a, b in sorted(section.edges):
+            if (a, b) not in widths:
+                continue
+            axis = 0 if a[1] == b[1] else 1
+            line, half = a[1 - axis] * size, widths[a, b]
+            low, high = (a, b) if a[axis] < b[axis] else (b, a)
+            start, end = low[axis] * size + zone(low), high[axis] * size - zone(high)
+            for side in (-1, 1):
+                lo, hi = sorted((line + side * (half + walk), line + side * (half + walk + DITCH_WIDTH)))
+                runs = [(start, end)]
+                for polygon in blocks:
+                    along = [p[axis] for p in polygon]
+                    across = [p[1 - axis] for p in polygon]
+                    if max(across) <= lo + 1e-6 or min(across) >= hi - 1e-6:
+                        continue
+                    if max(along) <= start or min(along) >= end:
+                        continue
+                    c0, c1 = min(along) - HEADWALL[0], max(along) + HEADWALL[0]
+                    runs = [piece for s0, s1 in runs
+                            for piece in ((s0, min(s1, c0)), (max(s0, c1), s1)) if piece[1] > piece[0]]
+                found += [Ditch(axis, line, half, side, s0, s1, walk)
+                          for s0, s1 in runs if s1 - s0 >= DITCH_LEAST]
+    plan.__dict__['_ditches'] = found
+    return found
+
+
+def culverts(plan, ground=None):
+    """Where each ditch ends: (ditch, end, direction) with ``end`` along the
+    street and ``direction`` (+1/-1) the way the headwall stands from it."""
+    return [(ditch, end, direction) for ditch in ditches(plan)
+            for end, direction in ((ditch.start, -1), (ditch.end, 1))]
+
+
+def build_culvert_mesh(plan, grading=None):
+    """The culverts where the ditches end (closed boxes): a concrete
+    headwall across the ditch, HEADWALL[1] over the ground, and on its face
+    toward the ditch a pipe's dark opening at the bottom. Materials: 0
+    concrete, 1 the pipe's opening."""
+    found = culverts(plan)
+    vertices, faces, materials = [], [], []
+    if not found:
+        return vertices, faces, materials
+    if plan.heights:
+        grading = grading or Grading(plan)
+
+        def ground(x, y):
+            return grading.ground(x, y)
+    else:
+        def ground(x, y):
+            return GROUND_Z
+
+    def box(axis, a0, a1, b0, b1, z0, z1, material):
+        # Along the street a0-a1, across it b0-b1 (world x, y swapped on axis 1).
+        def world(a, b):
+            return (a, b) if axis == 0 else (b, a)
+        corners = [world(a, b) for a, b in ((a0, b0), (a1, b0), (a1, b1), (a0, b1))]
+        if axis == 1:
+            corners.reverse()
+        base = len(vertices)
+        vertices.extend([(x, y, z) for z in (z0, z1) for x, y in corners])
+        for f in ((0, 3, 2, 1), (4, 5, 6, 7), (0, 1, 5, 4), (1, 2, 6, 5), (2, 3, 7, 6), (3, 0, 4, 7)):
+            faces.append(tuple(base + i for i in f))
+            materials.append(material)
+    for ditch, end, direction in found:
+        lo, hi = sorted((ditch.inner, ditch.outer))
+        a0, a1 = sorted((end, end + direction * HEADWALL[0]))
+
+        def at(b):
+            return ground(*((end, b) if ditch.axis == 0 else (b, end)))
+        rims = [at(ditch.inner), at(ditch.outer)]
+        bottom = at(ditch.bottom) - DITCH_DEPTH
+        box(ditch.axis, a0, a1, lo, hi, bottom - .3, max(rims) + HEADWALL[1], 0)
+        m0, m1 = sorted((end, end - direction * .03))
+        half = CULVERT_PIPE[0] / 2
+        box(ditch.axis, m0, m1, ditch.bottom - half, ditch.bottom + half,
+            bottom - .05, bottom + CULVERT_PIPE[1], 1)
+    return vertices, faces, materials
+
+
+def _ditch_cells(plan, cell):
+    """Ground cells (``cell`` metres) near a ditch, whose ground is made on
+    the street mesh's sample grid instead (``_ditch_ground``)."""
+    found = set()
+    for ditch in ditches(plan):
+        x0, y0, x1, y1 = ditch.rect(SAMPLE)
+        found |= {(i, j) for i in range(math.floor(x0 / cell), math.floor(x1 / cell) + 1)
+                  for j in range(math.floor(y0 / cell), math.floor(y1 / cell) + 1)}
+    return found
+
+
+def _ditch_ground(plan, cells, cell, field, vertex):
+    """Faces of the ground over ``cells`` on the street mesh's sample grid:
+    cut at the footways' outer edge as the street mesh is (sharing those
+    vertices' positions) and along each ditch's lines; ``vertex(x, y,
+    ditch)`` makes a vertex (sunk into ``ditch``, or None)."""
+    walk = plan.settings.sidewalk_width
+    per = int(round(cell / SAMPLE))
+    near = defaultdict(list)
+    for ditch in ditches(plan):
+        x0, y0, x1, y1 = ditch.rect(SAMPLE)
+        for i in range(math.floor(x0 / SAMPLE), math.floor(x1 / SAMPLE) + 1):
+            for j in range(math.floor(y0 / SAMPLE), math.floor(y1 / SAMPLE) + 1):
+                near[i, j].append(ditch)
+    faces = []
+    for ci, cj in sorted(cells):
+        for i in range(ci * per, ci * per + per):
+            for j in range(cj * per, cj * per + per):
+                x0, y0 = i * SAMPLE, j * SAMPLE
+                corners = tuple((x, y, field.value(x, y)) for x, y in
+                                ((x0, y0), (x0 + SAMPLE, y0), (x0 + SAMPLE, y0 + SAMPLE),
+                                 (x0, y0 + SAMPLE)))
+                for triangle in _cell_triangles(corners, field, walk):
+                    pieces = [_clip(triangle, walk, False)]
+                    for ditch in near.get((i, j), ()):
+                        for axis, value in ditch.cuts():
+                            pieces = [half for piece in pieces
+                                      for half in (_halfplane(piece, axis, value, True),
+                                                   _halfplane(piece, axis, value, False))
+                                      if len(half) >= 3]
+                    for piece in pieces:
+                        piece = _clean(piece)
+                        if len(piece) < 3:
+                            continue
+                        cx = sum(p[0] for p in piece) / len(piece)
+                        cy = sum(p[1] for p in piece) / len(piece)
+                        owner = next((d for d in near.get((i, j), ()) if d.contains(cx, cy)), None)
+                        ids = list(dict.fromkeys(vertex(x, y, owner) for x, y, _ in piece))
+                        if len(ids) >= 3:
+                            faces.append(tuple(ids))
+    return faces
+
+
+def _city_ground(plan, extent, cell, covered, field, vertex):
+    """Faces of the ground over the city: cells of ``cell`` metres but those
+    under the paving (all of their sample cells ``covered``), and round each
+    ditch on the street mesh's sample grid; ``vertex(x, y, depth=...)``
+    makes a vertex (sunk by ``depth``)."""
+    per = int(round(cell / SAMPLE))
+    count = defaultdict(int)
+    for i, j in covered:
+        count[i // per, j // per] += 1
+    paved = {key for key, n in count.items() if n == per * per}
+    finer = _ditch_cells(plan, cell) - paved
+    fine = set()
+
+    def sunk(x, y, ditch):
+        # (On the finer grid the ground's own level shoulder round each pad
+        # keeps it under the pad, which the cells' caps do on the coarser:
+        # only where the two meet do those apply.)
+        fine.add((x, y, 0.0))
+        edge = any((math.floor((x + dx) / cell), math.floor((y + dy) / cell)) not in finer
+                   for dx in (-1e-7, 1e-7) for dy in (-1e-7, 1e-7))
+        return vertex(x, y, depth=ditch.depth(x, y) if ditch else 0.0, capped=edge)
+    faces = _ditch_ground(plan, finer, cell, field, sunk)
+    rim = _rim(fine, cell)
+    for _, ring in _cell_rings(extent, cell, paved, finer, rim):
+        ids = [vertex(x, y) for x, y in ring]
+        if len(ids) == 4:
+            faces.append(tuple(ids))
+            continue
+        xs, ys = [p[0] for p in ring], [p[1] for p in ring]
+        middle = vertex((min(xs) + max(xs)) / 2, (min(ys) + max(ys)) / 2)
+        faces += [(middle, a, b) for a, b in zip(ids, ids[1:] + ids[:1])]
+    return faces
+
+
+def _cell_rings(extent, cell, skip, finer, rim):
+    """Each ground cell of ``cell`` metres over the city (clipped to
+    ``extent``) but those in ``skip`` (under paving) or ``finer`` (made on a
+    finer grid): its corners, and along a side shared with a finer cell the
+    finer grid's vertices there (``rim``: {(axis, line): positions}), so
+    they meet with no cracks. Yields ((i, j), ring)."""
+    for i in range(math.floor(-extent / cell), math.ceil(extent / cell)):
+        for j in range(math.floor(-extent / cell), math.ceil(extent / cell)):
+            if (i, j) in skip or (i, j) in finer:
+                continue
+            x0, y0 = max(-extent, i * cell), max(-extent, j * cell)
+            x1, y1 = min(extent, (i + 1) * cell), min(extent, (j + 1) * cell)
+            if x1 <= x0 or y1 <= y0:
+                continue
+
+            def side(fixed, axis, a, b, neighbour):
+                if neighbour not in finer:
+                    return []
+                lo, hi = min(a, b), max(a, b)
+                inside = sorted(v for v in rim.get((axis, round(fixed, 8)), ())
+                                if lo + 1e-6 < v < hi - 1e-6)
+                inside = inside if a < b else inside[::-1]
+                return [(v, fixed) if axis == 1 else (fixed, v) for v in inside]
+            ring = [(x0, y0)] + side(y0, 1, x0, x1, (i, j - 1))
+            ring += [(x1, y0)] + side(x1, 0, y0, y1, (i + 1, j))
+            ring += [(x1, y1)] + side(y1, 1, x1, x0, (i, j + 1))
+            ring += [(x0, y1)] + side(x0, 0, y1, y0, (i - 1, j))
+            yield (i, j), ring
+
+
+def _rim(vertices, cell):
+    """{(axis, line): positions} of the vertices lying on a ``cell`` grid's
+    lines (axis 0: x = line; 1: y = line)."""
+    rim = defaultdict(set)
+    for x, y, _ in vertices:
+        for axis, (a, b) in enumerate(((x, y), (y, x))):
+            if abs(a / cell - round(a / cell)) < 1e-7:
+                rim[axis, round(round(a / cell) * cell, 8)].add(b)
+    return rim
+
+
+def _pad_top(top, x, y):
+    """A pad's top at (x, y): a level pad's own, or a forecourt's there."""
+    return top.at(x, y) if isinstance(top, Forecourt) else top
+
+
+def _pad_lowest(top, x0, y0, x1, y1):
+    """At most the lowest top of a pad over a world box."""
+    return top.lowest(x0, y0, x1, y1) if isinstance(top, Forecourt) else top
 
 
 def frontage_rectangle(lot, plan):
@@ -250,6 +826,57 @@ class _Outer:
         self.centre = centre
         self.start = start
         self.end = start + self.sign * road['length']
+        # Its level along its centreline, and its cross-fall at the cut.
+        surface = plan.surface()
+        count = max(1, math.ceil(self.length / OUTER_STATION - 1e-9))
+        self.stations = [min(self.length, k * OUTER_STATION) for k in range(count + 1)]
+        self.levels = [surface(*self.world(a, centre, 0.0)[:2]) for a in self.stations]
+        self.surface = surface
+        self.fall = {}
+
+    def level(self, along):
+        """The road's level on its centreline ``along`` metres past the cut."""
+        if along <= 0:
+            return self.levels[0]
+        k = min(int(along / OUTER_STATION), len(self.stations) - 2)
+        a0, a1 = self.stations[k], self.stations[k + 1]
+        if a1 - a0 < 1e-9:
+            return self.levels[k]
+        return self.levels[k] + (self.levels[k + 1] - self.levels[k]) * (along - a0) / (a1 - a0)
+
+    def cross_fall(self, lateral):
+        """How far the road at the cut stands above its centreline's level at
+        ``lateral`` (none off a deck)."""
+        key = round(lateral, 8)
+        if key not in self.fall:
+            self.fall[key] = 0.0 if self.deck else (
+                self.surface(*self.world(0.0, lateral, 0.0)[:2]) - self.levels[0])
+        return self.fall[key]
+
+    def twist(self, along):
+        """Share of the cut's cross-fall left ``along`` metres past it (eased
+        out over OUTER_TWIST, straight between the stations)."""
+        def ease(a):
+            t = max(0.0, 1.0 - a / OUTER_TWIST)
+            return t * t * (3 - 2 * t)
+        if along >= OUTER_TWIST:
+            return 0.0
+        a0 = math.floor(max(along, 0.0) / OUTER_STATION) * OUTER_STATION
+        a1 = a0 + OUTER_STATION
+        return ease(a0) + (ease(a1) - ease(a0)) * (max(along, 0.0) - a0) / OUTER_STATION
+
+    def top(self, along, lateral):
+        """The carriageway's (and shoulders') top at ``along``, ``lateral``."""
+        return self.level(along) + self.cross_fall(lateral) * self.twist(along)
+
+    def bends(self):
+        """Stations where the road's level or twist bends (rows of its mesh)."""
+        found = [a for k, a in enumerate(self.stations[1:-1], 1)
+                 if abs((self.levels[k + 1] - self.levels[k]) * (a - self.stations[k - 1]) -
+                        (self.levels[k] - self.levels[k - 1]) * (self.stations[k + 1] - a)) > 1e-9]
+        if any(abs(self.cross_fall(b)) > 1e-9 for b in (self.lo, self.centre, self.hi)):
+            found += [a for a in self.stations if a <= OUTER_TWIST]
+        return found
 
     def drops(self, x0, y0):
         """True for street-mesh cells the outer road replaces."""
@@ -350,10 +977,11 @@ def _distance(px, py, segment):
 
 
 class Field:
-    """Distance to the carriageway, indexed so sample points touch few segments."""
+    """Distance to the carriageway, indexed so sample points touch few segments
+    (``rows``: of these segments only)."""
 
-    def __init__(self, plan, extra=(), cut=None):
-        self.segments = _segments(plan, cut) + list(extra)
+    def __init__(self, plan, extra=(), cut=None, rows=None):
+        self.segments = (_segments(plan, cut) if rows is None else list(rows)) + list(extra)
         self.walk = plan.settings.sidewalk_width
         self.grid = defaultdict(list)
         for segment in self.segments:
@@ -463,10 +1091,11 @@ def _cell_triangles(corners, field, walk):
 
 
 def build_street_mesh(plan):
-    """Return vertices, faces, material indices for road/footway/curb (0/1/2)."""
+    """Return vertices, faces, material indices for road/footway/curb/rural
+    shoulder (0/1/2/3)."""
     walk = plan.settings.sidewalk_width
-    nodes = flush_junctions(plan)
     field = Field(plan)
+    section = sections(plan)
     vertices, faces, materials = [], [], []
     ids = {}
     curbs = set()
@@ -494,17 +1123,17 @@ def build_street_mesh(plan):
         if len(polygon) < 3:
             return
         if surface is None:
-            top = [(x, y, height(x, y) if material == 1 else 0.0)
+            top = [(x, y, height(x, y) if material in (1, 3) else 0.0)
                    for x, y, _ in polygon]
             base = [0.0] * len(top)
         else:
             # On terrain everything rides on the road-level surface.
             base = [surface(x, y) for x, y, _ in polygon]
-            top = [(x, y, z + (height(x, y) if material == 1 else 0.0))
+            top = [(x, y, z + (height(x, y) if material in (1, 3) else 0.0))
                    for (x, y, _), z in zip(polygon, base)]
         for index in range(1, len(top) - 1):
             face((top[0], top[index], top[index + 1]), material)
-        if material != 1:
+        if material not in (1, 3):
             return
         # Curbs: iso-edges of the footway polygon. Both sides share these
         # vertices, so the skirt closes the surface without cracks. An iso edge
@@ -549,8 +1178,10 @@ def build_street_mesh(plan):
                    (x0, y0 + SAMPLE, field.value(x0, y0 + SAMPLE)))
         for polygon in _cell_triangles(corners, field, walk):
             emit(_clip(polygon, 0.0, True), 0, None)
-            emit(_clip(_clip(polygon, walk, True), 0.0, False), 1,
-                 lambda x, y: pavement_height(plan, x, y, nodes))
+            footway = _clip(_clip(polygon, walk, True), 0.0, False)
+            rural = footway and section.rural_at(sum(p[0] for p in footway) / len(footway),
+                                                 sum(p[1] for p in footway) / len(footway))
+            emit(footway, 3 if rural else 1, section.pavement)
     return vertices, faces, materials
 
 
@@ -582,28 +1213,16 @@ def build_ground_mesh(plan):
     extent = settings.radius * settings.block_size + 20
     far = extent + settings.wasteland
     covered = Field(plan).covered_cells()
-    per = int(round(GROUND_CELL / SAMPLE))
     vertices, faces, ids = [], [], {}
 
-    def vertex(x, y):
-        co = (round(x, 8), round(y, 8), GROUND_Z)
+    def vertex(x, y, depth=0.0, capped=True):
+        co = (round(x, 8), round(y, 8), round(GROUND_Z - depth, 8) if depth else GROUND_Z)
         if co not in ids:
             ids[co] = len(vertices)
             vertices.append(co)
         return ids[co]
 
-    for i in range(math.floor(-extent / GROUND_CELL), math.ceil(extent / GROUND_CELL)):
-        for j in range(math.floor(-extent / GROUND_CELL), math.ceil(extent / GROUND_CELL)):
-            if all((i * per + di, j * per + dj) in covered
-                   for di in range(per) for dj in range(per)):
-                continue
-            x0 = max(-extent, i * GROUND_CELL)
-            y0 = max(-extent, j * GROUND_CELL)
-            x1 = min(extent, (i + 1) * GROUND_CELL)
-            y1 = min(extent, (j + 1) * GROUND_CELL)
-            if x1 <= x0 or y1 <= y0:
-                continue
-            faces.append((vertex(x0, y0), vertex(x1, y0), vertex(x1, y1), vertex(x0, y1)))
+    faces += _city_ground(plan, extent, GROUND_CELL, covered, Field(plan), vertex)
     if settings.wasteland > 0:
         # Flat framing quads far outside the detailed city ground; the game
         # keeps the player in with invisible walls while the horizon stays
@@ -620,8 +1239,9 @@ def build_ground_mesh(plan):
 
 
 def _terrain_ground_mesh(plan):
-    """The graded ground (``Grading``) on a finer grid; the wasteland beyond the
-    map's edge stays level, as the edge of the graded city is."""
+    """The graded ground (``Grading``) on a finer grid, and round it the wild
+    land (on a coarser one, out to where it levels off); the far wasteland
+    beyond stays level."""
     settings = plan.settings
     extent = settings.radius * settings.block_size + 20
     far = extent + settings.wasteland
@@ -637,42 +1257,128 @@ def _terrain_ground_mesh(plan):
         xs, ys = [p[0] for p in polygon], [p[1] for p in polygon]
         for i in range(math.floor(min(xs) / cell), math.floor(max(xs) / cell) + 1):
             for j in range(math.floor(min(ys) / cell), math.floor(max(ys) / cell) + 1):
-                caps[i, j] = min(caps.get((i, j), math.inf), top)
+                low = _pad_lowest(top, i * cell, j * cell, (i + 1) * cell, (j + 1) * cell)
+                caps[i, j] = min(caps.get((i, j), math.inf), low)
 
-    def vertex(x, y, z=None):
-        key = (round(x, 8), round(y, 8))
+    def vertex(x, y, z=None, depth=0.0, capped=True):
+        # (A vertex sunk into a ditch is apart from one at the same place
+        # beside it: a ditch ends at a culvert's headwall.)
+        key = (round(x, 8), round(y, 8)) + (('ditch',) if depth > 0 else ())
         if key not in ids:
             if z is None:
-                i, j = round(x / cell), round(y / cell)
-                cap = min(caps.get((i + di, j + dj), math.inf) for di in (-1, 0) for dj in (-1, 0))
-                z = grading.ground(x, y, cap)
+                # Under the tops over every cell it touches.
+                cap = min(caps.get((math.floor((x + dx) / cell), math.floor((y + dy) / cell)),
+                                   math.inf) for dx in (-1e-7, 1e-7) for dy in (-1e-7, 1e-7))
+                z = grading.ground(x, y, cap if capped else math.inf) - depth
             ids[key] = len(vertices)
-            vertices.append(key + (round(z, 8),))
+            vertices.append(key[:2] + (round(z, 8),))
         return ids[key]
 
-    for i in range(math.floor(-extent / cell), math.ceil(extent / cell)):
-        for j in range(math.floor(-extent / cell), math.ceil(extent / cell)):
-            if all((i * per + di, j * per + dj) in covered
-                   for di in range(per) for dj in range(per)):
-                continue
-            x0, y0 = max(-extent, i * cell), max(-extent, j * cell)
-            x1, y1 = min(extent, (i + 1) * cell), min(extent, (j + 1) * cell)
-            if x1 <= x0 or y1 <= y0:
-                continue
-            faces.append((vertex(x0, y0), vertex(x1, y0), vertex(x1, y1), vertex(x0, y1)))
+    faces += _city_ground(plan, extent, cell, covered, grading.field, vertex)
+    edge_line = extent
+    if grading.wild and settings.wasteland > 0:
+        edge_line = (settings.radius + grading.wild) * settings.block_size
+        # Wild cells about a quarter block, a whole number of city cells (so
+        # their corners on the seam are the city ground's vertices); city
+        # cells along the outer roads, for their cuttings and embankments.
+        coarse = cell * max(1, round(settings.block_size / 4 / cell))
+        reach = coarse * math.ceil(OUTER_CORRIDOR / coarse - 1e-9)
+        strips = []
+        for outer in grading.outers:
+            a0, a1 = sorted((outer.sign * extent, outer.sign * edge_line))
+            b0, b1 = outer.centre - reach, outer.centre + reach
+            strips.append((a0, b0, a1, b1) if outer.axis == 0 else (b0, a0, b1, a1))
+        faces += _wild_ring(extent, edge_line, coarse, cell, vertex,
+                            lambda x, y: grading.ground(x, y), strips)
     if settings.wasteland > 0:
         holes = []
         for outer in outer_roads(plan):
-            a0 = max(extent, abs(outer.start)) * (1 if outer.sign > 0 else -1)
+            a0 = max(edge_line, abs(outer.start)) * (1 if outer.sign > 0 else -1)
             holes.append(outer.rect(a0))
-        for rect in ((-far, -far, -extent, far), (extent, -far, far, far),
-                     (-extent, extent, extent, far), (-extent, -far, extent, -extent)):
-            # The city's last 20 m are level (the surface is zero off the
-            # lattice), so the framing quads meet the city ground flush.
-            for x0, y0, x1, y1 in _subtract(rect, holes):
-                faces.append((vertex(x0, y0, GROUND_Z_TERRAIN), vertex(x1, y0, GROUND_Z_TERRAIN),
-                              vertex(x1, y1, GROUND_Z_TERRAIN), vertex(x0, y1, GROUND_Z_TERRAIN)))
+        far = max(far, edge_line + 1.0)
+        # The ground's vertices along its edge: the framing is cut into long
+        # quads there (a vertex in the middle of a quad's side leaves
+        # pinholes).
+        rim = defaultdict(set)
+        for x, y, _ in vertices:
+            for axis, (a, b) in enumerate(((x, y), (y, x))):
+                if abs(abs(a) - edge_line) < 1e-6 and abs(b) < edge_line + 1e-6:
+                    rim[axis, a > 0].add(round(b, 8))
+        for rect, axis, positive in (((-far, -far, -edge_line, far), 0, False),
+                                     ((edge_line, -far, far, far), 0, True),
+                                     ((-edge_line, edge_line, edge_line, far), 1, True),
+                                     ((-edge_line, -far, edge_line, -edge_line), 1, False)):
+            # The city's (or the wild land's) edge is level (the surface is
+            # zero off the lattice), so the framing quads meet it flush.
+            lo, hi = (rect[1], rect[3]) if axis == 0 else (rect[0], rect[2])
+            cuts = sorted({lo, hi} | rim[axis, positive])
+            for a, b in zip(cuts, cuts[1:]):
+                piece = ((rect[0], a, rect[2], b) if axis == 0 else (a, rect[1], b, rect[3]))
+                for x0, y0, x1, y1 in _subtract(piece, holes):
+                    faces.append(tuple(vertex(x, y, GROUND_Z_TERRAIN)
+                                       for x, y in ((x0, y0), (x1, y0), (x1, y1), (x0, y1))))
     return vertices, faces
+
+
+def _wild_ring(inner, outer, coarse, fine, vertex, height, strips=()):
+    """Faces of the ground between the squares of half-sides ``inner`` and
+    ``outer``: on a ``coarse`` grid (a multiple of the ``fine`` one), but for
+    ``strips`` (rectangles on the coarse grid's lines) on the fine one. A
+    coarse piece along the inner square or a strip takes every fine vertex
+    there, and every piece the corners of the pieces beside it, so they meet
+    with no cracks (a piece with more than its corners is a fan round its
+    middle)."""
+    holes = [(-inner, -inner, inner, inner)] + list(strips)
+    faces = []
+
+    def side(a, b, fixed, axis):
+        """Points strictly between a and b (either way) on a coarse piece's
+        side (``axis`` 0: along x at y = ``fixed``): the holes' corners, and
+        the fine grid's points where it runs along a hole's edge."""
+        lo, hi = min(a, b), max(a, b)
+        found = set()
+        for hole in holes:
+            c0, c1 = (hole[0], hole[2]) if axis == 0 else (hole[1], hole[3])
+            e0, e1 = (hole[1], hole[3]) if axis == 0 else (hole[0], hole[2])
+            found.update(v for v in (c0, c1) if lo + 1e-6 < v < hi - 1e-6)
+            if min(abs(fixed - e0), abs(fixed - e1)) < 1e-6:
+                s0, s1 = max(lo, c0), min(hi, c1)
+                found.update(k * fine for k in range(math.ceil(s0 / fine - 1e-9),
+                                                     math.floor(s1 / fine + 1e-9) + 1)
+                             if lo + 1e-6 < k * fine < hi - 1e-6)
+        points = sorted(found)
+        return points if a < b else points[::-1]
+    n = math.ceil(outer / coarse - 1e-9)
+    for i in range(-n, n):
+        for j in range(-n, n):
+            box = (max(-outer, i * coarse), max(-outer, j * coarse),
+                   min(outer, (i + 1) * coarse), min(outer, (j + 1) * coarse))
+            if box[2] - box[0] < 1e-6 or box[3] - box[1] < 1e-6:
+                continue
+            for x0, y0, x1, y1 in _subtract(box, holes):
+                ring = [(x0, y0)]
+                ring += [(x, y0) for x in side(x0, x1, y0, 0)]
+                ring.append((x1, y0))
+                ring += [(x1, y) for y in side(y0, y1, x1, 1)]
+                ring.append((x1, y1))
+                ring += [(x, y1) for x in side(x1, x0, y1, 0)]
+                ring.append((x0, y1))
+                ring += [(x0, y) for y in side(y1, y0, x0, 1)]
+                ids = [vertex(x, y) for x, y in ring]
+                if len(ids) == 4:
+                    faces.append(tuple(ids))
+                    continue
+                cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
+                middle = vertex(cx, cy, height(cx, cy))
+                faces += [(middle, a, b) for a, b in zip(ids, ids[1:] + ids[:1])]
+    for sx0, sy0, sx1, sy1 in strips:
+        for i in range(math.floor(sx0 / fine), math.ceil(sx1 / fine)):
+            for j in range(math.floor(sy0 / fine), math.ceil(sy1 / fine)):
+                x0, y0 = max(sx0, i * fine), max(sy0, j * fine)
+                x1, y1 = min(sx1, (i + 1) * fine), min(sy1, (j + 1) * fine)
+                if x1 - x0 > 1e-6 and y1 - y0 > 1e-6:
+                    faces.append((vertex(x0, y0), vertex(x1, y0), vertex(x1, y1), vertex(x0, y1)))
+    return faces
 
 
 def build_wall_mesh(plan):
@@ -742,7 +1448,9 @@ def _terraced_ground(plan):
         level = grading.level_at(sum(xs) / len(xs), sum(ys) / len(ys))
         for i in range(math.floor(min(xs) / cell), math.floor(max(xs) / cell) + 1):
             for j in range(math.floor(min(ys) / cell), math.floor(max(ys) / cell) + 1):
-                caps[i, j].append((top, level))
+                low = _pad_lowest(top, i * cell, j * cell, (i + 1) * cell, (j + 1) * cell)
+                if low < math.inf:
+                    caps[i, j].append((low, level))
     vertices, faces, ids = [], [], {}
     iso_edges, verge_edges, line_edges = [], defaultdict(list), defaultdict(list)
 
@@ -1571,7 +2279,10 @@ class Grading:
         self.streets = Field(plan)
         self.field = self.streets
         self.stairs, self.spans = [], {}
-        self.wild = 0
+        self.wild = getattr(plan, 'wild', 0) if plan.heights else 0
+        # On hills the outer roads run through the wild land on their own
+        # level (a terraced city's along its valley floor).
+        self.outers = outer_roads(plan) if self.wild and not self.terraces else []
         if self.terraces:
             self.wild = self.terraces.get('wild', 0)
             self.base = _Facets(settings.radius + self.wild,
@@ -1602,9 +2313,16 @@ class Grading:
         curb = settings.curb_height
         # Under a raised highway's decks (and cut back beside its ramps).
         self.decks = deck_profiles(plan)
-        # The ground is graded up and down to each foundation (``_shaped``).
+        # The ground is graded up and down to each foundation and forecourt
+        # (``_shaped``).
+        self.forecourts = {}
+        for lot in plan.lots:
+            court = forecourt(lot, plan, self.surface, self.nodes)
+            if court is not None:
+                self.forecourts[lot.id] = court
         self.pads = ([(footprint(lot.center, lot.width, lot.depth, lot.rotation),
                        curb + lot.level) for lot in plan.lots] +
+                     [(court.polygon, court) for court in self.forecourts.values()] +
                      [(site_footprint(poi), curb + poi.level) for poi in plan.pois] +
                      [(footprint(yard.center, yard.width, yard.depth, 0.0), curb + yard.level)
                       for yard in getattr(plan, 'yards', ())])
@@ -1671,6 +2389,35 @@ class Grading:
                      self.under_decks(x, y))
         if self.field.value(x, y) <= self.walk + .5:
             height = max(height, level + CURB_BOTTOM_TERRAIN + .05)
+        if self.outers:
+            height = min(self._outer_section(x, y, height), self.under_decks(x, y))
+        return height
+
+    def _outer_section(self, x, y, height):
+        """The ground (``height``) beside an outer road out in the wild land:
+        level with its edges out to the ground grid's next line, then cut or
+        filled at OUTER_SLOPE back to the hills."""
+        width, deep = OUTER_DITCH
+        for outer in self.outers:
+            a, b = (x, y) if outer.axis == 0 else (y, x)
+            along = (a - outer.cut) * outer.sign
+            off = abs(b - outer.centre)
+            if along < 0 or along > outer.length or off > OUTER_CORRIDOR:
+                continue
+            bed = math.ceil(outer.band / GROUND_CELL_TERRAIN - 1e-9) * GROUND_CELL_TERRAIN
+            side = math.copysign(1.0, b - outer.centre)
+            lateral = outer.centre + side * min(off, outer.band)
+            edge = outer.top(along, lateral) + self.offset
+            beyond = max(0.0, off - bed)
+            # How far the hills stand over the road past the ditch: a ditch
+            # in a cutting, none on an embankment.
+            rim = outer.centre + side * (bed + width)
+            hill = self.surface(*((a, rim) if outer.axis == 0 else (rim, a))) + self.offset
+            share = min(1.0, max(0.0, (hill - edge - OUTER_DITCH_CUT[0]) / OUTER_DITCH_CUT[1]))
+            high = edge + OUTER_SLOPE * max(0.0, beyond - width * share)
+            height = min(max(height, edge - OUTER_SLOPE * beyond), high)
+            if share and beyond < width:
+                height = min(height, edge - deep * share * (1 - abs(2 * beyond / width - 1)))
         return height
 
     def under_decks(self, x, y, beside=True):
@@ -1696,10 +2443,12 @@ class Grading:
                 continue
             gap = _polygon_distance(polygon, x, y)
             distance = max(0.0, gap - PAD_SHOULDER)
-            high = top - PAD_CLEAR + PAD_CUT_SLOPE * distance
-            low = top - PAD_CLEAR - PAD_FILL_SLOPE * distance
+            here = _pad_top(top, x, y)
+            high = here - PAD_CLEAR + PAD_CUT_SLOPE * distance
+            low = here - PAD_CLEAR - PAD_FILL_SLOPE * distance
             ceiling, floor = min(ceiling, high), max(floor, low)
-            if gap < nearest[0]:
+            # Of pads as near (side by side), the lower.
+            if (gap, high) < nearest[:2]:
                 nearest = (gap, high, low)
         if nearest[0] == math.inf:
             return height
@@ -2006,7 +2755,7 @@ def heightmap(plan, resolution, column_sign=1, row_sign=1):
                 continue
             here = grading.level_at(x, y)
             height = grading.natural(x, y, here) if terraced else surface(x, y) + offset
-            tops = [top for polygon, top, level in grading.hash.get(
+            tops = [_pad_top(top, x, y) for polygon, top, level in grading.hash.get(
                 (math.floor(x / PAD_CELL), math.floor(y / PAD_CELL)), ())
                 if level == here and _polygon_distance(polygon, x, y) <= 0.0]
             row.append(tops[0] if tops else grading._shaped(x, y, height, here))
@@ -2086,8 +2835,8 @@ def build_outer_road_mesh(plan, street_vertices):
         heights = {}
         if outer.deck:
             # Off a raised highway's deck: shoulders flush with the carriageway.
-            heights = {round(b, 8): 0.0 for b in (low, outer.centre - outer.half,
-                                                   outer.centre + outer.half, high)}
+            heights = {round(b, 8): outer.top(0.0, b) for b in (low, outer.centre - outer.half,
+                                                                outer.centre + outer.half, high)}
             street_vertices = ()
         for x, y, z in street_vertices:
             a, b = (x, y) if outer.axis == 0 else (y, x)
@@ -2106,15 +2855,19 @@ def build_outer_road_mesh(plan, street_vertices):
             if alongs[-1] < fade_start - 1e-6:
                 following = min(following, fade_start)
             alongs.append(min(following, length))
+        # On hills a row wherever its level bends.
+        alongs = sorted(set(alongs) | {a for a in outer.bends() if 0 < a < length})
         road_seed = seed * 31 + index
 
         def shoulder(lateral, along):
             """Footway height at the cut, ramping down to the shoulder level."""
-            return heights.get(round(lateral, 8), 0.0) * max(0.0, 1 - along / OUTER_RAMP)
+            key = round(lateral, 8)
+            raised = heights.get(key, outer.top(0.0, lateral)) - outer.top(0.0, lateral)
+            return outer.top(along, lateral) + raised * max(0.0, 1 - along / OUTER_RAMP)
 
         def surface(lateral, along, carriageway):
             if carriageway:
-                return 0.0
+                return outer.top(along, lateral)
             return shoulder(lateral, along)
 
         for a0, a1 in zip(alongs, alongs[1:]):
@@ -2137,26 +2890,30 @@ def build_outer_road_mesh(plan, street_vertices):
                     if lateral not in heights:
                         continue
                     toward = (0.0, -side, 0.0) if outer.axis == 0 else (-side, 0.0, 0.0)
-                    face([outer.world(a0, lateral, 0.0), outer.world(a1, lateral, 0.0),
+                    face([outer.world(a0, lateral, outer.top(a0, lateral)),
+                          outer.world(a1, lateral, outer.top(a1, lateral)),
                           outer.world(a1, lateral, shoulder(lateral, a1)),
                           outer.world(a0, lateral, shoulder(lateral, a0))], 2, toward)
             for side, lateral in ((-1, laterals[0]), (1, laterals[-1])):
                 outward = (0.0, side, 0.0) if outer.axis == 0 else (side, 0.0, 0.0)
                 face([outer.world(a0, lateral, shoulder(lateral, a0)),
                       outer.world(a1, lateral, shoulder(lateral, a1)),
-                      outer.world(a1, lateral, CURB_BOTTOM), outer.world(a0, lateral, CURB_BOTTOM)],
+                      outer.world(a1, lateral, outer.top(a1, lateral) + CURB_BOTTOM),
+                      outer.world(a0, lateral, outer.top(a0, lateral) + CURB_BOTTOM)],
                      2, outward)
         outward = (outer.sign, 0.0, 0.0) if outer.axis == 0 else (0.0, outer.sign, 0.0)
         for l0, l1 in zip(laterals, laterals[1:]):
-            face([outer.world(length, l0, 0.0), outer.world(length, l1, 0.0),
-                  outer.world(length, l1, CURB_BOTTOM), outer.world(length, l0, CURB_BOTTOM)],
-                 2, outward)
+            face([outer.world(length, l0, outer.top(length, l0)),
+                  outer.world(length, l1, outer.top(length, l1)),
+                  outer.world(length, l1, outer.top(length, l1) + CURB_BOTTOM),
+                  outer.world(length, l0, outer.top(length, l0) + CURB_BOTTOM)], 2, outward)
     return vertices, faces, materials
 
 
 def outer_road_dashes(plan):
-    """Worn lane dashes on the outer highways: quads (four xy points) at the
-    lane lines, thinning out and gone where the surface breaks up."""
+    """Worn lane dashes on the outer highways: quads (four points just over
+    the road) at the lane lines, thinning out and gone where the surface
+    breaks up."""
     quads = []
     seed = plan.settings.seed
     for index, outer in enumerate(outer_roads(plan)):
@@ -2176,11 +2933,15 @@ def outer_road_dashes(plan):
                     continue
                 if not outer_asphalt(outer, road_seed, middle, lateral):
                     continue
-                quad = [outer.world(along, lateral - .06, 0.0)[:2],
-                        outer.world(along + 3, lateral - .06, 0.0)[:2],
-                        outer.world(along + 3, lateral + .06, 0.0)[:2],
-                        outer.world(along, lateral + .06, 0.0)[:2]]
-                area = sum(ax * by - bx * ay for (ax, ay), (bx, by) in zip(quad, quad[1:] + quad[:1]))
+                # Over the road all along, where its level bends under it too.
+                ends = (outer.top(along, lateral), outer.top(along + 3, lateral))
+                lift = .004 + max(0.0, outer.top(middle, lateral) - sum(ends) / 2)
+                quad = [outer.world(along, lateral - .06, ends[0] + lift),
+                        outer.world(along + 3, lateral - .06, ends[1] + lift),
+                        outer.world(along + 3, lateral + .06, ends[1] + lift),
+                        outer.world(along, lateral + .06, ends[0] + lift)]
+                area = sum(ax * by - bx * ay for (ax, ay, _), (bx, by, _) in
+                           zip(quad, quad[1:] + quad[:1]))
                 quads.append(quad if area > 0 else quad[::-1])
             along += 7.0
     return quads

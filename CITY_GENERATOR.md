@@ -38,6 +38,7 @@ The original single-building and bulk operators remain available. Architecture u
 | Road Corner Radius | Fraction of the tier fillet radius: 26 m highway, 18 m arterial, 12 m collector, 8 m local. 0 keeps square turns |
 | Minimum Road Setback | Extra parcel clearance beyond street/ramp reservations |
 | Sidewalk Width / Curb Height | Default 2 m footway and 0.15 m curb |
+| Rural Streets | Auto (default): on Rolling Hills, suburban, industrial and outskirts streets get [gravel shoulders, ditches and culverts](#rural-streets) instead of curbs and footways; a flat city keeps them. On or Off whatever the terrain |
 | Wasteland Extent | Open ground beyond the city edge, default 12000 m. The city stays inside the invisible game walls; the ground keeps going to the horizon |
 | Highway | Raised (default): a [viaduct straight across the city](#raised-highway), the streets passing under it, with diamond interchanges; at grade again out in the wasteland. At Grade: a street like the others, through the city's junctions |
 | Highway Reach | How far the highways continue past the city edge, default 3000 m (never past the wasteland); the last 40% breaks up into the ground. 0 ends them at the edge |
@@ -144,8 +145,9 @@ With **Terrain: Rolling Hills** the city stands on gentle seeded hills.
 
 - **Hills.** Every lattice node (street corner) gets a height from smooth
   noise, up to **Relief** metres from the lowest to the highest. The hills
-  fade to level over the outermost two blocks, so the wasteland and the
-  highways leaving the city stay level with the map's edge.
+  carry on past the map's edge into 20 blocks of wild land, graded with the
+  city, and fade to level over its last four blocks into the flat far
+  wasteland.
 - **Grades.** The node heights are then graded until no street is steeper
   than its tier allows: highways 4%, arterials 5%, collectors 6%, local
   streets 8%. Open ground without a street is held to 12%. A site's block
@@ -154,7 +156,11 @@ With **Terrain: Rolling Hills** the city stands on gentle seeded hills.
   blend of each block's four corners. Along a street that is the street's own
   profile, flat at both junctions, and steepest mid-block at 1.5 times the
   straight grade (the limits above already allow for it). Carriageways,
-  footways, curbs, lane paint and the ground all ride on it.
+  footways, curbs, lane paint and the ground all ride on it. Past the map's
+  edge it turns, over two blocks, into a smooth spline through the heights:
+  with no streets to ease out flat, the smoothsteps would step every
+  hillside at each lattice line. The wild land's ground is a quarter-block
+  grid (finer along the highway), stitched to the city's with no cracks.
 - **Level pads.**
   - Every building and site stands on a level pad at the height of the road
     in front of its middle, so its front door is at street level.
@@ -164,16 +170,21 @@ With **Terrain: Rolling Hills** the city stands on gentle seeded hills.
     (a fill), so a building stands in its ground rather than on a plinth.
     Between two buildings at different levels the nearer one's grading wins.
   - Near a building the ground also meets the footways at those slopes, so
-    its front yard runs from the footway to the door. A building's paved
-    approach slopes from the footway to its pad.
+    its front yard runs from the footway to the door.
+  - A building's paved forecourt follows the street-level surface back from
+    the footway (at the footway's own height where it meets it), so
+    forecourts side by side meet level; only an apron at the facade, 1.5 m
+    or more and no steeper than 1:2, climbs or drops to the floor (the whole
+    of a forecourt too short for one). The ground is graded to the
+    forecourts as to the foundations.
   - A house (not a downtown tower) whose foundation stands further off a
     footway beside it than its graded ground can make up is not built, with
     the rest of its row: it would stand along a retaining wall.
 - **Retaining curbs.** On terrain the curbs reach 2.5 m down. Where the
   ground lies below its street away from the buildings, the curb shows as a
   concrete wall holding up the footway.
-- **How high.** The map's level edge and the highway's 4% through the centre
-  hold small maps lower than the setting. At the default 30 m, typical hills
+- **How high.** The highway's 4% through the centre holds small maps lower
+  than the setting. At the default 30 m, typical hills
   are about 12 m on a radius-6 map, 18 m at radius 8 and 24 m at radius 12.
 
 The plan records every node's height, and each lot, site and stop's
@@ -552,12 +563,51 @@ wasteland for **Highway Reach** metres past the map's edge
   seeded value noise on 4 m rows, and the patches thin out to bare ground
   before the end. Worn lane dashes run on and stop where the surface goes.
 - **Ground.** Breaks show the ground material at road level; the edges and the
-  far end drop to the curb bottom. The wasteland ground leaves a gap for the
-  road, so no two surfaces overlap.
+  far end drop to the curb bottom. The far wasteland's ground leaves a gap
+  for the road, so no two surfaces overlap.
+- **Through the hills** (Rolling Hills). The highway's line across the wild
+  land is graded as a highway (4%), and the outer road follows its own level
+  (every 10 m), the cross-fall it has at the city's edge eased out over
+  30 m. The ground runs on under it, meets its edges out to the ground
+  grid's next line and climbs from them at 1:2 into a cutting or falls at
+  1:2 down an embankment to the hills. In a cutting a ditch 6 m wide and
+  0.8 m deep runs at the slope's foot. A raised highway comes down onto the
+  same level. A Terraced city's highway leaves along a level valley floor
+  instead.
 
 Each end is listed in the plan's `outer_roads` (start node, direction, width,
 length, fade). One leaving a raised deck has `deck` set: it starts where the
 deck meets the ground, with its shoulders flush and no street mesh to meet.
+
+## Rural streets
+
+With **Rural Streets** on (Auto, the default, turns it on with Rolling
+Hills, so a flat city stays as it was; On and Off whatever the terrain),
+local streets and collectors whose blocks either side are suburban or
+industrial, or out past the city's edge or the map's, have a rural section
+(in a small town, every street out of its old town):
+
+- **Shoulder.** A gravel shoulder flush with the road where the footway
+  would be, with no curb. Where a footway meets one (at a junction with an
+  urban street) it rises from the shoulder's level over 2 m.
+- **Ditch.** Beyond the shoulder a V-ditch 3 m wide and 0.7 m deep (slopes
+  of about 1:2, walkable). Near the ditches the ground is made on the
+  street mesh's 1.5 m grid and cut along the shoulder's edge, the ditch's
+  bottom and its outer edge, so the V is exact and the ground meets the
+  shoulder at its own vertices (just under it, behind its skirt).
+- **Culverts.** A ditch runs along each side of the street between its
+  junctions. It stops 1 m clear of where a cross street's ditch would be,
+  and at anything in its way (a driveway, a site's approach, a pier), at a
+  culvert: a concrete headwall across the ditch standing 0.15 m over the
+  ground, with a pipe's dark opening at the bottom of its face
+  (`City_Culverts`). No ditch is shorter than 4 m.
+- **Driveways.** A house on a rural street has a lawn in front and a
+  driveway (3.5 m wide, 8 m to an industrial building) from the shoulder
+  over a culvert to its front, instead of a forecourt paved across the plot.
+
+A Terraced city's streets keep their curbs and footways: their outer edges
+meet its retaining walls. The plan's `rural` lists the rural streets'
+lattice edges; the metadata lists each ditch and culvert.
 
 ## Points of interest
 
@@ -688,12 +738,13 @@ the same way.
 
 | Field | Contents |
 | --- | --- |
-| `city` | Preset, shape, terrain, relief, plateau height and podiums, seed, origin, extent, block size, wasteland, curb height, sidewalk width, whether small props were modelled, interiors listed and water modelled |
+| `city` | Preset, shape, terrain, relief, `wild_extent` (half the side of the graded wild land round the map; 0 on a flat city), plateau height and podiums, `rural_streets`, seed, origin, extent, block size, wasteland, curb height, sidewalk width, whether small props were modelled, interiors listed and water modelled |
 | `districts` | District seeds: id, role, style, position |
-| `roads` | Every route: tier, width, lattice nodes, centreline points at carriageway level (footways run along both sides) |
+| `roads` | Every route: tier, width, lattice nodes, centreline points at carriageway level (footways run along both sides), `rural_edges` (k: from node k to k + 1 it has gravel shoulders and ditches instead) |
 | `junctions` | Lattice nodes with roads: position, radius (widest half-width plus footway, or the turning circle plus footway), number of roads, `cul_de_sac` |
 | `driving_loops`, `outer_roads` | The driving circuits; the highways beyond the city edge (start, forward, length, fade) |
 | `freeway` | A raised highway (null at grade): width, interchanges (cross-street node and position), the deck's centreline at road level (`mainline`, every 8 m) and its two `touchdown` ends, each ramp (kind `on` or `off`, interchange, side, width, climb and taper lengths, centreline from the cross street) and the pier feet |
+| `ditches`, `culverts` | Each rural street's ditch: `start` and `end` along its bottom, width, depth and `outward` from the street; each culvert at the bottom of its headwall's face (the pipe's opening), `facing` into its ditch |
 | `terraces`, `ramps`, `stairs` | Terraced terrain: each terrace's kind (`plateau`, `podium`), rise, lattice blocks on top and `slope_blocks` (its natural sides); each ramp's terrace, lattice nodes from the top down, their positions and `viaducts` (deck ends at road level and pier feet); each stair's terrace, top and foot (the middle of the top and bottom steps' outer edges, at the footways), width, step count and riser. Empty on other terrain |
 | `buildings` | One per lot: object name, style, district, condition, damage, floors, height, interiors, `structure` (`FITTED`, `PARTITIONS`, `BEARING` or `NONE`), `footprint` (`RECT`, `L`, `T`, `U` or `O`) and `wings` (two opposite ground corners per wing, building space), enterable floors, party walls, block group, footprint (position at the base, forward = front, width, depth), and `entrances` (each street door's position, outward forward and width) |
 | `sites` | Points of interest: grounds object, kind, variant, condition, pad; their buildings with the same fields as above |
@@ -738,7 +789,7 @@ For scale: a radius-8 city with every building detailed has about 490 buildings 
 
 ## Plan data
 
-A JSON text datablock (`<collection>_plan.json`) stores the versioned plan. Coordinates are relative to the collection's stored `origin`; road nodes multiply by `block_size`, while lot positions/dimensions and path points are metres. Schema version 20 adds `yards` (courtyards and estate grounds: `id`, `kind`, `center`, `width`, `depth`, `style`, `district`, `seed`, `keep_out`, `level`). Version 19 adds `district_superblocks` to the settings. Version 18 adds `highway` to the settings (`RAISED` or `GRADE`), `freeway` to the plan (a raised highway's layout and heights; empty at grade), `deck` to an outer road leaving a raised deck and `freeway` (the interchanges it leaves and rejoins at) to a driving circuit on one. Version 17 grades the wild land round a terraced city with it: `terraces` gains `wild` (blocks of it beyond the map's edge) and its `ground` covers them. Version 16 raised every corner of a terrace's blocks (the streets round its edge run along the top) and keeps terraces in the downtown and residential districts at the city's edge. Version 15 gave a ramp one road class and its junctions' heights along its curved route. Version 14 added each terrace's natural sides: `slopes` (`axis`, downhill `sign`, crest lattice `line`, `cells`) and `corners` (a `cell` joining two slopes, with each slope's `line` and `sign` along `x` and `y`). Version 13 added `plateau_height` and `podiums` to the settings and `terraces` to the plan: `regions` (each terrace's `cells`, `step` and `kind`), `ramps` (lattice `nodes` from the top down and each one's `raises` above the hills), `stairs` (`low` and `high` lattice nodes, `width`) and `ground` (the hills' node heights under the terraces; `heights` are then the road level). Version 12 added `terrain` and `relief` to the settings, `heights` (each lattice node's graded height, where it is not zero) to the plan, and `level` (pad or road height) to every lot, site and stop. Version 11 added `shape` and `irregularity` to the settings. Version 10 added `bulb` to each lot: the cul-de-sac node a house round a turning circle faces (empty for the rest). Those houses are turned to face the circle, so a lot's `rotation` is no longer always a quarter turn. Version 9 added `preset` to the settings (`CITY` or `SMALL_TOWN`). Version 8 added `culdesacs` (turning-circle node and radius). Version 7 added `party_walls` and `group` to each lot (downtown towers built against neighbours). Version 6 added `outer_roads`. Version 5 added `pois` (kind, centre, width along the frontage, depth, rotation, frontage edge, blocks, seed, condition, damage, approach) and `shelters` (position, rotation, variant, road edge); a site's layout is chosen by `sites.compose` from its seed. Version 4 added `kind`, `condition`, `interiors` and `damage` to each lot alongside the version-3 `paths`: one entry per continuous same-tier route with its lattice `nodes`, flattened metre-space `points` and `width`. Locations and lots carry their district `style`; the per-style profile table is code (`STYLE_PROFILE`), not part of the file. No legacy-plan importer is included.
+A JSON text datablock (`<collection>_plan.json`) stores the versioned plan. Coordinates are relative to the collection's stored `origin`; road nodes multiply by `block_size`, while lot positions/dimensions and path points are metres. Schema version 21 adds `rural_streets` to the settings, `rural` (the rural streets' lattice edges) and `wild` (blocks of graded wild land round the map; on Rolling Hills `heights` reach into it). Version 20 adds `yards` (courtyards and estate grounds: `id`, `kind`, `center`, `width`, `depth`, `style`, `district`, `seed`, `keep_out`, `level`). Version 19 adds `district_superblocks` to the settings. Version 18 adds `highway` to the settings (`RAISED` or `GRADE`), `freeway` to the plan (a raised highway's layout and heights; empty at grade), `deck` to an outer road leaving a raised deck and `freeway` (the interchanges it leaves and rejoins at) to a driving circuit on one. Version 17 grades the wild land round a terraced city with it: `terraces` gains `wild` (blocks of it beyond the map's edge) and its `ground` covers them. Version 16 raised every corner of a terrace's blocks (the streets round its edge run along the top) and keeps terraces in the downtown and residential districts at the city's edge. Version 15 gave a ramp one road class and its junctions' heights along its curved route. Version 14 added each terrace's natural sides: `slopes` (`axis`, downhill `sign`, crest lattice `line`, `cells`) and `corners` (a `cell` joining two slopes, with each slope's `line` and `sign` along `x` and `y`). Version 13 added `plateau_height` and `podiums` to the settings and `terraces` to the plan: `regions` (each terrace's `cells`, `step` and `kind`), `ramps` (lattice `nodes` from the top down and each one's `raises` above the hills), `stairs` (`low` and `high` lattice nodes, `width`) and `ground` (the hills' node heights under the terraces; `heights` are then the road level). Version 12 added `terrain` and `relief` to the settings, `heights` (each lattice node's graded height, where it is not zero) to the plan, and `level` (pad or road height) to every lot, site and stop. Version 11 added `shape` and `irregularity` to the settings. Version 10 added `bulb` to each lot: the cul-de-sac node a house round a turning circle faces (empty for the rest). Those houses are turned to face the circle, so a lot's `rotation` is no longer always a quarter turn. Version 9 added `preset` to the settings (`CITY` or `SMALL_TOWN`). Version 8 added `culdesacs` (turning-circle node and radius). Version 7 added `party_walls` and `group` to each lot (downtown towers built against neighbours). Version 6 added `outer_roads`. Version 5 added `pois` (kind, centre, width along the frontage, depth, rotation, frontage edge, blocks, seed, condition, damage, approach) and `shelters` (position, rotation, variant, road edge); a site's layout is chosen by `sites.compose` from its seed. Version 4 added `kind`, `condition`, `interiors` and `damage` to each lot alongside the version-3 `paths`: one entry per continuous same-tier route with its lattice `nodes`, flattened metre-space `points` and `width`. Locations and lots carry their district `style`; the per-style profile table is code (`STYLE_PROFILE`), not part of the file. No legacy-plan importer is included.
 
 ## Code and verification
 

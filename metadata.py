@@ -377,6 +377,9 @@ class CityMetadata:
                            'riser': _r(layout['riser'])})
         return terraces, ramps, stairs
 
+    def _ditches(self):
+        return _ditch_lists(self.plan, self.space, self.origin)
+
     def _freeway(self, node_point):
         """A raised highway: its deck's centreline, interchanges, ramps (from
         the cross street, at grade, to where the lane has joined the deck) and
@@ -432,11 +435,15 @@ class CityMetadata:
         # A cul-de-sac's turning circle sets its junction radius.
         for bulb in getattr(plan, 'culdesacs', ()):
             junctions.setdefault(tuple(bulb['node']), []).append(bulb['radius'])
+        rural = {tuple(sorted((tuple(a), tuple(b)))) for a, b in getattr(plan, 'rural', ())}
         roads = [{'id': path['id'], 'tier': path['tier'], 'width': path['width'],
                   'nodes': _flat(path['nodes']),
                   'points': _flat(space.point((ox + x, oy + y, oz + surface(x, y)))
-                                  for x, y in path['points'])}
+                                  for x, y in path['points']),
+                  'rural_edges': [k for k, (a, b) in enumerate(zip(path['nodes'], path['nodes'][1:]))
+                                  if tuple(sorted((tuple(a), tuple(b)))) in rural]}
                  for path in plan.paths]
+        ditches, culverts = self._ditches()
         bulbs = {tuple(bulb['node']) for bulb in getattr(plan, 'culdesacs', ())}
         terraces, ramps, stairs = self._terraces(node_point)
         markers = sorted(self.markers, key=lambda m: m['type'])
@@ -456,6 +463,9 @@ class CityMetadata:
                      'small_props_modelled': self.props_modelled,
                      'interiors_listed': self.interiors, 'water_modelled': self.water,
                      'terrain': settings.terrain, 'relief': settings.relief,
+                     'rural_streets': settings.rural_streets,
+                     'wild_extent': _r((settings.radius + getattr(plan, 'wild', 0)) * size
+                                       if getattr(plan, 'wild', 0) else 0.0),
                      'plateau_height': settings.plateau_height, 'podiums': settings.podiums,
                      'highway': settings.highway},
             'districts': [{'id': loc.id, 'role': loc.role, 'style': loc.style,
@@ -479,17 +489,50 @@ class CityMetadata:
             'ramps': ramps,
             'stairs': stairs,
             'freeway': self._freeway(node_point),
+            'ditches': ditches,
+            'culverts': culverts,
             'buildings': self.buildings,
             'sites': self.sites,
             'yards': self.yards,
             'transit_stops': self.stops,
             'markers': markers,
             'counts': {'buildings': len(self.buildings), 'sites': len(self.sites),
-                       'yards': len(self.yards),
+                       'yards': len(self.yards), 'ditches': len(ditches),
+                       'culverts': len(culverts),
                        'transit_stops': len(self.stops),
                        'markers': [{'type': kind, 'count': count}
                                    for kind, count in sorted(counts.items())]},
         }
+
+
+def _ditch_lists(plan, space, origin):
+    """The rural streets' ditches (along each one's bottom) and the culverts
+    where they end (at the bottom of each headwall's face, facing into the
+    ditch)."""
+    from .streets import DITCH_DEPTH, DITCH_WIDTH, GROUND_Z, Grading, ditches
+    found = ditches(plan)
+    if not found:
+        return [], []
+    grading = Grading(plan) if plan.heights else None
+    ox, oy, oz = origin
+
+    def point(ditch, along, across):
+        x, y = (along, across) if ditch.axis == 0 else (across, along)
+        z = (grading.ground(x, y) if grading else GROUND_Z) - DITCH_DEPTH
+        return space.point((ox + x, oy + y, oz + z))
+
+    def direction(ditch, along, across):
+        return space.direction(*((along, across) if ditch.axis == 0 else (across, along)))
+    listed, culverts = [], []
+    for k, ditch in enumerate(found):
+        ends = [point(ditch, a, ditch.bottom) for a in (ditch.start, ditch.end)]
+        listed.append({'id': f'ditch_{k}', 'start': ends[0], 'end': ends[1],
+                       'width': DITCH_WIDTH, 'depth': DITCH_DEPTH,
+                       'outward': direction(ditch, 0.0, float(ditch.side))})
+        for end, sign in ((ends[0], 1.0), (ends[1], -1.0)):
+            culverts.append({'id': f'culvert_{len(culverts)}', 'ditch': f'ditch_{k}',
+                             'position': end, 'facing': direction(ditch, sign, 0.0)})
+    return listed, culverts
 
 
 def _segment_distance(px, py, row):

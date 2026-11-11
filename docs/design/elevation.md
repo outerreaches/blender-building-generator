@@ -392,8 +392,8 @@ The aim is the scale of Akira or Judge Dredd at a cost the game can run.
 | v0.21 (done) | Terrain field (Flat, Rolling), road grading, pads and plinths, ground and street meshes on the terrain, metadata heights, heightmap export |
 | v0.22 (done) | Terraced style: plateau and podiums behind retaining walls, ramp streets and stairs, exact walls where ground meets a street |
 | v0.23 (done) | Raised highway: a straight viaduct across the city, the streets passing under it, diamond interchanges with tapered ramps, at grade again in the wasteland |
-| v0.24 | Cross-sections: ditches, embankments and cuttings, culverts; hills continued past the map's edge |
-| v0.25 | Levels: structure types, road tunnels at the map edge, rail with crossings and a freight siding, subway routes with station entrances, sewer network data with manholes |
-| v0.26 | Freeway (§4b): free-flowing alignment with gentle curves, partial cloverleafs |
-| v0.27 | Megacity preset: megablocks, stacked decks, skybridges, collapsed spans, instanced modules, skyline ring |
+| v0.25 (done) | Cross-sections: rural streets with shoulders, ditches and culverts (Flat and Rolling; Rural Streets setting); the highway in cuttings and on embankments; hills continued past the map's edge (Rolling); forecourts following sloping streets |
+| v0.26 | Levels: structure types, road tunnels at the map edge, rail with crossings and a freight siding, subway routes with station entrances, sewer network data with manholes |
+| v0.27 | Freeway (§4b): free-flowing alignment with gentle curves, partial cloverleafs |
+| v0.28 | Megacity preset: megablocks, stacked decks, skybridges, collapsed spans, instanced modules, skyline ring |
 | Later | Walkable subway tunnels and platforms; walkable sewers with collapsed sections and breaches into the subway |

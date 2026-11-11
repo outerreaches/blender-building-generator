@@ -11,10 +11,11 @@ from .metadata import SPACES as METADATA_SPACES, CityMetadata
 from .spec import BuildingSpec
 from .sites import (KINDS as SITE_KINDS, PAD_THICKNESS, VARIANTS as SITE_VARIANTS,
                     compose as compose_site, compose_yard)
-from .streets import (Grading, build_freeway_mesh, build_ground_mesh, build_outer_road_mesh,
-                      build_stair_mesh, build_street_mesh, build_viaduct_mesh, build_wall_mesh,
-                      footprint, freeway_markings, junctions, lot_approach, lot_yard,
-                      outer_road_dashes, pavement_height, site_footprint)
+from .streets import (Grading, approach_reach, build_culvert_mesh, build_freeway_mesh,
+                      build_ground_mesh, build_outer_road_mesh, build_stair_mesh,
+                      build_street_mesh, build_viaduct_mesh, build_wall_mesh, footprint,
+                      freeway_markings, junctions, lot_approach, lot_yard, outer_road_dashes,
+                      site_footprint)
 from .styles import NO_STRUCTURE, STYLE_ITEMS, STYLE_COLORS, building_recipe
 from .city_export import store_city_metadata
 from .building_assets import (add_site_material_slots, addon_version, create_rubble,
@@ -68,6 +69,7 @@ def build_roads(plan, collection):
                       material('City_Asphalt', (.085, .09, .10, 1)))
     obj.data.materials.append(material('City_Pavement', (.42, .41, .38, 1)))
     obj.data.materials.append(material('City_Curb', (.52, .50, .46, 1)))
+    obj.data.materials.append(material('City_Gravel', (.36, .33, .28, 1)))
     for poly, index in zip(obj.data.polygons, indices):
         poly.material_index = index
     obj['surface_role'] = 'streets'
@@ -84,6 +86,22 @@ def build_roads(plan, collection):
         outer['reach_m'] = [road['length'] for road in plan.outer_roads]
         outer.parent = obj
     return obj
+
+
+def build_culverts(plan, collection, origin):
+    """Headwalls and pipe openings where the rural streets' ditches end."""
+    vertices, faces, indices = build_culvert_mesh(plan)
+    if not faces:
+        return None
+    culverts = mesh_object('City_Culverts', vertices, faces, collection,
+                           material('City_Retaining_Wall', (.46, .45, .42, 1)))
+    culverts.data.materials.append(material('City_Culvert_Pipe', (.03, .03, .03, 1)))
+    for poly, index in zip(culverts.data.polygons, indices):
+        poly.material_index = index
+    culverts['surface_role'] = 'culverts'
+    culverts['culvert_count'] = len(faces) // 12
+    culverts.location = origin
+    return culverts
 
 
 def build_terrace_works(plan, collection, origin):
@@ -126,9 +144,6 @@ def build_freeway(plan, collection, origin):
     return obj
 
 
-BULB_PATH = 3.0   # Width of the path from a house round a turning circle to its footway.
-
-
 def build_frontage(lot, plan, collection, sunken=None, grading=None):
     """Level foundation and a clear concrete approach from sidewalk to entrance.
 
@@ -136,7 +151,8 @@ def build_frontage(lot, plan, collection, sunken=None, grading=None):
     storey: the foundation drops there to the underside of its ground slab,
     so the two never share the floor plane. On terrain (``grading``) the
     foundation is the lot's level pad: a plinth down to the lowest graded
-    ground under it, and an approach sloping from the footway to the pad.
+    ground under it, and its forecourt (``streets.Forecourt``) from the
+    footway to the pad.
     """
     h = plan.settings.curb_height + lot.level
     vertices, faces = [], []
@@ -152,35 +168,21 @@ def build_frontage(lot, plan, collection, sunken=None, grading=None):
                      ((0, 3, 2, 1), (4, 5, 6, 7), (0, 1, 5, 4),
                       (1, 2, 6, 5), (2, 3, 7, 6), (3, 0, 4, 7)))
 
-    def ramp(x0, y0, x1, y1, front):
-        """A slab whose top runs from the footway (front corners, y0) to the
-        pad (back corners, y1); the top is two triangles."""
-        offset = len(vertices)
-        vertices.extend([(x0, y0, floor), (x1, y0, floor), (x1, y1, floor), (x0, y1, floor),
-                         (x0, y0, front[0]), (x1, y0, front[1]), (x1, y1, h), (x0, y1, h)])
-        faces.extend(tuple(offset + i for i in f) for f in
-                     ((0, 3, 2, 1), (4, 5, 6), (4, 6, 7), (0, 1, 5, 4),
-                      (1, 2, 6, 5), (2, 3, 7, 6), (3, 0, 4, 7)))
-
-    def footway(x, y):
-        """Footway top at a lot-local point (relative to the city origin)."""
-        c, s = math.cos(lot.rotation), math.sin(lot.rotation)
-        wx, wy = lot.center[0] + x * c - y * s, lot.center[1] + x * s + y * c
-        return grading.surface(wx, wy) + pavement_height(plan, wx, wy)
     # Local building coordinates: door faces -Y.
     half_w, half_d = lot.width / 2, lot.depth / 2
-    size = plan.settings.block_size
     # A house round a turning circle gets a path to the circle's footway (a
-    # full-width approach would square off against its curve).
-    path = BULB_PATH / 2 if lot.bulb else None
+    # full-width approach would square off against its curve), one on a
+    # rural street a driveway over its ditch.
+    path = approach_reach(lot, plan)
     approach_end = lot_approach(lot, plan)
     front = half_d if path else approach_end
     if grading is not None:
-        # The approach slopes from the footway's height to the pad's.
-        reach = path if path else half_w
-        if approach_end > half_d + .05:
-            ramp(-reach, -approach_end, reach, -half_d,
-                 (footway(-reach, -approach_end), footway(reach, -approach_end)))
+        court = grading.forecourts.get(lot.id)
+        if court is not None:
+            offset = len(vertices)
+            court_vertices, court_faces = court.mesh(floor)
+            vertices.extend(court_vertices)
+            faces.extend(tuple(offset + i for i in face) for face in court_faces)
         front = half_d
     elif path:
         slab(-path, -approach_end, path, -half_d)
@@ -260,7 +262,7 @@ def build_markings(plan, collection):
     # Outer highways: worn dashes that thin out and stop where the road breaks up.
     for quad in outer_road_dashes(plan):
         base = len(vertices)
-        vertices.extend((x, y, .004) for x, y in quad)
+        vertices.extend(quad)
         faces.append(tuple(range(base, base + 4)))
     # The raised highway's lanes, on its deck.
     for quad in freeway_markings(plan):
@@ -522,6 +524,14 @@ class MESH_OT_generate_city(bpy.types.Operator):
                                   'interchanges; at grade again out in the wasteland'),
                                  ('GRADE', 'At Grade', 'A street like the others, crossing the '
                                   'city through its junctions')])
+    rural_streets: EnumProperty(name='Rural Streets', default='AUTO',
+                                items=[('AUTO', 'Auto', 'On Rolling Hills: suburban, industrial '
+                                        'and outskirts streets get gravel shoulders and ditches '
+                                        '(a flat city keeps its curbs and footways)'),
+                                       ('ON', 'On', 'Gravel shoulders, ditches and culverts on '
+                                        'suburban, industrial and outskirts streets (in a town, '
+                                        'out of its old town)'),
+                                       ('OFF', 'Off', 'Curbs and footways everywhere')])
     highway_reach: FloatProperty(name='Highway Reach (m)', default=3000, min=0, max=20000,
                                  description='How far the highways run on beyond the city edge, '
                                              'breaking up into the ground over the last 40%; '
@@ -574,7 +584,7 @@ class MESH_OT_generate_city(bpy.types.Operator):
         for title, names in (
             ('City Growth', ('preset', 'seed', 'radius', 'shape', 'irregularity', 'block_size', 'primary_count', 'secondary_count', 'driving_loop_count')),
             ('Terrain', ('terrain', 'relief', 'plateau_height', 'podiums')),
-            ('Density and Access', ('curve_radius', 'core_radius', 'core_density', 'outskirts_density', 'road_density', 'setback', 'sidewalk_width', 'curb_height', 'wasteland', 'highway', 'highway_reach')),
+            ('Density and Access', ('curve_radius', 'core_radius', 'core_density', 'outskirts_density', 'road_density', 'setback', 'sidewalk_width', 'curb_height', 'rural_streets', 'wasteland', 'highway', 'highway_reach')),
             ('Buildings', ('style', 'damage', 'max_buildings', 'downtown_superblocks',
                            'district_superblocks', 'points_of_interest', 'small_props', 'water',
                            'detail')),
@@ -644,6 +654,7 @@ class MESH_OT_generate_city(bpy.types.Operator):
                                  root, material('City_Ground', (.23, .21, .17, 1)))
             ground['surface_role'] = 'terrain'
             ground.location = origin
+            build_culverts(plan, root, origin)
             if plan.terraces:
                 build_terrace_works(plan, root, origin)
             if plan.freeway:

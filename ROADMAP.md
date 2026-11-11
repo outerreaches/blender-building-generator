@@ -21,6 +21,7 @@
 | v0.22 | Terraced terrain: a built-up plateau and podiums of whole blocks at the city's edge, walled on some sides and falling naturally into the open ground on two or three others; edge streets along the top; ramps (on viaducts where high) and stairs up to them; retaining walls with parapets |
 | v0.23 | Raised highway: a straight viaduct across the city on piers, the streets passing under it; diamond interchanges whose ramps climb alongside the deck and taper into it; at grade again out in the wasteland. Stairs and walls in every standing building, gutted ones with rubble on the floors, column frames (v0.23.4); superblocks in the old town, residential, brutalist and industrial districts (v0.23.5); courtyards, estate grounds and uneven plots (v0.23.6) |
 | v0.24 | Building footprints: L, T, U and courtyard buildings made of wings, with corridors along every wing, a stair to every storey and a door out to the court; whole-block buildings in the old town, residential and brutalist districts |
+| v0.25 | Cross-sections: forecourts that follow a sloping street (no more stepped bases), the ground graded to them; wild hills round Rolling Hills cities, the highway leaving through them in cuttings (with ditches) and on embankments; rural streets with gravel shoulders, V-ditches, culverts and driveways |
 
 See [CHANGELOG.md](CHANGELOG.md) for the details.
 
@@ -53,13 +54,17 @@ stay as they are; every feature below is off until its setting is changed.
 
 | Version | Scope |
 | --- | --- |
-| v0.25 | Cross-sections: roadside ditches outside the dense districts, embankments and cuttings, culverts; the hills carried on into the wasteland round Rolling Hills cities too (Terraced has it since v0.22.4); forecourts that follow a sloped street, so party-walled towers no longer stand on stepped bases |
 | v0.26 | Levels: elevated, at-grade and below-grade structures; road tunnels at the map edge; rail with level crossings and a freight siding; subway routes with station entrances; the sewer network as data, with manholes |
 | v0.27 | Freeway to North American practice: the raised highway on a free-flowing alignment with gentle curves (curve radii and grades for its design speed) instead of straight along the lattice, and partial cloverleafs where there is room |
 | v0.28 | Megacity preset: megablocks, stacked highway decks, skybridges and collapsed spans, built from instanced modules with a low-poly skyline ring |
 
 ## Later
 
+- Ditches on Terraced cities' rural streets (their footways meet the
+  retaining walls), and a Terraced city's highway through its hills rather
+  than along a valley floor.
+- Grading round compound buildings' outlines: their notches and courts are
+  paved yards at floor level for now.
 - Walkable subway tunnels and platforms.
 - Walkable sewers: some reachable, some collapsed, some breaking into the
   subway tunnels.

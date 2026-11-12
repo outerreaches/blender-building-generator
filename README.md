@@ -56,7 +56,9 @@ sized for the game's 2 m player capsule.
   rooms to furnish (doors, windows, blank wall runs), its lifts (shaft,
   doors, car) and its railings, since furniture, railings and lift parts are
   game assets. A 16-bit heightmap of the graded ground can go with them. C#
-  classes for `JsonUtility` are included.
+  classes for `JsonUtility` are included. Every building is exported with
+  two lighter levels of detail (a shell and a massing), and the ground and
+  streets as tiles.
 - **Deterministic.** The same seed and settings give the same result. The
   generator is pure Python up to a thin Blender adapter.
 

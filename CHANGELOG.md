@@ -1,5 +1,46 @@
 # Changelog
 
+## v0.26.0: Game delivery, part one
+
+The first step of getting a city into the engine at a usable cost. A
+radius-18 city drew 11 million triangles from anywhere, three quarters of
+them floors, stairs, partitions, window frames and rubble inside buildings.
+
+- **Levels of detail.** Every building now has two lighter versions for
+  the engine to show at a distance:
+  - the **shell**: the same walls (openings and damage kept, so the outline
+    is the building's), columns, roof, facade details, a rubble fill and the
+    rubble on the ground, without floors, partitions, stairs or upper-floor
+    debris: about 40% of the triangles;
+  - the **massing**: every wall as a solid without openings under its broken
+    top (within 0.75 m), a plate closing each tier where its lowest wall
+    stands, and the real roof where it is whole: about 2%.
+
+  Both are closed solids like the building. Buildings themselves are
+  unchanged (the shell's faces are flagged on the mesh, attribute
+  `pbs_shell`; the massing is a small mesh kept with it).
+- **Export: Levels of Detail** (on by default). The FBX carries each
+  building's shell and massing as its children, `<name>_shell` and
+  `<name>_mass`, with its materials and UVs. They are not named `_LOD1`:
+  Unity's importer would gather every building's levels into one group on
+  the model's root.
+- **Export: Ground Tiles** (256 m by default; 128, 512 or off). The ground,
+  streets, lane paint, retaining walls, freeway and other city-wide meshes
+  are cut into square tiles, `<name>_t<column>_<row>`, so the engine can
+  cull them. Faces go to the tile their centre is in and none is split, so
+  tiles still meet; what lies beyond the buildings is gathered into the
+  outermost ring of tiles.
+- **Export: Merge Flat Ground** (on by default, with tiles). Faces of a
+  tile lying in one plane are merged: flat streets, pads, terraces and
+  facets. The surface is the same (within a millimetre, measured against the
+  unmerged export); a hilly city's streets lose about 40% of their
+  triangles, a flat city's about 90%.
+- **Metadata `delivery`**: the level-of-detail suffixes, how many buildings
+  have them, the tile size, whether tiles were merged and each tiled
+  object's tiles. The exported FBX
+  is about a fifth larger. The city in Blender is not touched: the extra
+  objects exist only during the export.
+
 ## v0.25.0: Cross-sections
 
 - **Forecourts that follow the street.** On hills a building's paved

@@ -42,6 +42,21 @@ def mark_seams_for_uvs(bm: bmesh.types.BMesh):
             edge.seam = True
 
 
+# Face attribute (integer): 1 on the faces of the shell level of detail.
+SHELL_ATTRIBUTE = 'pbs_shell'
+
+
+def mark_shell(bm, spans):
+    """Flag the faces in the ``(first, last)`` index ranges as the shell level
+    of detail. Call before merging: whole solids are in or out, and merging
+    stays inside a solid, so merged faces keep their flag."""
+    layer = bm.faces.layers.int.new(SHELL_ATTRIBUTE)
+    bm.faces.ensure_lookup_table()
+    for first, last in spans:
+        for index in range(first, last):
+            bm.faces[index][layer] = 1
+
+
 def to_bmesh(mesh_data):
     """Convert a MeshData to a BMesh through a temporary mesh (fast C path)."""
     temp = bpy.data.meshes.new('_pbs_building')
@@ -83,6 +98,7 @@ class BuildingShellBuilder:
         if self.center:
             mesh.translate(-building.spec.width / 2, -building.spec.depth / 2)
         bm = to_bmesh(mesh)
+        mark_shell(bm, building.shell)
         bm.normal_update()
         if self.params.get('auto_clean', True):
             merge_coplanar(bm)

@@ -6,7 +6,7 @@ import random
 
 import bpy
 
-from . import interior, metadata, rubble, sites
+from . import interior, metadata, rubble, shell, sites
 from .mesh_builder import (BuildingShellBuilder, generate_uvs, mark_seams_for_uvs,
                            merge_coplanar, to_bmesh)
 from .meshdata import MAT_RUBBLE, MeshData
@@ -59,11 +59,19 @@ def add_material_slots(obj):
         obj.data.materials.append(material(name, color))
 
 
+# Mesh property: the building's massing level of detail (a mesh datablock).
+MASS_PROPERTY = 'pbs_mass'
+
+
 def create_shell(name, params, collection, facts=None):
     """Building object centred on its footprint, linked into ``collection``.
 
     ``facts``, a dict, receives the building's interior facts (rooms, lifts,
     railings, fixtures; see interior.py) under 'interior'.
+
+    The mesh carries its lower levels of detail for the exporter: the faces
+    of the shell are flagged (``mesh_builder.SHELL_ATTRIBUTE``) and the
+    massing is a small mesh of its own (``MASS_PROPERTY``).
     """
     builder = BuildingShellBuilder(dict(params), center=True)
     mesh = None
@@ -75,6 +83,9 @@ def create_shell(name, params, collection, facts=None):
         collection.objects.link(obj)
         add_material_slots(obj)
         _annotate(obj, builder.building)
+        mass = shell.massing(builder.building)
+        mass.translate(-builder.building.spec.width / 2, -builder.building.spec.depth / 2)
+        mesh[MASS_PROPERTY] = mesh_from_data(f'{name}_mass', mass)
         if facts is not None:
             facts['interior'] = interior.interior_facts(builder.building)
         return obj
@@ -130,6 +141,13 @@ def create_rubble(name, params, collection):
 
 def mesh_object_from_data(name, data, collection, merge=True):
     """Object from a MeshData (material indices kept), merged and UV-mapped."""
+    obj = bpy.data.objects.new(name, mesh_from_data(name, data, merge))
+    collection.objects.link(obj)
+    return obj
+
+
+def mesh_from_data(name, data, merge=True):
+    """Mesh from a MeshData (material indices kept), merged and UV-mapped."""
     bm = to_bmesh(data)
     mesh = None
     try:
@@ -147,9 +165,7 @@ def mesh_object_from_data(name, data, collection, merge=True):
         raise
     finally:
         bm.free()
-    obj = bpy.data.objects.new(name, mesh)
-    collection.objects.link(obj)
-    return obj
+    return mesh
 
 
 def add_site_material_slots(obj):

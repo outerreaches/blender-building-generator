@@ -23,6 +23,8 @@
 | v0.24 | Building footprints: L, T, U and courtyard buildings made of wings, with corridors along every wing, a stair to every storey and a door out to the court; whole-block buildings in the old town, residential and brutalist districts |
 | v0.25 | Cross-sections: forecourts that follow a sloping street (no more stepped bases), the ground graded to them; wild hills round Rolling Hills cities, the highway leaving through them in cuttings (with ditches) and on embankments; rural streets with gravel shoulders, V-ditches, culverts and driveways |
 
+| v0.26 | Game delivery, part one: a shell and a massing level of detail for every building; the ground, streets and other city-wide meshes exported as tiles |
+
 See [CHANGELOG.md](CHANGELOG.md) for the details.
 
 ## Next
@@ -41,9 +43,13 @@ See [CHANGELOG.md](CHANGELOG.md) for the details.
 - More variety: a courthouse or city hall, authored facade kits, rooftop
   clutter, per-district palettes.
 
-**Game delivery**
+**Game delivery** (levels of detail and ground tiles shipped in v0.26)
 
-- Chunk and LOD export, collision proxies.
+- One combined massing mesh per tile for the far distance, and occluders.
+- Collision proxies: ramps for stairs, rubble as low hulls, no trim.
+- Surviving connectivity in the metadata: rooms and openings as flat
+  tables with ids, reachability from the street, road edges mapped to their
+  polylines.
 - Navigation checks and vehicle swept-clearance tests.
 - Unity import and play-mode tests.
 
@@ -54,9 +60,9 @@ stay as they are; every feature below is off until its setting is changed.
 
 | Version | Scope |
 | --- | --- |
-| v0.26 | Levels: elevated, at-grade and below-grade structures; road tunnels at the map edge; rail with level crossings and a freight siding; subway routes with station entrances; the sewer network as data, with manholes |
-| v0.27 | Freeway to North American practice: the raised highway on a free-flowing alignment with gentle curves (curve radii and grades for its design speed) instead of straight along the lattice, and partial cloverleafs where there is room |
-| v0.28 | Megacity preset: megablocks, stacked highway decks, skybridges and collapsed spans, built from instanced modules with a low-poly skyline ring |
+| v0.27 | Levels: elevated, at-grade and below-grade structures; road tunnels at the map edge; rail with level crossings and a freight siding; subway routes with station entrances; the sewer network as data, with manholes |
+| v0.28 | Freeway to North American practice: the raised highway on a free-flowing alignment with gentle curves (curve radii and grades for its design speed) instead of straight along the lattice, and partial cloverleafs where there is room |
+| v0.29 | Megacity preset: megablocks, stacked highway decks, skybridges and collapsed spans, built from instanced modules with a low-poly skyline ring |
 
 ## Later
 

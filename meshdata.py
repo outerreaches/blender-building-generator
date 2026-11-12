@@ -45,6 +45,22 @@ class MeshData:
         self.faces.extend((tuple(index + offset for index in face), material)
                           for face, material in other.faces)
 
+    def subset(self, spans):
+        """The faces in the ``(first, last)`` index ranges as a mesh of their own
+        (only the vertices they use), in the same order."""
+        result = MeshData()
+        mapped = {}
+        for first, last in spans:
+            for face, material in self.faces[first:last]:
+                indices = []
+                for index in face:
+                    if index not in mapped:
+                        mapped[index] = len(result.verts)
+                        result.verts.append(self.verts[index])
+                    indices.append(mapped[index])
+                result.faces.append((tuple(indices), material))
+        return result
+
     def directed_edges(self):
         counts = Counter()
         for face, _ in self.faces:

@@ -783,7 +783,46 @@ also writes `<name>.heightmap.raw` and `<name>.heightmap.json`:
   regenerated from its stored settings. A city made by another version of
   the add-on gets a warning instead.
 
-Output stays as separate meshes for culling and future chunk/LOD work. No texture baking, Unity materials, colliders, NavMesh or static flags are generated; the metadata's markers say where game assets go. `City_LanePaint` is tagged `decoration_no_collision`; exclude it from collision generation. Route guide curves are omitted from FBX.
+**Levels of Detail** (on by default). Every building is exported with two
+lighter versions as its children:
+
+| Object | What it holds | Triangles |
+| --- | --- | --- |
+| `<name>` | The building, interior included | all |
+| `<name>_shell` | Walls with their openings and damage, columns, roof, facade details, a rubble fill and the rubble on the ground | about 40% |
+| `<name>_mass` | Walls as solids without openings under their broken tops (within 0.75 m), a plate closing each tier, the roof where it is whole | about 2% |
+
+- They share the building's materials and UVs and stand exactly where it
+  does; put a collider on the building only.
+- They are not named `_LOD0`, `_LOD1`: Unity's importer would gather every
+  building's levels into one group on the model's root. Build one group per
+  building instead (the full mesh up close, the shell from where interiors
+  stop reading, the massing for the skyline).
+- A collapsed lot (a rubble field) has no lighter versions.
+- In Blender the building is one object, as before. The shell's faces are
+  flagged on its mesh (face attribute `pbs_shell`) and the massing is a
+  small mesh kept with it (mesh property `pbs_mass`); the exporter makes
+  the extra objects and removes them again.
+
+**Ground Tiles** (256 m by default; 128 m, 512 m or off). Objects much
+longer than a tile (the ground, streets, lane paint, retaining walls,
+freeway, outer roads) are exported as square tiles named
+`<name>_t<column>_<row>`, where the tile covers `column * size` to
+`(column + 1) * size` along Blender's x and likewise `row` along y. A face
+goes to the tile its centre is in and none is split, so tiles meet exactly.
+What lies beyond the buildings (the wasteland, the highway's reach) is
+gathered into the outermost ring of tiles. Tiles keep the object's custom
+properties, so `surface_role` still says what they are.
+
+**Merge Flat Ground** (on by default) merges each tile's faces that lie in
+one plane. Vertices on a tile's border stay, so tiles and whatever met the
+ground still meet; heights change by under a millimetre.
+
+The metadata records these under `delivery`: `lod_suffixes`
+(`["", "_shell", "_mass"]`), `lod_buildings`, `tile_size`, `tiles_merged`
+and `tiled` (each tiled object with its tiles' names).
+
+Output stays as separate meshes for culling. No texture baking, Unity materials, colliders, NavMesh or static flags are generated; the metadata's markers say where game assets go. `City_LanePaint` is tagged `decoration_no_collision`; exclude it from collision generation. Route guide curves are omitted from FBX.
 
 For scale: a radius-8 city with every building detailed has about 490 buildings and 1,070 mesh objects; its street mesh is about 345k polygons. A radius-14 metro is about 1.85M polygons in 1,700 objects, with ground spanning about 25.6 km.
 

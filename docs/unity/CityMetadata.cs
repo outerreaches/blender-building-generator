@@ -48,6 +48,27 @@ namespace Ares.CityGen
         public Marker[] markers;
         public Counts counts;
         public string[] missing_objects;
+        public Delivery delivery;       // What this export wrote for the engine (v0.26).
+    }
+
+    // Levels of detail: a building `lot_x` has children `lot_x` + suffix for
+    // every suffix after the first (the shell, then the massing). Tiles: a
+    // tiled object is not in the FBX under its own name; its tiles are.
+    [Serializable]
+    public class Delivery
+    {
+        public string[] lod_suffixes;   // "", "_shell", "_mass"; just "" when off.
+        public int lod_buildings;
+        public float tile_size;         // Metres; 0 when off.
+        public bool tiles_merged;       // Flat faces of each tile merged.
+        public TiledObject[] tiled;
+    }
+
+    [Serializable]
+    public class TiledObject
+    {
+        public string @object;          // As generated, e.g. City_Ground.
+        public string[] tiles;          // City_Ground_t<column>_<row>.
     }
 
     [Serializable]

@@ -21,12 +21,16 @@ FINE_GRID = .6          # Slab contouring step where damage cuts through.
 class Building:
     """Result of the pipeline: mesh plus what downstream code needs to know."""
 
-    def __init__(self, mesh, spec, plan, field, fill_top=None):
+    def __init__(self, mesh, spec, plan, field, fill_top=None, shell=(), params=None):
         self.mesh = mesh
         self.spec = spec
         self.plan = plan
         self.field = field
         self.fill_top = fill_top    # Highest point of a rubble fill (None: no fill).
+        # (first, last) face ranges of ``mesh`` seen from outside: the shell
+        # level of detail (see ``shell_mesh``).
+        self.shell = list(shell)
+        self.params = params or {}
 
     @property
     def damage_min_height(self):
@@ -77,30 +81,117 @@ def build_building(params):
         fill_top = fill.bounds()[1][2]
         plan = layouts.above(plan, spec, fill_top)
     mesh = MeshData()
+    # Whole solids are either part of the shell level of detail or not; the
+    # order they are built in is unchanged.
+    outside = []
+
+    def seen(first):
+        if len(mesh.faces) > first:
+            outside.append((first, len(mesh.faces)))
+
     roof_intact = _roof_intact(spec, field)
     _walls(mesh, spec, field, roof_intact)
     _columns(mesh, spec)
+    seen(0)
     _slabs(mesh, spec, field, plan)
+    first = len(mesh.faces)
     _roof(mesh, spec, field, roof_intact, params)
     _facade_details(mesh, spec, field, params)
+    seen(first)
     _interiors(mesh, spec, field, plan)
     _terraces(mesh, spec, field, plan)
     _ramps(mesh, spec, field)
+    first = len(mesh.faces)
     mesh.extend(fill)
     rubble.exterior_piles(mesh, rng, spec, params)
+    seen(first)
     for x, y, rx, ry, peak, base in field.debris:
         x, y, rx, ry = _clear_of_party_walls(spec, x, y, rx, ry)
         if base > 0:
             x, y, rx, ry = _inside_storey(spec, base, x, y, rx, ry)
         # Upper-floor debris sinks into its slab so its underside shares no
         # plane with partitions standing on the same floor.
+        first = len(mesh.faces)
         rubble.mound(mesh, rng, x, y, rx, ry, peak, segments=9,
                      base=base - .03 if base > 0 else base)
+        if base <= 0:
+            seen(first)
     if params.get('interior_mound'):
+        first = len(mesh.faces)
         rubble.interior_mound(mesh, rng, spec)
+        seen(first)
     if params.get('floor_rubble'):
         rubble.floor_debris(mesh, random.Random((spec.seed * 40503) ^ 0xDEB5), spec, field, plan)
-    return Building(mesh, spec, plan, field, fill_top)
+    return Building(mesh, spec, plan, field, fill_top, _joined(outside), params)
+
+
+def _joined(spans):
+    """Adjacent face ranges merged."""
+    result = []
+    for first, last in spans:
+        if result and result[-1][1] == first:
+            result[-1] = (result[-1][0], last)
+        else:
+            result.append((first, last))
+    return result
+
+
+# -- levels of detail --------------------------------------------------------
+
+# How far a massing wall's top may stray from the real broken top.
+MASS_TOLERANCE = .75
+
+
+def shell_mesh(building):
+    """The shell level of detail: what shows from outside at a distance. The
+    same wall solids (openings and damage kept, so the silhouette is the
+    full building's), columns, roof, facade details, a rubble fill and the
+    rubble on the ground; no floors, partitions, stairs or upper-floor debris.
+    """
+    return building.mesh.subset(building.shell)
+
+
+def massing(building, tolerance=MASS_TOLERANCE):
+    """The massing level of detail, for the skyline: every wall as a solid
+    without openings under its (simplified) broken top, the columns, and a
+    plate closing each tier where its lowest wall stands; the real roof where
+    it is whole. Closed solids, like the building."""
+    spec, field, params = building.spec, building.field, building.params
+    mesh = MeshData()
+    roof_intact = _roof_intact(spec, field)
+    gable = spec.roof_kind == 'GABLE' and roof_intact
+    rise = float(spec.params.get('roof_height', 2.0))
+    for tier in spec.tiers:
+        last = tier is spec.tiers[-1]
+        lowest = spec.top if last else spec.levels[tier.last].ceiling
+        for facade in tier.facades:
+            profile = field.wall_profile(facade.origin, facade.direction, facade.ua, facade.ub,
+                                         side=facade.side, along=facade.along)
+            for ua, ub, height in facade.segments:
+                top = [(ua, height), (ub, height)]
+                if gable and last and facade.side in ('left', 'right'):
+                    half = facade.length / 2
+                    top = [(ua, height + rise * ua / half), (half, height + rise),
+                           (ub, height + rise * (facade.length - ub) / half)]
+                top = geom2d.simplify(geom2d.profile_min(top, profile), tolerance)
+                lowest = min(lowest, min(z for _, z in top))
+                solids.wall_solid(mesh, facade.origin, facade.direction, spec.t, ua, ub,
+                                  facade.base, top, (), MAT_WALLS)
+        if last and roof_intact:
+            continue
+        base = spec.levels[tier.first].z
+        thickness = spec.roof_slab if last else spec.slab
+        if lowest - thickness > base + .5:
+            rect = spec.interior_rect(tier.last)
+            holes = spec.outline_holes()
+            xs = _grid(rect[0], rect[2], [h[0] for h in holes] + [h[2] for h in holes])
+            ys = _grid(rect[1], rect[3], [h[1] for h in holes] + [h[3] for h in holes])
+            solids.slab_solid(mesh, xs, ys, lowest - thickness, lowest, lambda x, y: 1.0,
+                              MAT_ROOF if last else MAT_FLOOR, holes)
+    _columns(mesh, spec)
+    if roof_intact:
+        _roof(mesh, spec, field, True, params)
+    return mesh
 
 
 def _inside_storey(spec, floor, x, y, rx, ry):

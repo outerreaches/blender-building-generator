@@ -28,6 +28,7 @@ class Opening:
     top: list
     frame: int
     kind: str = 'window'
+    balcony: bool = False      # A window down to the floor, opening onto a balcony.
 
     @classmethod
     def rect(cls, u0, u1, z0, z1, frame, kind='window'):

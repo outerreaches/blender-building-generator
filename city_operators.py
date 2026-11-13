@@ -11,6 +11,7 @@ from .metadata import SPACES as METADATA_SPACES, CityMetadata
 from .spec import BuildingSpec
 from .sites import (KINDS as SITE_KINDS, PAD_THICKNESS, VARIANTS as SITE_VARIANTS,
                     compose as compose_site, compose_yard)
+from . import ground_cover
 from .streets import (Grading, approach_reach, build_culvert_mesh, build_freeway_mesh,
                       build_ground_mesh, build_outer_road_mesh, build_stair_mesh,
                       build_street_mesh, build_viaduct_mesh, build_wall_mesh, footprint,
@@ -60,6 +61,10 @@ def box_between(name, low, high, collection, mat):
     faces = [(0, 2, 3, 1), (4, 5, 7, 6), (0, 1, 5, 4),
              (1, 3, 7, 5), (3, 2, 6, 7), (2, 0, 4, 6)]
     return mesh_object(name, vertices, faces, collection, mat)
+
+
+# Styles whose lots stand on gravel where the district's paving has thinned out.
+UNPAVED_PADS = ('SUBURBAN', 'RESIDENTIAL', 'INDUSTRIAL')
 
 
 def build_roads(plan, collection):
@@ -571,6 +576,11 @@ class MESH_OT_generate_city(bpy.types.Operator):
                                      description='Gas stations, schools, hospitals, parks, parking, malls '
                                                  'and transit stops on reserved blocks')
     lane_markings: BoolProperty(name='Worn Lane Markings', default=True)
+    district_ground: BoolProperty(name='District Ground', default=True,
+                                  description='Open ground by district: paving downtown with strips of '
+                                              'dirt and dry grass, patchier paving further out, grass '
+                                              'round apartment blocks, gravel in industry, dirt round '
+                                              'houses and in the wasteland. Off: one material')
 
     @classmethod
     def poll(cls, context):
@@ -603,6 +613,7 @@ class MESH_OT_generate_city(bpy.types.Operator):
         if self.detail == 'SHELLS':
             layout.prop(self, 'interior_ratio')
         layout.prop(self, 'lane_markings')
+        layout.prop(self, 'district_ground')
         layout.prop(self, 'route_guides')
         layout.label(text='Streets meet at grade; only the raised highway bridges them.',
                      icon='INFO')
@@ -653,6 +664,15 @@ class MESH_OT_generate_city(bpy.types.Operator):
             ground = mesh_object('City_Ground', ground_vertices, ground_faces,
                                  root, material('City_Ground', (.23, .21, .17, 1)))
             ground['surface_role'] = 'terrain'
+            cover = None
+            if self.district_ground:
+                # Paving, grass, gravel and dirt by district (ground_cover.py).
+                cover = ground_cover.Cover(plan)
+                for name, color in ground_cover.MATERIALS[1:]:
+                    ground.data.materials.append(material(name, color))
+                ground.data.polygons.foreach_set(
+                    'material_index', cover.faces(ground_vertices, ground_faces))
+            root['district_ground'] = self.district_ground
             ground.location = origin
             build_culverts(plan, root, origin)
             if plan.terraces:
@@ -696,6 +716,9 @@ class MESH_OT_generate_city(bpy.types.Operator):
                     sunken = (x0 - lot.width / 2, y0 - lot.depth / 2,
                               x1 - lot.width / 2, y1 - lot.depth / 2)
                 foundation = build_frontage(lot, plan, col, sunken, grading)
+                if cover is not None and lot.style in UNPAVED_PADS and not cover.paved(*lot.center):
+                    # Out where the paving has gone, a pad of gravel and packed earth.
+                    foundation.data.materials[0] = material(*ground_cover.MATERIALS[ground_cover.GRAVEL])
                 foundation.location = (origin.x + lot.center[0], origin.y + lot.center[1], origin.z)
                 entrances, height, floors = _object_facts(obj)
                 if height is None:

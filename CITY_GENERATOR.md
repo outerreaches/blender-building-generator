@@ -55,6 +55,7 @@ The original single-building and bulk operators remain available. Architecture u
 | Points of Interest | Reserve blocks for gas stations, fast food, schools, hospitals, police and fire stations, transit, parks, parking and malls, and put transit stops on the footways (default on) |
 | Worn Lane Markings | Optional broken paint on highway/arterial/collector roads |
 | Show Driving Route Guides | Colored curves, excluded from FBX export |
+| District Ground | Open ground by district: paved downtown with strips of dirt and grass, patchier further out, grass round apartment blocks, gravel in industry, dirt round houses and in the wasteland (default on; off: one material) |
 
 | Starting layout | Core radius | Core density | Outskirts density | Local roads |
 | --- | --- | --- | --- | --- |

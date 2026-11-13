@@ -114,6 +114,11 @@ class Site:
     markers: list = field(default_factory=list)    # Placements for game assets (Ground.mark).
 
 
+# Side of a free-standing tower (drill tower, clock tower): the smallest
+# plate that takes a stair with a room beside it on every storey.
+TOWER = 6.5
+
+
 def designed(width, depth, floors, floor_height, seed, profile='NONE', **extra):
     """Generator parameters for a purpose-built (non-district) building."""
     params = dict(
@@ -535,7 +540,13 @@ class Composer:
         params['seed'] = (self.seed * 31 + number * 7919) & 0x7FFFFFFF
         if self.damage > 0 and self.condition != 'INTACT':
             params.update(enable_damage=True, damage_amount=self.damage)
+        program = params.get('building_profile', 'NONE')
         styles.apply_condition(params, self.condition, params['floors'], params['seed'])
+        if params.get('building_profile', 'NONE') == 'NONE' and program != 'NONE':
+            # The condition took the fitted interior; the building keeps its
+            # stairs and the walls that carry it, like a district's lots.
+            params.update(structure_profile=program,
+                          **styles.structure('NONE', self.condition, params['seed']))
         if not params.get('floor_slabs', True):
             params.pop('ramps', None)   # Garage ramps need their decks.
         item = SiteBuilding(name, params, x, y, quarter, role)
@@ -1418,14 +1429,15 @@ def _fire_station(c):
                                         doors=[('front', ww / 2, 1.6)]),
                    hx + hw / 2 + ww / 2, hy, role='quarters')
     stalls_x1 = x1 - STRIP - 1.0
-    if c.variant == 'CLASSIC' and y1 - STRIP - (hy + hd / 2) > 9.0:
+    if c.variant == 'CLASSIC' and y1 - STRIP - (hy + hd / 2) > TOWER + 4.5:
         # Free-standing drill tower in the back lot.
-        tx = x1 - STRIP - 1.5 - 2.25
-        c.building('hose_tower', designed(4.5, 4.5, 5, 3.2, c.seed, 'NONE', window_width=.8,
+        # 6.5 m square: the smallest plate a stair and a room beside it fit.
+        tx = x1 - STRIP - 1.5 - TOWER / 2
+        c.building('hose_tower', designed(TOWER, TOWER, 5, 3.2, c.seed, 'TOWER', window_width=.8,
                                           window_height=1.0, window_spacing=1.0,
-                                          parapet_height=.4, doors=[('front', 2.25, 1.4)]),
-                   tx, y1 - STRIP - 1.5 - 2.25, role='drill tower')
-        stalls_x1 = tx - 2.25 - 1.5
+                                          parapet_height=.4, doors=[('front', TOWER / 2, 1.4)]),
+                   tx, y1 - STRIP - 1.5 - TOWER / 2, role='drill tower')
+        stalls_x1 = tx - TOWER / 2 - 1.5
     front = hy - hd / 2
     g.layer((hx - hw / 2, y0 - c.approach, hx + hw / 2, front), S_CONCRETE, 'apron')
     for u in centres:
@@ -1454,11 +1466,12 @@ def _transit_station(c):
         doors=[('front', bw * .3, 2.4), ('front', bw * .7, 2.4), ('back', bw / 2, 1.6)]),
         bx, by, role='station hall')
     front = by - bd / 2
-    if hub and bw / 2 + 5.5 <= c.W / 2 - STRIP:
+    if hub and bw / 2 + TOWER + .5 <= c.W / 2 - STRIP:
         tower = c.building('clock_tower', designed(
-            5.0, 5.0, 5, 3.5, c.seed, 'NONE', window_width=1.0, window_height=1.4,
-            window_spacing=1.2, parapet_height=.6, window_sides=('front', 'back', 'right'),
-            doors=[('front', 2.5, 1.4)]), bx + bw / 2 + 2.5, by + bd / 2 - 2.5, role='clock tower')
+            TOWER, TOWER, 5, 3.5, c.seed, 'TOWER', window_width=1.0, window_height=1.4,
+            window_spacing=1.0, parapet_height=.6, window_sides=('front', 'back', 'right'),
+            doors=[('front', TOWER / 2, 1.4)]), bx + bw / 2 + TOWER / 2, by + bd / 2 - TOWER / 2,
+            role='clock tower')
         if c.condition == 'INTACT':
             top = c.spec(tower).top
             g.boxc(tower.x, tower.y, 2.2, 2.2, top, top + 2.4, S_SIGN)          # Clock stage.

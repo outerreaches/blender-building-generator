@@ -693,6 +693,8 @@ def _facade_details(mesh, spec, field, params):
         _cornices(mesh, spec, field)
     if spec.lobby != 'NONE' or params.get('entrance_canopy'):
         _canopy(mesh, spec, field)
+    if getattr(spec, 'balconies', None):
+        _balconies(mesh, spec, field, params)
 
 
 def _profile_min(facade, field, u0, u1, tier_top):
@@ -821,6 +823,76 @@ def _band(mesh, facade, u0, u1, z0, z1, depth, embed=.035):
     outline = [(ax - nx * embed, ay - ny * embed), (bx - nx * embed, by - ny * embed),
                (bx + nx * depth, by + ny * depth), (ax + nx * depth, ay + ny * depth)]
     solids.prism(mesh, _ccw(outline), z0, z1, MAT_WALLS)
+
+
+from .spec import BALCONY_INSET  # noqa: E402
+
+BALCONY_SLAB = .18
+BALCONY_PARAPET = (1.0, .12)     # Height and thickness of a balcony's solid upstand.
+
+
+def _slab_on(mesh, facade, u0, u1, n0, n1, z0, z1, material=MAT_WALLS):
+    """Box on a facade: u along it, n out from its face."""
+    nx, ny = facade.normal
+    (ax, ay), (bx, by) = facade.point(u0), facade.point(u1)
+    outline = [(ax + nx * n0, ay + ny * n0), (bx + nx * n0, by + ny * n0),
+               (bx + nx * n1, by + ny * n1), (ax + nx * n1, ay + ny * n1)]
+    solids.prism(mesh, _ccw(outline), z0, z1, material)
+
+
+def balcony_runs(spec, field):
+    """Balconies that stand: (facade, storey index, u0, u1), one per run of
+    neighbouring balcony bays whose doors are whole and whose wall still
+    stands a storey high above the floor."""
+    grouped = {}
+    for facade, index, u0, u1, opening in spec.balconies:
+        grouped.setdefault((id(facade), index), (facade, index, []))[2].append((u0, u1, opening))
+    runs = []
+    for facade, index, bays in grouped.values():
+        level = spec.levels[index]
+        profile = field.wall_profile(facade.origin, facade.direction, facade.ua, facade.ub,
+                                     side=facade.side, along=facade.along)
+        need = level.z + min(level.height, 2.6)
+
+        def stands(u0, u1):
+            heights = [geom2d.interp(profile, min(max(u0 + (u1 - u0) * k / 8, profile[0][0]),
+                                                  profile[-1][0])) for k in range(9)]
+            heights += [z for u, z in profile if u0 <= u <= u1]      # Dips between the samples.
+            if min(heights) < need:
+                return False
+            # A notch or a breach reaching into this storey's wall takes it too.
+            return not any(o.kind != 'window' and o.kind != 'door' and o.u0 < u1 and o.u1 > u0 and
+                           min(z for _, z in o.bottom) < need and max(z for _, z in o.top) > level.z
+                           for o in facade.openings)
+
+        run = None
+        for u0, u1, opening in sorted(bays, key=lambda bay: bay[0]) + [(None, None, None)]:
+            # A door the damage took (a notch or a breach replaced it) has no
+            # balcony, nor has a stretch of wall broken down over it.
+            whole = opening is not None and any(o is opening for o in facade.openings) and \
+                stands(u0, u1)
+            if run is not None and (not whole or u0 - run[1] > 1e-6):
+                runs.append((facade, index, run[0] + BALCONY_INSET, run[1] - BALCONY_INSET))
+                run = None
+            if whole:
+                run = [u0, u1] if run is None else [run[0], u1]
+    return runs
+
+
+def _balconies(mesh, spec, field, params):
+    """A slab level with the floor and a solid upstand round it, outside each
+    run of balcony doors."""
+    depth = float((params.get('balconies') or {}).get('depth', 1.4))
+    height, thick = BALCONY_PARAPET
+    for facade, index, u0, u1 in balcony_runs(spec, field):
+        z = spec.levels[index].z
+        if u1 - u0 < 1.2:
+            continue
+        # Embedded a little, unlike the bands and canopies it may cross.
+        _slab_on(mesh, facade, u0, u1, -.045, depth, z - BALCONY_SLAB, z)
+        _slab_on(mesh, facade, u0, u1, depth - thick, depth, z, z + height)
+        _slab_on(mesh, facade, u0, u0 + thick, 0.0, depth - thick, z, z + height)
+        _slab_on(mesh, facade, u1 - thick, u1, 0.0, depth - thick, z, z + height)
 
 
 def _canopy(mesh, spec, field):

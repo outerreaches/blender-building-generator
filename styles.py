@@ -102,8 +102,32 @@ def footprint_for(style, width, depth, seed, party_walls=(), shape=None):
     return shape, [tuple(round(v, 3) for v in w) for w in wings]
 
 
+# Balconies by style: (chance, chance on a building of BALCONY_TALL storeys
+# or more, depth). They go on the sides that face no neighbour.
+BALCONIES = {'BRUTALIST': (.55, .9, 1.5), 'RESIDENTIAL': (.45, .55, 1.2)}
+BALCONY_TALL = 5
+BALCONY_PATTERNS = ('ALL', 'ALL', 'ALTERNATE', 'PAIRS', 'COLUMNS')
+
+
+def balconies_for(style, floors, seed, party_walls=()):
+    """A building's balconies (``params['balconies']``) or None; its own
+    stream, so nothing else about the building depends on them."""
+    if style not in BALCONIES or floors < 2:
+        return None
+    low, tall, depth = BALCONIES[style]
+    pick = random.Random(f'balconies:{style}:{seed}')
+    if pick.random() >= (tall if floors >= BALCONY_TALL else low):
+        return None
+    sides = [side for side in (('front', 'back') if pick.random() < .6 else
+                               ('front', 'back', 'left', 'right')) if side not in party_walls]
+    if not sides:
+        return None
+    return {'sides': tuple(sides), 'pattern': pick.choice(BALCONY_PATTERNS), 'depth': depth,
+            'first': 1}
+
+
 def building_recipe(style, width, depth, floors, seed, damage=0, interiors=False,
-                    condition='INTACT', party_walls=(), shape=None):
+                    condition='INTACT', party_walls=(), shape=None, balconies=True):
     """Generator parameters for a district building. ``party_walls`` lists the
     sides (front/back/left/right) built against a neighbour; ``shape`` forces
     a footprint shape (RECT, L, T, U or O; by default chosen by style)."""
@@ -200,6 +224,12 @@ def building_recipe(style, width, depth, floors, seed, damage=0, interiors=False
                        door_width=1.2, door_height=2.4, roof_parapet=False,
                        flat_roof=False, roof_kind='GABLE', roof_height=2.4,
                        roof_overhang=.5)
+    if balconies:
+        chosen = balconies_for(style, floors, seed, party_walls)
+        if chosen:
+            # Above a cornice at the first-floor line, not through it.
+            chosen['first'] = 2 if profile.get('cornice') else 1
+            profile['balconies'] = chosen
     apply_condition(profile, condition, floors, seed)
     profile.update(structure_profile=INTERIOR_PROFILE.get(style, 'RESIDENTIAL'),
                    **structure(profile['building_profile'], condition, seed))

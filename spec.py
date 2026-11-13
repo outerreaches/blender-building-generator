@@ -33,6 +33,9 @@ WINDOW_SIDES = {
 }
 
 
+BALCONY_DOOR = 1.5       # Least width of the door onto a balcony.
+BALCONY_INSET = .2       # A balcony stops this short of its bay's ends.
+
 @dataclass
 class Level:
     index: int
@@ -141,6 +144,8 @@ class BuildingSpec:
         planner's choice: a list of (side, centre, width) in building space.
         """
         self.door_overrides = doors if doors is not None else self.base_doors
+        # (facade, storey index, bay start, bay end, opening): see shell._balconies.
+        self.balconies = []
         for tier in self.tiers:
             for facade in tier.facades:
                 facade.openings = []
@@ -451,6 +456,7 @@ class BuildingSpec:
             sill, head, width, glazed = self._upper_glazing(facade, level)
         else:
             return self._extra_openings(facade, level, result)
+        balconied = self._balcony_bays(facade, level, tier, count)
         for bay in glazed:
             if bay in taken or bay >= count:
                 continue
@@ -459,9 +465,41 @@ class BuildingSpec:
             if span < .4 or head - sill < .4:
                 continue
             centre = (u0 + u1) / 2
+            door = min(max(width, BALCONY_DOOR), u1 - u0 - 2 * BALCONY_INSET - .5)
+            if bay in balconied and door >= dims.DOOR_WIDTH:
+                # A glazed door down to the floor (a window to the damage code).
+                opening = Opening.rect(centre - door / 2, centre + door / 2, level.z,
+                                       level.z + min(self._clear_height(level), dims.DOOR_HEIGHT),
+                                       MAT_DOOR_FRAME)
+                opening.balcony = True
+                result.append(opening)
+                self.balconies.append((facade, level.index, u0, u1, opening))
+                continue
             result.append(Opening.rect(centre - span / 2, centre + span / 2,
                                        level.z + sill, level.z + head, MAT_WINDOW_FRAME))
         return self._extra_openings(facade, level, result)
+
+    def _balcony_bays(self, facade, level, tier, count):
+        """Bays of an upper storey that open onto a balcony (``params['balconies']``:
+        sides, pattern, first storey)."""
+        chosen = self.params.get('balconies')
+        if not chosen or level.index < max(1, chosen.get('first', 1)) or facade.court or \
+                facade.side not in chosen['sides'] or self.facade_system not in ('PUNCHED', 'GRID'):
+            return ()
+        pattern = chosen.get('pattern', 'ALL')
+        bays = []
+        for bay in range(count):
+            # Clear of a corner the outline turns in at.
+            if (bay == 0 and facade.concave[0]) or (bay == count - 1 and facade.concave[1]):
+                continue
+            if pattern == 'ALTERNATE' and (bay + level.index) % 2:
+                continue
+            if pattern == 'PAIRS' and bay % 3 == 2:
+                continue
+            if pattern == 'COLUMNS' and bay % 2:
+                continue
+            bays.append(bay)
+        return bays
 
     def _extra_openings(self, facade, level, result):
         """Designed openings (drive-thru windows, hatches) replace what they overlap."""

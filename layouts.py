@@ -1321,6 +1321,7 @@ PLANNERS = {
     'HOUSE': plan_house,
     'WAREHOUSE': plan_warehouse,
     'BAR': plan_bar,
+    'TOWER': plan_open,
 }
 
 

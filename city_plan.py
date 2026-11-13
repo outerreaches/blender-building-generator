@@ -10,7 +10,7 @@ import json
 import math
 import random
 
-VERSION = 21
+VERSION = 22
 ROAD_WIDTHS = {"HIGHWAY": 20.0, "ARTERIAL": 12.0, "COLLECTOR": 8.0, "LOCAL": 6.0}
 ROAD_RANK = {name: i for i, name in enumerate(ROAD_WIDTHS)}
 # Corner radius at a route bend, before the curve_radius multiplier and clamping.
@@ -2915,12 +2915,17 @@ def _estate_lots(settings, district, profile, rect, streets, group, rng):
     for row, (start, depth) in enumerate(zip(starts, depths)):
         middle = start + depth / 2
         near = low if middle - b0 <= b1 - middle else high
-        front = near if streets[near] else (high if near == low else low)
+        # With no street on its own side, a lone row faces the other long
+        # side; one of two rows must not (its approach would run through the
+        # other row and the grounds between): each of its slabs faces the
+        # street at its end of the row instead, or is left out.
+        front = near if streets[near] else (high if near == low else low) if rows == 1 else None
         count = max(1, math.ceil((a1 - a0) / ESTATE_LONGEST))
         if count == 1 and a1 - a0 > 40 and rng.random() < .35:
             count = 2
         gap = rng.uniform(*ESTATE_GAP)
-        for index, (c0, c1) in enumerate(_uneven_cuts(a0, a1, count, gap, rng)):
+        cuts = list(_uneven_cuts(a0, a1, count, gap, rng))
+        for index, (c0, c1) in enumerate(cuts):
             # Slabs stop short of the row's ends at random: open ground between.
             c0 += rng.uniform(0, 4)
             c1 -= rng.uniform(0, 4)
@@ -2934,6 +2939,17 @@ def _estate_lots(settings, district, profile, rect, streets, group, rng):
                 continue                    # An estate is mostly built.
             ca, cb = (c0 + c1) / 2, middle
             cx, cy = (ca, cb) if along_x else (cb, ca)
+            if front is None:
+                end_low, end_high = ("W", "E") if along_x else ("S", "N")
+                end = end_low if index == 0 and streets[end_low] else \
+                    end_high if index == len(cuts) - 1 and streets[end_high] else None
+                if end is None:
+                    continue
+                frontage = _nearest_edge(streets[end], end, (cx, cy), size)
+                lots.append(_make_lot(settings, ident, item, district, profile,
+                                      (round(cx, 3), round(cy, 3)), round(depth, 3),
+                                      round(c1 - c0, 3), SIDE_ROTATION[end], frontage))
+                continue
             frontage = _nearest_edge(streets[front], front, (cx, cy), size)
             lots.append(_make_lot(settings, ident, item, district, profile,
                                   (round(cx, 3), round(cy, 3)), round(c1 - c0, 3), round(depth, 3),
@@ -2961,10 +2977,13 @@ def _estate_lots(settings, district, profile, rect, streets, group, rng):
                 # The tower and its way out to the street stay clear of the
                 # grounds (across, along its front's axis).
                 end = a0 if front in "WS" else a1
-                u0, u1 = sorted((end, ca + (deep / 2 if end < ca else -deep / 2)))
-                v0, v1 = cb - across / 2, cb + across / 2
-                keep_out.append(_grow_rect((u0, v0, u1, v1) if along_x else (v0, u0, v1, u1),
-                                           YARD_KEEP))
+                near_face = ca + (-deep / 2 if end < ca else deep / 2)
+                # The tower itself, and the path to it (streets.LONG_PATH wide).
+                for (u0, u1), half in ((sorted((ca - deep / 2, ca + deep / 2)), across / 2),
+                                       (sorted((end, near_face)), 2.0)):
+                    v0, v1 = cb - half, cb + half
+                    keep_out.append(_grow_rect((u0, v0, u1, v1) if along_x else (v0, u0, v1, u1),
+                                               YARD_KEEP))
     if rows == 2:
         b_lo, b_hi = starts[0] + depths[0] + YARD_GAP, starts[1] - YARD_GAP
     else:

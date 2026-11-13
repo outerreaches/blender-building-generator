@@ -4,7 +4,7 @@
 bl_info = {
     "name": "Procedural Building Shell Generator",
     "author": "Ares Project",
-    "version": (0, 26, 0),
+    "version": (0, 27, 0),
     "blender": (4, 5, 0),
     "location": "View3D > Add > Mesh > Procedural Building Shell",
     "description": "Generate customizable, game-ready building shells with windows, doors, and optional damage",
@@ -21,6 +21,7 @@ import bpy
 # Reload them first, leaves before the modules that import them.
 _SUBMODULES = ('dims', 'meshdata', 'geom2d', 'util', 'solids', 'damage', 'spec', 'layouts',
                'rubble', 'shell', 'interior', 'mesh_builder', 'styles', 'sites', 'city_plan',
+               'ground_cover',
                'metadata', 'building_assets', 'streets', 'operators', 'city_export',
                'city_operators')
 for _name in _SUBMODULES:

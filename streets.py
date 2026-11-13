@@ -138,6 +138,8 @@ def lot_yard(lot, plan):
 
 
 BULB_PATH = 3.0          # Width of the path from a house round a turning circle to its footway.
+LONG_APPROACH = 25.0     # A building set this far back from its footway (an estate's point
+LONG_PATH = 4.0          # tower) gets a path this wide, not paving across its whole front.
 DRIVEWAY = 3.5           # ...and of the driveway over a rural street's ditch (by style).
 DRIVEWAYS = {'INDUSTRIAL': 8.0}
 # A rural street (``plan.rural``): a gravel shoulder flush with the road where
@@ -216,12 +218,14 @@ def sections(plan):
 
 def approach_reach(lot, plan):
     """Half the width of a lot's approach from its footway: a path to a
-    turning circle, a driveway over a rural street's ditch; None: the lot's
-    whole width."""
+    turning circle, a driveway over a rural street's ditch, a path to a
+    building set far back; None: the lot's whole width."""
     if lot.bulb:
         return BULB_PATH / 2
     if tuple(sorted(tuple(n) for n in lot.frontage)) in sections(plan).edges:
         return min(lot.width, DRIVEWAYS.get(lot.style, DRIVEWAY)) / 2
+    if lot_approach(lot, plan) - lot.depth / 2 > LONG_APPROACH:
+        return min(lot.width, LONG_PATH) / 2
     return None
 FORECOURT_APRON = 1.5    # Shortest apron from a forecourt to its building's floor.
 FORECOURT_GRADE = .5     # Steepest an apron climbs or drops (1:2).

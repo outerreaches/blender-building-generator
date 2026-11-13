@@ -1,5 +1,43 @@
 # Changelog
 
+## v0.27.0: District ground, balconies, stairs in every site building
+
+- **District Ground** (new city setting, on by default). The open ground is
+  no longer one material:
+  - downtown and the old town are paved, with the odd long strip of dirt or
+    dry grass;
+  - brutalist estates are paved in patches, residential districts mostly
+    grass, industry gravel and packed earth;
+  - suburban lots stand on bare wasteland dirt, and so does everything past
+    the city's edge;
+  - towards the edge the paving thins out and breaks into smaller pieces.
+
+  The ground object carries four materials (`City_Ground`,
+  `City_Ground_Concrete`, `City_Ground_Grass`, `City_Ground_Gravel`); its
+  geometry is unchanged. Suburban, residential and industrial lots out where
+  the paving has gone stand on gravel pads. Off: one material, as before.
+- **Balconies** on brutalist and residential buildings (about nine in ten
+  brutalist blocks of five storeys or more, half of the rest): a slab and a
+  solid upstand outside a glazed door, on the sides that face no neighbour,
+  in one of four patterns. None on the ground floor, on party walls, in
+  courts, or where the wall has broken down over them. Other styles and all
+  site buildings are unchanged.
+- **Stairs in damaged site buildings.** A site building whose condition took
+  its fitted interior (rubble-filled, partly filled, a shell) had no stairs
+  or stair openings at all: police stations, hospitals, schools, hotels, fire
+  station quarters. They now keep their stairs and bearing walls, like a
+  district's buildings.
+- **Towers you can climb.** Fire stations' drill towers and transit hubs'
+  clock towers had five storeys and no stair (4.5 m and 5 m plates take
+  none). They are 6.5 m square now, with a stair and a room beside it on
+  every storey.
+- **Estate slabs no longer pave their grounds.** With no street on its own
+  side, one of an estate's two rows faced the far street, so its foundation
+  ran 80 m through the grounds and the other row. Its end slabs now turn to
+  face the street at their end of the row; a middle one is left out. An
+  estate's point tower gets a 4 m path instead of paving as wide as itself.
+  Plan schema 22.
+
 ## v0.26.0: Game delivery, part one
 
 The first step of getting a city into the engine at a usable cost. A

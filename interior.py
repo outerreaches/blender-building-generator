@@ -51,7 +51,51 @@ def interior_facts(building):
         facts['fixtures'].extend(_seats(field, lp, level))
     facts['lifts'] = _lifts(spec, field, plan)
     facts['railings'] = _railings(spec, field, plan, built)
+    facts['rooms'].extend(_basement_rooms(building))
     return _centred(facts, cx, cy)
+
+
+def _basement_rooms(building):
+    """Rooms of the basement (``floor`` -1, -2; ``layer`` basement_1, _2):
+    whole, windowless, their doors through the partitions."""
+    under = getattr(building, 'basement', None)
+    if under is None:
+        return []
+    from .basement import LAYERS
+    rooms = []
+    for lp in under.levels:
+        z = under.z(lp.index)
+        for room in lp.rooms:
+            clear = _clear_rect(room.rect, under.rect, lp.walls)
+            doors = []
+            x0, y0, x1, y1 = room.rect
+            mx, my = (x0 + x1) / 2, (y0 + y1) / 2
+            for wall in lp.walls:
+                (ax, ay), (bx, by) = wall.start, wall.end
+                if abs(ay - by) < 1e-6 and (abs(ay - y0) < 1e-6 or abs(ay - y1) < 1e-6):
+                    axis, line, origin, sign, lo, hi = 'x', ay, ax, 1.0 if bx >= ax else -1.0, x0, x1
+                elif abs(ax - bx) < 1e-6 and (abs(ax - x0) < 1e-6 or abs(ax - x1) < 1e-6):
+                    axis, line, origin, sign, lo, hi = 'y', ax, ay, 1.0 if by >= ay else -1.0, y0, y1
+                else:
+                    continue
+                for offset, width, height in wall.openings:
+                    centre = origin + sign * (offset + width / 2)
+                    if not lo - 1e-6 <= centre <= hi + 1e-6:
+                        continue
+                    if axis == 'x':
+                        x, y, normal = centre, line, (0.0, 1.0 if my > line else -1.0)
+                    else:
+                        x, y, normal = line, centre, (1.0 if mx > line else -1.0, 0.0)
+                    across = (x - normal[0] * .3, y - normal[1] * .3)
+                    other = next((r.name for r in lp.rooms if r is not room and
+                                  _inside(r.rect, *across)), '')
+                    doors.append({'x': x, 'y': y, 'normal': normal, 'width': width,
+                                  'height': height, 'to': other})
+            rooms.append({'name': room.name, 'kind': room.kind, 'floor': lp.index,
+                          'layer': LAYERS[lp.index], 'unit': '', 'group': room.group or '',
+                          'rect': clear, 'z': z, 'height': under.ceiling, 'standing': 1.0,
+                          'ceiling': 1.0, 'doors': doors, 'windows': [], 'wall_runs': []})
+    return rooms
 
 
 def _seats(field, lp, level):

@@ -49,6 +49,39 @@ namespace Ares.CityGen
         public Counts counts;
         public string[] missing_objects;
         public Delivery delivery;       // What this export wrote for the engine (v0.26).
+        public Underground underground; // Rooms below ground and what joins them (v0.28).
+    }
+
+    // A graph for reachability below ground. Node ids are "<building object>/<room name>";
+    // each building with a basement also has "<building object>/surface", its ground floor.
+    [Serializable]
+    public class Underground
+    {
+        public UndergroundNode[] nodes;
+        public UndergroundLink[] links;
+    }
+
+    [Serializable]
+    public class UndergroundNode
+    {
+        public string id;
+        public string kind;             // The room's kind, or "surface".
+        public string building;
+        public string room;             // Its name among the building's rooms ("" for surface).
+        public int floor;               // -1, -2; 0 for surface.
+        public string layer;            // basement_1, basement_2, surface.
+        public float[] position;        // City space, at floor level.
+        public float area;              // Square metres.
+    }
+
+    [Serializable]
+    public class UndergroundLink
+    {
+        public string a;
+        public string b;
+        public string kind;             // door, open (no wall between), stair, tunnel.
+        public float width;             // Of a doorway; 0 otherwise.
+        public float[] position;
     }
 
     // Levels of detail: a building `lot_x` has children `lot_x` + suffix for
@@ -295,7 +328,8 @@ namespace Ares.CityGen
         // bedroom, living, kitchen, bath, hall, corridor, lobby, office, open,
         // shop, storage, bar, auditorium, plant, stair, landing, ...
         public string kind;
-        public int floor;
+        public int floor;         // 0 is the ground floor; -1 and -2 are below ground.
+        public string layer;      // basement_1, basement_2; "" above ground.
         public string unit;       // Flat or shop unit it belongs to ("" if none).
         public string group;      // Open-plan group: rooms of one group share a space.
         public float[] position;  // Centre of the clear floor.

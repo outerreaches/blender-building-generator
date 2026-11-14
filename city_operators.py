@@ -11,7 +11,7 @@ from .metadata import SPACES as METADATA_SPACES, CityMetadata
 from .spec import BuildingSpec
 from .sites import (KINDS as SITE_KINDS, PAD_THICKNESS, VARIANTS as SITE_VARIANTS,
                     compose as compose_site, compose_yard)
-from . import ground_cover
+from . import cutouts, ground_cover
 from .streets import (Grading, approach_reach, build_culvert_mesh, build_freeway_mesh,
                       build_ground_mesh, build_outer_road_mesh, build_stair_mesh,
                       build_street_mesh, build_viaduct_mesh, build_wall_mesh, footprint,
@@ -149,12 +149,13 @@ def build_freeway(plan, collection, origin):
     return obj
 
 
-def build_frontage(lot, plan, collection, sunken=None, grading=None):
+def build_frontage(lot, plan, collection, sunken=None, grading=None, hollow=False):
     """Level foundation and a clear concrete approach from sidewalk to entrance.
 
     ``sunken`` (x0, y0, x1, y1, centred on the lot) is the building's ground
     storey: the foundation drops there to the underside of its ground slab,
-    so the two never share the floor plane. On terrain (``grading``) the
+    so the two never share the floor plane; ``hollow`` leaves it out there
+    altogether (a basement fills it). On terrain (``grading``) the
     foundation is the lot's level pad: a plinth down to the lowest graded
     ground under it, and its forecourt (``streets.Forecourt``) from the
     footway to the pad.
@@ -200,6 +201,8 @@ def build_frontage(lot, plan, collection, sunken=None, grading=None):
                     continue
                 inside = (sunken[0] <= (x0 + x1) / 2 <= sunken[2] and
                           sunken[1] <= (y0 + y1) / 2 <= sunken[3])
+                if inside and hollow:
+                    continue
                 slab(x0, y0, x1, y1, h - GROUND_SLAB if inside else h)
     else:
         slab(-half_w, -front, half_w, half_d)
@@ -576,6 +579,9 @@ class MESH_OT_generate_city(bpy.types.Operator):
                                      description='Gas stations, schools, hospitals, parks, parking, malls '
                                                  'and transit stops on reserved blocks')
     lane_markings: BoolProperty(name='Worn Lane Markings', default=True)
+    basements: BoolProperty(name='Basements', default=True,
+                            description='A storey below ground (two under downtown towers) under '
+                                        'many buildings, reached by their own stair carried on down')
     district_ground: BoolProperty(name='District Ground', default=True,
                                   description='Open ground by district: paving downtown with strips of '
                                               'dirt and dry grass, patchier paving further out, grass '
@@ -614,6 +620,7 @@ class MESH_OT_generate_city(bpy.types.Operator):
             layout.prop(self, 'interior_ratio')
         layout.prop(self, 'lane_markings')
         layout.prop(self, 'district_ground')
+        layout.prop(self, 'basements')
         layout.prop(self, 'route_guides')
         layout.label(text='Streets meet at grade; only the raised highway bridges them.',
                      icon='INFO')
@@ -661,19 +668,11 @@ class MESH_OT_generate_city(bpy.types.Operator):
             if self.route_guides:
                 build_route_guides(plan, root, origin)
             ground_vertices, ground_faces = build_ground_mesh(plan)
-            ground = mesh_object('City_Ground', ground_vertices, ground_faces,
-                                 root, material('City_Ground', (.23, .21, .17, 1)))
-            ground['surface_role'] = 'terrain'
-            cover = None
-            if self.district_ground:
-                # Paving, grass, gravel and dirt by district (ground_cover.py).
-                cover = ground_cover.Cover(plan)
-                for name, color in ground_cover.MATERIALS[1:]:
-                    ground.data.materials.append(material(name, color))
-                ground.data.polygons.foreach_set(
-                    'material_index', cover.faces(ground_vertices, ground_faces))
+            # (The ground object is made after the lots: basements open it.)
+            cover = ground_cover.Cover(plan) if self.district_ground else None
             root['district_ground'] = self.district_ground
-            ground.location = origin
+            root['basements'] = self.basements
+            openings = []
             build_culverts(plan, root, origin)
             if plan.terraces:
                 build_terrace_works(plan, root, origin)
@@ -687,7 +686,8 @@ class MESH_OT_generate_city(bpy.types.Operator):
                 col = districts[lot.district]
                 params = building_recipe(lot.style, lot.width, lot.depth, lot.floors,
                                          lot.seed, lot.damage, lot.interiors,
-                                         lot.condition, lot.party_walls)
+                                         lot.condition, lot.party_walls,
+                                         basements=self.basements)
                 facts = {}
                 if self.detail == 'SHELLS':
                     if lot.condition == 'COLLAPSED':
@@ -715,7 +715,15 @@ class MESH_OT_generate_city(bpy.types.Operator):
                     x0, y0, x1, y1 = BuildingSpec(params).levels[0].rect
                     sunken = (x0 - lot.width / 2, y0 - lot.depth / 2,
                               x1 - lot.width / 2, y1 - lot.depth / 2)
-                foundation = build_frontage(lot, plan, col, sunken, grading)
+                under = facts.get('basement')
+                if under is not None:
+                    # The ground stops under the building's walls.
+                    bx0, by0, bx1, by1 = under.rect
+                    cx, cy = (bx0 + bx1 - lot.width) / 2, (by0 + by1 - lot.depth) / 2
+                    c, s = math.cos(lot.rotation), math.sin(lot.rotation)
+                    openings.append((lot.center[0] + cx * c - cy * s, lot.center[1] + cx * s + cy * c,
+                                     bx1 - bx0 + .2, by1 - by0 + .2, lot.rotation))
+                foundation = build_frontage(lot, plan, col, sunken, grading, hollow=under is not None)
                 if cover is not None and lot.style in UNPAVED_PADS and not cover.paved(*lot.center):
                     # Out where the paving has gone, a pad of gravel and packed earth.
                     foundation.data.materials[0] = material(*ground_cover.MATERIALS[ground_cover.GRAVEL])
@@ -728,6 +736,17 @@ class MESH_OT_generate_city(bpy.types.Operator):
                              params.get('structure', 'NONE'),
                              (params.get('footprint_shape', 'RECT'), params.get('footprint')))
                 context.window_manager.progress_update(index + 1)
+            ground_faces, _ = cutouts.cut(ground_vertices, ground_faces, openings)
+            ground = mesh_object('City_Ground', ground_vertices, ground_faces,
+                                 root, material('City_Ground', (.23, .21, .17, 1)))
+            ground['surface_role'] = 'terrain'
+            if cover is not None:
+                # Paving, grass, gravel and dirt by district (ground_cover.py).
+                for name, color in ground_cover.MATERIALS[1:]:
+                    ground.data.materials.append(material(name, color))
+                ground.data.polygons.foreach_set(
+                    'material_index', cover.faces(ground_vertices, ground_faces))
+            ground.location = origin
             if plan.pois or plan.shelters:
                 build_sites(plan, root, origin, self.detail, self.small_props, meta, self.water,
                             grading)

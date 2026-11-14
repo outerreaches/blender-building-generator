@@ -1414,6 +1414,9 @@ def _fire_station(c):
     while bays > 1 and bays * 5.0 + 1.0 + 10 > c.W - 2 * STRIP:
         bays -= 1
     hw, hd = bays * 5.0 + 1.0, min(20.0, c.D - 14)
+    if c.variant == 'CLASSIC':
+        # Room behind the hall for the drill tower.
+        hd = max(12.0, min(hd, c.D - 9.0 - STRIP - TOWER - 4.6))
     hx, hy = x0 + STRIP + 1 + hw / 2, y0 + 9.0 + hd / 2
     centres = [.5 + 5.0 * (k + .5) for k in range(bays)]
     hall = c.building('apparatus', designed(
@@ -1460,13 +1463,16 @@ def _transit_station(c):
     hub = c.variant == 'HUB'
     bw, bd = min(30.0, c.W * .6), 10.0
     bx, by = 0.0, y1 - STRIP - bd / 2
+    if hub and bw + TOWER + .5 <= c.W - 2 * STRIP:
+        # The hall stands off centre, the clock tower at its end.
+        bx = min(0.0, c.W / 2 - STRIP - TOWER - .5 - bw / 2)
     hall = c.building('station', designed(
         bw, bd, 1, 5.0, c.seed, 'BAY', ground_floor_windows='STOREFRONT_WIDE',
         window_sides='FRONT_ONLY', storefront_window_height=3.2, parapet_height=1.0,
         doors=[('front', bw * .3, 2.4), ('front', bw * .7, 2.4), ('back', bw / 2, 1.6)]),
         bx, by, role='station hall')
     front = by - bd / 2
-    if hub and bw / 2 + TOWER + .5 <= c.W / 2 - STRIP:
+    if hub and bx + bw / 2 + TOWER + .5 <= c.W / 2 - STRIP + 1e-6:
         tower = c.building('clock_tower', designed(
             TOWER, TOWER, 5, 3.5, c.seed, 'TOWER', window_width=1.0, window_height=1.4,
             window_spacing=1.0, parapet_height=.6, window_sides=('front', 'back', 'right'),

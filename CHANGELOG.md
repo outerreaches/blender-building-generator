@@ -1,5 +1,30 @@
 # Changelog
 
+## v0.28.0: Basements, part one
+
+- **Basements** (new city setting, on by default). Many buildings have a
+  storey below ground, reached by their own stair carried on down:
+  - about half of the brutalist, old-town, residential and suburban
+    buildings (one storey: a hall off the stair, cellar rooms off the hall);
+  - about a third of downtown towers (two storeys of large rooms).
+
+  A building needs a stair on its ground floor to have one: none under
+  one-storey houses, compound footprints, rubble-filled or collapsed lots.
+  Basements are not damaged. The foundation is left open under them and the
+  ground is cut out along the building's walls (`cutouts.py`).
+- **Metadata.** Basement rooms are listed with the building's others, with
+  `floor` -1 or -2 and `layer` `basement_1` or `basement_2` (every room now
+  has a `layer`; above ground it is empty). New `underground` graph: a node
+  per room below ground and one `surface` node per building, a link per
+  doorway (`door`), per pair of rooms open to each other (`open`) and per
+  stair (`stair`). Tunnels between buildings will add `tunnel` links.
+- Not yet: basements under site buildings (police, hospitals, schools),
+  tunnels and doors between neighbouring basements, flooded or
+  rubble-choked ones.
+- **Towers kept on ordinary pads.** v0.27's larger drill and clock towers no
+  longer fitted pads of 38 to 44 m and were left out; the fire station's
+  hall is shallower and the transit hall stands off centre to make room.
+
 ## v0.27.0: District ground, balconies, stairs in every site building
 
 - **District Ground** (new city setting, on by default). The open ground is

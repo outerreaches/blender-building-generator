@@ -126,8 +126,23 @@ def balconies_for(style, floors, seed, party_walls=()):
             'first': 1}
 
 
+# Basements by style: (chance, storeys, large). Common under homes; rarer
+# under downtown towers, where they are two storeys of large rooms.
+BASEMENTS = {'BRUTALIST': (.6, 1, False), 'SUBURBAN': (.55, 1, False), 'OLD_TOWN': (.6, 1, False),
+             'RESIDENTIAL': (.5, 1, False), 'DOWNTOWN': (.35, 2, True), 'INDUSTRIAL': (.15, 1, True)}
+
+
+def basement_for(style, seed):
+    """(storeys, large) of a building's basement, or None; its own stream."""
+    chance, storeys, large = BASEMENTS.get(style, (0, 0, False))
+    if random.Random(f'basement:{style}:{seed}').random() >= chance:
+        return None
+    return storeys, large
+
+
 def building_recipe(style, width, depth, floors, seed, damage=0, interiors=False,
-                    condition='INTACT', party_walls=(), shape=None, balconies=True):
+                    condition='INTACT', party_walls=(), shape=None, balconies=True,
+                    basements=False):
     """Generator parameters for a district building. ``party_walls`` lists the
     sides (front/back/left/right) built against a neighbour; ``shape`` forces
     a footprint shape (RECT, L, T, U or O; by default chosen by style)."""
@@ -230,6 +245,10 @@ def building_recipe(style, width, depth, floors, seed, damage=0, interiors=False
             # Above a cornice at the first-floor line, not through it.
             chosen['first'] = 2 if profile.get('cornice') else 1
             profile['balconies'] = chosen
+    if basements:
+        chosen = basement_for(style, seed)
+        if chosen:
+            profile.update(basement=chosen[0], basement_large=chosen[1])
     apply_condition(profile, condition, floors, seed)
     profile.update(structure_profile=INTERIOR_PROFILE.get(style, 'RESIDENTIAL'),
                    **structure(profile['building_profile'], condition, seed))

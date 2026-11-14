@@ -86,8 +86,11 @@ def create_shell(name, params, collection, facts=None):
         mass = shell.massing(builder.building)
         mass.translate(-builder.building.spec.width / 2, -builder.building.spec.depth / 2)
         mesh[MASS_PROPERTY] = mesh_from_data(f'{name}_mass', mass)
+        under = builder.building.basement
+        obj['basement_floors'] = len(under.levels) if under is not None else 0
         if facts is not None:
             facts['interior'] = interior.interior_facts(builder.building)
+            facts['basement'] = under
         return obj
     except Exception:
         if mesh is not None and mesh.users == 0:

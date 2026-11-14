@@ -154,6 +154,8 @@ class CityMetadata:
         self.yards = []
         self.stops = []
         self.markers = []
+        self.under_nodes = []           # The underground graph: rooms below ground
+        self.under_links = []           # and what joins them.
 
     # -- transforms ------------------------------------------------------
     def lot_transform(self, lot):
@@ -178,6 +180,7 @@ class CityMetadata:
         entry = self.space.pose(apply(transform, 0.0, 0.0, 0.0), fx, fy)
         entry.update(width=_r(width), depth=_r(depth), entrances=doors)
         entry.update(self._interior(interior or {}))
+        self._underground(transform, obj_name, interior or {})
         for fixture in (interior or {}).get('fixtures', ()):
             fx_, fy_ = turn(transform, *fixture['facing'])
             marker = {'type': fixture['kind'], 'site': site_id, 'building': obj_name,
@@ -187,6 +190,63 @@ class CityMetadata:
             marker['size'] = [_r(v) for v in fixture['size']]
             self.markers.append(marker)
         return entry
+
+    def _underground(self, transform, building, facts):
+        """Adds a building's rooms below ground to the underground graph:
+        a node per room, a link per doorway, per pair of rooms open to each
+        other and per stair, the topmost to the building's ``surface`` node
+        (its ground floor). Listed whether or not interiors are."""
+        below = [room for room in facts.get('rooms', ()) if room['floor'] < 0]
+        if not below:
+            return
+        point = self.space.point
+
+        def ident(name):
+            return f'{building}/{name}'
+
+        def centre(room):
+            x0, y0, x1, y1 = room['rect']
+            return apply(transform, (x0 + x1) / 2, (y0 + y1) / 2, room['z'])
+
+        self.under_nodes.append({'id': ident('surface'), 'kind': 'surface', 'building': building,
+                                 'room': '', 'floor': 0, 'layer': 'surface',
+                                 'position': point(apply(transform, 0.0, 0.0, 0.0)), 'area': 0.0})
+        names = {room['name'] for room in below}
+        seen = set()
+        stairs = {}
+        for room in below:
+            x0, y0, x1, y1 = room['rect']
+            self.under_nodes.append({'id': ident(room['name']), 'kind': room['kind'],
+                                     'building': building, 'room': room['name'],
+                                     'floor': room['floor'], 'layer': room['layer'],
+                                     'position': point(centre(room)),
+                                     'area': _r((x1 - x0) * (y1 - y0))})
+            if room['kind'] == 'stair':
+                stairs[room['floor']] = room
+            for door in room['doors']:
+                pair = tuple(sorted((room['name'], door['to'])))
+                if door['to'] in names and pair not in seen:
+                    seen.add(pair)
+                    self.under_links.append({
+                        'a': ident(pair[0]), 'b': ident(pair[1]), 'kind': 'door',
+                        'width': _r(door['width']),
+                        'position': point(apply(transform, door['x'], door['y'], room['z']))})
+        # Rooms of one group on a storey are open to each other.
+        groups = {}
+        for room in below:
+            if room['group']:
+                groups.setdefault((room['floor'], room['group']), []).append(room)
+        for members in groups.values():
+            for a, b in zip(members, members[1:]):
+                self.under_links.append({'a': ident(a['name']), 'b': ident(b['name']), 'kind': 'open',
+                                         'width': 0.0, 'position': point(centre(b))})
+        for floor in sorted(stairs, reverse=True):
+            upper = ident('surface') if floor == -1 else ident(stairs[floor + 1]['name']) \
+                if floor + 1 in stairs else None
+            if upper:
+                self.under_links.append({'a': upper, 'b': ident(stairs[floor]['name']),
+                                         'kind': 'stair', 'width': 0.0,
+                                         'position': point(centre(stairs[floor]))})
 
     def _interior(self, facts):
         """Rooms, lifts and railings in building space."""
@@ -199,6 +259,7 @@ class CityMetadata:
             z = room['z']
             rooms.append({
                 'name': room['name'], 'kind': room['kind'], 'floor': room['floor'],
+                'layer': room.get('layer', ''),
                 'unit': room['unit'], 'group': room['group'],
                 'position': local(((x0 + x1) / 2, (y0 + y1) / 2, z)),
                 'width': _r(x1 - x0), 'depth': _r(y1 - y0), 'height': _r(room['height']),
@@ -468,6 +529,7 @@ class CityMetadata:
                                        if getattr(plan, 'wild', 0) else 0.0),
                      'plateau_height': settings.plateau_height, 'podiums': settings.podiums,
                      'highway': settings.highway},
+            'underground': {'nodes': self.under_nodes, 'links': self.under_links},
             'districts': [{'id': loc.id, 'role': loc.role, 'style': loc.style,
                            'position': node_point(loc.node)} for loc in plan.locations],
             'roads': roads,

@@ -9,6 +9,7 @@ outline, so damage, openings and plans of any shape cannot leave holes.
 import math
 import random
 
+from . import basement as basements
 from . import damage, dims, geom2d, layouts, rubble, solids
 from .meshdata import (MAT_DOOR_FRAME, MAT_FLOOR, MAT_INTERIOR_WALL, MAT_ROOF, MAT_STAIRS,
                        MAT_WALLS, MAT_WINDOW_FRAME, MeshData)
@@ -31,6 +32,7 @@ class Building:
         # level of detail (see ``shell_mesh``).
         self.shell = list(shell)
         self.params = params or {}
+        self.basement = None        # basement.Basement under the building, if it has one.
 
     @property
     def damage_min_height(self):
@@ -80,6 +82,8 @@ def build_building(params):
     if fill.verts and params.get('interior_fill', 'NONE') in ('FILLED', 'PARTIAL'):
         fill_top = fill.bounds()[1][2]
         plan = layouts.above(plan, spec, fill_top)
+    # A basement under a building whose ground floor is not buried.
+    under = basements.plan(spec, plan, params) if fill_top is None else None
     mesh = MeshData()
     # Whole solids are either part of the shell level of detail or not; the
     # order they are built in is unchanged.
@@ -93,7 +97,7 @@ def build_building(params):
     _walls(mesh, spec, field, roof_intact)
     _columns(mesh, spec)
     seen(0)
-    _slabs(mesh, spec, field, plan)
+    _slabs(mesh, spec, field, plan, under)
     first = len(mesh.faces)
     _roof(mesh, spec, field, roof_intact, params)
     _facade_details(mesh, spec, field, params)
@@ -122,7 +126,11 @@ def build_building(params):
         seen(first)
     if params.get('floor_rubble'):
         rubble.floor_debris(mesh, random.Random((spec.seed * 40503) ^ 0xDEB5), spec, field, plan)
-    return Building(mesh, spec, plan, field, fill_top, _joined(outside), params)
+    if under is not None:
+        _basement(mesh, spec, under)
+    built = Building(mesh, spec, plan, field, fill_top, _joined(outside), params)
+    built.basement = under
+    return built
 
 
 def _joined(spans):
@@ -134,6 +142,42 @@ def _joined(spans):
         else:
             result.append((first, last))
     return result
+
+
+# -- basement ----------------------------------------------------------------
+
+class _Whole:
+    """Stands in for the damage field below ground: nothing is broken."""
+    damaged = False
+
+    @staticmethod
+    def line_profile(x0, y0, x1, y1, ceiling):
+        return [(0.0, ceiling), (math.hypot(x1 - x0, y1 - y0), ceiling)]
+
+    @staticmethod
+    def blast_spans(*_):
+        return []
+
+
+def _basement(mesh, spec, under):
+    """Walls under the building's own down to the lowest floor, a floor slab
+    per storey (open over the stair from below), partitions and stairs."""
+    whole = _Whole()
+    x0, y0, x1, y1 = spec.levels[0].rect
+    ix0, iy0, ix1, iy1 = under.rect
+    low = under.depth
+    for a, b, c, d in ((x0, y0, x1, iy0), (x0, iy1, x1, y1), (x0, iy0, ix0, iy1), (ix1, iy0, x1, iy1)):
+        if c - a > 1e-6 and d - b > 1e-6:
+            # Up to the underside of the door thresholds, which reach that far below the floor.
+            solids.box(mesh, a, b, low, c, d, -dims.GROUND_SLAB, MAT_FLOOR)
+    for level in under.levels:
+        z = under.z(level.index)
+        slab(mesh, whole, under.rect, z - dims.SLAB, z, level.holes, clearance=0.0)
+        for wall in level.walls:
+            _partition(mesh, whole, wall, z, z + under.ceiling)
+        boxes, *_ = layouts.stair_steps(level.stair, under.height)
+        for bx0, by0, bz0, bx1, by1, bz1 in boxes:
+            solids.box(mesh, bx0, by0, z + bz0, bx1, by1, z + bz1, MAT_STAIRS)
 
 
 # -- levels of detail --------------------------------------------------------
@@ -579,13 +623,17 @@ def slab(mesh, field, rect, z_bottom, z_top, holes=(), material=MAT_FLOOR, clear
     solids.slab_solid(mesh, xs, ys, z_bottom, z_top, inside, material, holes)
 
 
-def _slabs(mesh, spec, field, plan):
+def _slabs(mesh, spec, field, plan, under=None):
     planned = {level.index: level for level in plan.levels}
     t = spec.t
     for level in spec.levels:
         if level.index == 0:
             rect = spec.interior_rect(0)
-            slab(mesh, field, rect, -dims.GROUND_SLAB, 0.0, spec.outline_holes(), clearance=-10.0)
+            if under is None:
+                slab(mesh, field, rect, -dims.GROUND_SLAB, 0.0, spec.outline_holes(), clearance=-10.0)
+            else:
+                # Over a basement: a full slab, open over the stair down.
+                slab(mesh, field, rect, -dims.SLAB, 0.0, [under.ground_hole], clearance=-10.0)
             continue
         if not spec.has_slabs:
             continue

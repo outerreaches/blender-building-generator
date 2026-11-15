@@ -28,8 +28,9 @@
 - **Fixes to v0.29 tunnels.** On terrain the footways' skirts reach 2.5 m
   down and hung into most tunnels under a street (on BigCity004 into 19 of
   26, two of them cut the NavMesh): over tunnels and breaches the skirts
-  now stop above the roof. Foundations reaching down to low ground are
-  solids to the tunnels too (a few tunnels ran through one).
+  now stop above the roof. A foundation reaching down to low ground is a
+  solid to the tunnels too where it would reach under a tunnel's roof
+  (some ran through one; on BigCity004 16 of 105 are no longer built).
 - **Metadata.** `sewers` (ends, the floor's centre line as `points`,
   sizes, clearance walk or crouch, condition and plug), `manholes` (rim
   and floor points, size, depth, open) and `breaches`. In the

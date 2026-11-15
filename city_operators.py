@@ -716,14 +716,15 @@ class MESH_OT_generate_city(bpy.types.Operator):
                     lowest = None
                     if grading is not None:
                         lowest = lambda r: grading.lowest([(r[0], r[1]), (r[2], r[1]), (r[2], r[3]), (r[0], r[3])])  # noqa: E731
-                    # Foundations on terrain reach down to the lowest ground under the lot: solids too.
+                    # Foundations on terrain reach down to the lowest ground under the lot: solids
+                    # too, but only where they would reach under a tunnel's roof (its slab may hold one).
                     below = list(network.solids()) if network else []
                     for lot in plan.lots:
                         corners = footprint_with_approach(lot, plan)
                         bottom = (grading.lowest(corners) if grading is not None else 0.0) - .2
                         below.append(((min(p[0] for p in corners), min(p[1] for p in corners),
                                        max(p[0] for p in corners), max(p[1] for p in corners)),
-                                      bottom, self.curb_height + lot.level))
+                                      bottom + tunnels.SHELL + tunnels.LAYER_GAP, self.curb_height + lot.level))
                     dug = tunnels.plan(sites, plan, lowest, pads, below)
                 if network is not None and sites:
                     sewers.breach(network, sites, plan.settings.seed,

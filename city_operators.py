@@ -240,7 +240,9 @@ def polyline_sample(points, distance):
     return (b[0], b[1]), ((b[0] - a[0]) / length, (b[1] - a[1]) / length)
 
 
-def build_markings(plan, collection):
+def build_markings(plan, collection, openings=()):
+    """Worn lane paint; ``openings`` (manholes) are cut out of it as out of
+    the street under it."""
     vertices, faces = [], []
     size = plan.settings.block_size
     surface = plan.surface()
@@ -285,6 +287,8 @@ def build_markings(plan, collection):
         base = len(vertices)
         vertices.extend(quad)
         faces.append(tuple(range(base, base + 4)))
+    if openings:
+        faces, _ = cutouts.cut(vertices, faces, openings)
     if not faces:
         return None
     obj = mesh_object('City_LanePaint', vertices, faces, collection,
@@ -678,10 +682,6 @@ class MESH_OT_generate_city(bpy.types.Operator):
                 marker.empty_display_size = 5 if loc.role == 'SECONDARY' else 10
                 marker['role'], marker['style'] = loc.role, loc.style
             street_mesh = build_street_mesh(plan)
-            if self.lane_markings:
-                markings = build_markings(plan, root)
-                if markings is not None:
-                    markings.location = origin
             if self.route_guides:
                 build_route_guides(plan, root, origin)
             ground_vertices, ground_faces = build_ground_mesh(plan)
@@ -744,6 +744,11 @@ class MESH_OT_generate_city(bpy.types.Operator):
                 street_mesh = (street_vertices, street_faces, street_materials)
             roads = build_roads(plan, root, street_mesh, network.openings() if network else ())
             roads.location = origin
+            if self.lane_markings:
+                # After the sewers: the paint is cut where the manholes come up, like the street.
+                markings = build_markings(plan, root, network.openings() if network else ())
+                if markings is not None:
+                    markings.location = origin
             if network is not None:
                 openings.extend(network.openings())
             build_culverts(plan, root, origin)

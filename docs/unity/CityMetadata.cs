@@ -202,6 +202,9 @@ namespace Ares.CityGen
     {
         public string id, building, room;
         public float length;
+        public int storey;              // -2 through a doorway, -1 down a ladder shaft (a drop).
+        public bool drop;
+        public float[] ladder_bottom, ladder_top, ladder_facing;
     }
 
     [Serializable]

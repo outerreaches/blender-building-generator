@@ -503,10 +503,21 @@ class CityMetadata:
             accesses = []
             for a in s.accesses:
                 t = a.tunnel
-                wall = s.line + (sub.HALL_SIDE + sub.HALL_SHELL) * (1 if (t.start + t.end) / 2 > s.line else -1)
+                wall = s.line + (sub.HALL_SIDE + sub.HALL_SHELL) * a.side
                 x, y = (t.line, wall) if s.axis == 'x' else (wall, t.line)
-                link(f'{a.site}/{a.room}', hall, 'door', passages.DOOR[0], at(x, y, s.hall_floor))
-                accesses.append({'id': a.id, 'building': a.site, 'room': a.room, 'length': _r(t.length)})
+                link(f'{a.site}/{a.room}', hall, 'door', passages.DOOR[0], at(x, y, s.hall_floor),
+                     ladder=a.drop is not None)
+                entry = {'id': a.id, 'building': a.site, 'room': a.room, 'length': _r(t.length), 'storey': a.storey,
+                         'drop': a.drop is not None, 'ladder_bottom': [], 'ladder_top': [], 'ladder_facing': []}
+                if a.drop is not None:
+                    from .sewers import DROP
+                    _, far, zs, zb, _ = a.drop
+                    face = far - a.side * DROP[1]
+                    entry['ladder_bottom'] = at(*_across(t, a.along, face), zs)
+                    entry['ladder_top'] = at(*_across(t, a.along, face), zb)
+                    entry['ladder_facing'] = self.space.direction(*((0.0, -a.side) if t.axis == 'y'
+                                                                    else (-a.side, 0.0)))
+                accesses.append(entry)
             forward = (1.0, 0.0) if s.axis == 'x' else (0.0, 1.0)
             self.subway['stations'].append({
                 'id': s.id, 'hall': hall, 'platform': platform, 'position': at(s.x, s.y, s.track),

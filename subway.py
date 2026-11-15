@@ -19,13 +19,14 @@ them with a ladder shaft up to a hatch in the footway.
 import math
 from dataclasses import dataclass, field
 
-from .city_plan import stream
+from .city_plan import district_at, stream
 from . import sewers as _sewers
 
 TRACK_DEPTH = 14.0        # Track bed under the street.
 LINE = (8.6, 5.0, 1.2)    # Clear width and height of the line's tunnel, and its vaulted upper corners.
 SHELL = .4                # Floor, walls and roof of the line and its stations.
-WALKWAY = (.9, .9)        # Evacuation walkway along the line's +across side: width, height.
+WALKWAY = (.9, .9)        # Evacuation walkway along the line's +across side: width, height,
+WALKWAY_STEPS = (4, .3)   # with steps down to the track bed at both ends: count (the last at track level), going.
 STATION = 46.0            # A station's clear length,
 PLATFORM = (3.5, 1.0)     # its side platforms' width and height over the track bed,
 HEADROOM = 5.5            # and its clear height over the track bed.
@@ -33,7 +34,8 @@ END_STEPS = (5, .32)      # Steps at a platform's end down to the track bed: cou
 HALL = (14.0, 3.5, 6.4)   # Ticket hall: half length along the line, clear height, floor under the footway.
 HALL_SHELL = .25
 HALL_SIDE = 7.5           # The hall's half width across the line, under an arterial's street.
-SPACING = 4               # Junctions from one station to the next, about.
+SPACING = 4               # Junctions from one station to the next, about,
+SPACING_DOWNTOWN = 2      # and downtown.
 STAIR = (2.0, .17, .28)   # Stairs: clear width, rise and going of a step.
 STAIR_TOP = 9.0           # Along the line from the junction, where a hall stair arrives.
 HEADROOM_STAIR = 2.2
@@ -44,6 +46,7 @@ UTILITY = 2.4             # Utility room, square, clear (as high).
 UTILITY_SHELL = .25
 EXIT_SHARE = .5           # Share of utility rooms with a ladder shaft up to the street.
 ACCESS_REACH = 16.0       # Longest passage from a basement into a hall.
+ACCESS_DROP_STYLES = ('DOWNTOWN', 'OLD_TOWN', 'BRUTALIST')   # Their first storeys drop into a hall by a ladder.
 LINE_TIERS = {'ARTERIAL': 1.0, 'COLLECTOR': 2.5}
 MIN_STOPS = 6             # Shortest line, in junctions.
 
@@ -117,7 +120,11 @@ class Access:
     id: str
     site: str
     room: str
-    tunnel: object        # A tunnels.Tunnel from the basement's wall to the hall's.
+    tunnel: object        # A tunnels.Tunnel from the basement's wall to the hall's (or to a drop's shaft).
+    along: float = 0.0    # Along the line,
+    side: int = 1         # on which side of the hall.
+    storey: int = -2
+    drop: tuple = None    # A ladder shaft beside the hall, as sewers.drop_shaft takes it.
 
 
 @dataclass
@@ -230,6 +237,11 @@ class Subway:
                 found.append((s.hall(), *s.hall_span()))
             for e in s.entrances:
                 found.append((_entrance_rect(s, e), e.floor - HALL_SHELL, e.top + PARAPET))
+            for a in s.accesses:
+                if a.drop is not None:
+                    wall, far, zs, _, top = a.drop
+                    lo, hi = sorted((wall, far))
+                    found.append((_rect(s, a.along - 1.2, a.along + 1.2, lo - s.line, hi - s.line), zs - .2, top))
         for t in self.turns:
             found.append((t.rect(), t.track - SHELL, t.track + LINE[1] + SHELL))
         for u in self.utilities:
@@ -237,6 +249,18 @@ class Subway:
             found.append((u.corridor.rect(), u.floor - .2, u.floor + 2.4))
             if u.exit is not None:
                 found.append((u.exit.rect(), u.exit.base, u.exit.rim))
+        return found
+
+    def lifts(self):
+        """Where the footways' skirts must stop short: over the ladder shafts
+        of drops into halls (rect, top)."""
+        found = []
+        for s in self.stations:
+            for a in s.accesses:
+                if a.drop is not None:
+                    wall, far, _, _, top = a.drop
+                    lo, hi = sorted((wall, far))
+                    found.append((_rect(s, a.along - 1.2, a.along + 1.2, lo - s.line, hi - s.line), top))
         return found
 
     def openings(self):
@@ -390,9 +414,14 @@ def plan(city, surface=None, sites=(), street=None, avoid=()):
         if any(other is not None and not arterial(node, other) for other in (before, after)):
             continue
         candidates.append(k)
+    def spacing(k):
+        x, y = path[k][0] * size, path[k][1] * size
+        downtown = district_at(city.settings, x, y, city.locations).style == 'DOWNTOWN'
+        return SPACING_DOWNTOWN if downtown else SPACING
+
     chosen = []
     for k in candidates:
-        if k in (0, count - 1) or not chosen or k - chosen[-1] >= SPACING:
+        if k in (0, count - 1) or not chosen or k - chosen[-1] >= spacing(k):
             if chosen and k - chosen[-1] < 2:
                 continue
             chosen.append(k)
@@ -444,8 +473,9 @@ def plan(city, surface=None, sites=(), street=None, avoid=()):
         start, end = path[lo][i] * size + t0, path[hi][i] * size - t1
         edge = Edge(axis, line, path[lo], path[hi], start, end, [], [], arterial(a, b))
         if end - start > 1e-6:
+            run = WALKWAY_STEPS[0] * WALKWAY_STEPS[1]
             edge.sections = _sewers._sections(start, end, line, axis, lambda along: TRACK_DEPTH, level, f0, f1,
-                                              False, False)
+                                              False, False, (start + run, end - run) if end - start > 3 * run else ())
         else:
             edge.sections = [(start, f0), (end, f1)]
         edges.append(edge)
@@ -587,17 +617,23 @@ def connect(subway, sites, network=None, avoid=()):
             chamber = halls.get(f'subway_hall_{_key(station.node)}')
             if chamber is not None:
                 station.doors = list(chamber.doors)
-    have = [s for s in sites if s.level(-2) is not None and s.quarter() is not None]
+    have = [s for s in sites if s.quarter() is not None and
+            (s.level(-2) is not None or (s.style in ACCESS_DROP_STYLES and s.level(-1) is not None))]
     boxes = {s.id: s.box(s.outer) for s in sites}
     taken = set()
+    shaft = 2 * _sewers.DROP[1] + _sewers.DROP[0]
     for station in subway.stations:
         hall = station.hall()
         m = 0 if station.axis == 'x' else 1           # Along the line.
         n = 1 - m
+        axis = 'y' if station.axis == 'x' else 'x'
         for site in have:
             if site.id in taken:
                 continue
             box = boxes[site.id]
+            if not (box[m] < hall[m + 2] and hall[m] < box[m + 2]):
+                continue
+            made = None
             for side in (1, -1):
                 wall = station.line + side * (HALL_SIDE + HALL_SHELL)
                 face = box[n] if side > 0 else box[n + 2]
@@ -610,40 +646,70 @@ def connect(subway, sites, network=None, avoid=()):
                 hi = min(inner[m + 2] - need, hall[m + 2] - HALL_SHELL - need)
                 if hi < lo:
                     continue
-                zb = site.floor(-2)
-                if abs(zb - station.hall_floor) > .05 + max(gap, .25) * tunnels.SLOPE:
-                    continue
-                along = None
-                for k in range(int((hi - lo) / .5) + 1):
-                    trial = (lo + hi) / 2 + .5 * ((k + 1) // 2) * (1 if k % 2 else -1)
-                    if not lo - 1e-6 <= trial <= hi + 1e-6:
+                modes = []
+                if site.level(-2) is not None:
+                    modes.append((-2, False))
+                if site.style in ACCESS_DROP_STYLES and site.level(-1) is not None and gap >= shaft + .3:
+                    modes.append((-1, True))
+                for storey, drop in modes:
+                    zb = site.floor(storey)
+                    if drop:
+                        if zb - station.hall_floor < 1.0:
+                            continue
+                    elif abs(zb - station.hall_floor) > .05 + max(gap, .25) * tunnels.SLOPE:
                         continue
-                    probe = face + side * .6
-                    px, py = (trial, probe) if station.axis == 'x' else (probe, trial)
-                    room = tunnels._room_behind(site, -2, px, py, 'y' if station.axis == 'x' else 'x')
-                    if room is not None:
-                        along = trial
+                    for k in range(int((hi - lo) / .5) + 1):
+                        along = (lo + hi) / 2 + .5 * ((k + 1) // 2) * (1 if k % 2 else -1)
+                        if not lo - 1e-6 <= along <= hi + 1e-6:
+                            continue
+                        probe = face + side * .6
+                        px, py = (along, probe) if station.axis == 'x' else (probe, along)
+                        room = tunnels._room_behind(site, storey, px, py, axis)
+                        if room is None:
+                            continue
+                        ident = f'access_{site.id}__{station.id}'
+                        if drop:
+                            far = wall + side * shaft
+                            top = zb + tunnels.HEIGHT + tunnels.SHELL
+                            start, end = sorted((far, face))
+                            passage = tunnels.Tunnel(ident, site.id, station.id, storey, axis, along, start, end,
+                                                     zb, zb, room.name, '', True)
+                            lo_s, hi_s = sorted((wall, far))
+                            parts = [(passage.rect(tunnels.CLEAR), zb - tunnels.SHELL, top),
+                                     (_rect(station, along - tunnels.WIDTH / 2 - _sewers.DROP[1],
+                                            along + tunnels.WIDTH / 2 + _sewers.DROP[1],
+                                            lo_s - station.line, hi_s - station.line),
+                                      station.hall_floor - _sewers.DROP[1], top)]
+                            shape = (wall, far, station.hall_floor, zb, top)
+                        else:
+                            start, end, z0, z1 = ((wall, face, station.hall_floor, zb) if side > 0
+                                                  else (face, wall, zb, station.hall_floor))
+                            passage = tunnels.Tunnel(ident, site.id, station.id, storey, axis, along, start, end,
+                                                     z0, z1, room.name, '', True)
+                            parts = [] if passage.length <= .05 else [
+                                (passage.rect(tunnels.CLEAR), min(z0, z1) - tunnels.SHELL,
+                                 max(z0, z1) + tunnels.HEIGHT + tunnels.SHELL)]
+                            shape = None
+                        if any(_overlap(r, b) for r, _, _ in parts for i, b in boxes.items() if i != site.id):
+                            continue
+                        if any(_overlap(r, r2) and lo2 < high and low < hi2
+                               for r, low, high in parts for r2, lo2, hi2 in avoid):
+                            continue
+                        if any(_overlap(r, other.tunnel.rect()) for r, _, _ in parts
+                               for st in subway.stations for other in st.accesses):
+                            continue
+                        made = Access(ident, site.id, room.name, passage, along, side, storey, shape)
+                        point = (along, face) if station.axis == 'x' else (face, along)
+                        door_side, door_centre = tunnels._side(site, *point)
+                        site.doors.append((storey, door_side, door_centre, tunnels.DOOR[0], tunnels.DOOR[1]))
                         break
-                if along is None:
-                    continue
-                ident = f'access_{site.id}__{station.id}'
-                start, end, z0, z1 = (wall, face, station.hall_floor, zb) if side > 0 else (face, wall, zb, station.hall_floor)
-                passage = tunnels.Tunnel(ident, site.id, station.id, -2, 'y' if station.axis == 'x' else 'x', along,
-                                         start, end, z0, z1, room.name, '', True)
-                if passage.length > .05:
-                    rect = passage.rect(tunnels.CLEAR)
-                    low = min(z0, z1) - tunnels.SHELL
-                    high = max(z0, z1) + tunnels.HEIGHT + tunnels.SHELL
-                    if any(_overlap(rect, b) for i, b in boxes.items() if i != site.id):
-                        continue
-                    if any(_overlap(rect, r) and lo2 < high and low < hi2 for r, lo2, hi2 in avoid):
-                        continue
-                point = (along, face) if station.axis == 'x' else (face, along)
-                door_side, door_centre = tunnels._side(site, *point)
-                site.doors.append((-2, door_side, door_centre, tunnels.DOOR[0], tunnels.DOOR[1]))
-                station.accesses.append(Access(ident, site.id, room.name, passage))
+                    if made is not None:
+                        break
+                if made is not None:
+                    break
+            if made is not None:
+                station.accesses.append(made)
                 taken.add(site.id)
-                break
 
 
 # -- geometry ------------------------------------------------------------------
@@ -741,6 +807,9 @@ def build(mesh, subway, material, floor_material):
         _station(mesh, station, material, floor_material)
         for access in station.accesses:
             tunnels.build(mesh, access.tunnel, material, floor_material)
+            if access.drop is not None:
+                _sewers.drop_shaft(mesh, station, access.along, access.side, access.drop, _sewers.OPENING['trunk'],
+                                   material, floor_material)
     for utility in subway.utilities:
         tunnels.build(mesh, utility.corridor, material, floor_material)
         _utility(mesh, utility, material, floor_material)
@@ -777,7 +846,23 @@ def _edge(mesh, edge, material, floor_material):
                 extrude(upper, a0, a1, material)
                 continue
             extrude(quad, a0, a1, floor_material if i == 0 else material)
-        extrude(walkway, a0, a1, floor_material)
+        # The walkway, stepping down to the track bed at the edge's ends so it can be reached from it.
+        count, going = WALKWAY_STEPS
+        run = count * going
+        stepped = edge.length > 3 * run
+        if stepped and a1 <= edge.start + run + 1e-6:
+            ends = [(edge.start, 1)]
+        elif stepped and a0 >= edge.end - run - 1e-6:
+            ends = [(edge.end, -1)]
+        else:
+            extrude(walkway, a0, a1, floor_material)
+            continue
+        for at, sense in ends:
+            for j in range(1, count):
+                b0, b1 = sorted((at + sense * j * going, at + sense * (j + 1) * going))
+                height = WALKWAY[1] * j / count
+                block = [(half - WALKWAY[0], 0.0), (half, 0.0), (half, height), (half - WALKWAY[0], height)]
+                extrude(block, b0, b1, floor_material)
 
 
 def _station(mesh, station, material, floor_material):
@@ -845,9 +930,15 @@ def _station(mesh, station, material, floor_material):
             (centre, lambda u, f=s.hall_floor: _rect_opening(u, ENTRANCE[0], f, ENTRANCE[2], floor_material)))
     for access in s.accesses:
         t = access.tunnel
-        hall_side = ('+' if (t.start + t.end) / 2 > s.line else '-') + ('y' if s.axis == 'x' else 'x')
-        hall_openings.setdefault(hall_side, []).append(
-            (t.line, lambda u, f=s.hall_floor: _rect_opening(u, 1.6, f, 2.1, floor_material)))
+        hall_side = ('+' if access.side > 0 else '-') + ('y' if s.axis == 'x' else 'x')
+        if access.drop is not None:
+            # Into the drop's shaft at the hall's floor, as wide as the shaft.
+            from . import tunnels
+            factory = lambda u, f=s.hall_floor: _rect_opening(u, tunnels.WIDTH, f, _sewers.OPENING['trunk'],  # noqa: E731
+                                                              floor_material)
+        else:
+            factory = lambda u, f=s.hall_floor: _rect_opening(u, 1.6, f, 2.1, floor_material)  # noqa: E731
+        hall_openings.setdefault(hall_side, []).append((t.line, factory))
     _room(mesh, s.x, s.y, hhx, hhy, s.hall_floor, HALL[1], HALL_SHELL, hall_openings, material, floor_material,
           floor_holes=hall_holes)
     for e in s.entrances:

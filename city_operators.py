@@ -747,7 +747,7 @@ class MESH_OT_generate_city(bpy.types.Operator):
                     taken = dug_solids + [(b.tunnel.rect(), min(b.tunnel.za, b.tunnel.zb) - tunnels.SHELL,
                                            max(b.tunnel.za, b.tunnel.zb) + tunnels.HEIGHT + tunnels.SHELL)
                                           for b in (network.breaches if network else ())]
-                    subway.connect(transit, sites, network, taken)
+                    subway.connect(transit, sites, network, taken + (network.solids() if network else []))
                 doorways = {site.id: site.doors for site in sites if site.doors}
             root['tunnels'] = len(dug)
             root['sewers'] = self.sewers
@@ -760,7 +760,8 @@ class MESH_OT_generate_city(bpy.types.Operator):
                 street_vertices = list(street_vertices)
                 street_faces, street_materials = cutouts.lift(
                     street_vertices, street_faces, street_materials,
-                    [(t.rect(), max(t.za, t.zb) + tunnels.HEIGHT + tunnels.SHELL) for t in passages], 2)
+                    [(t.rect(), max(t.za, t.zb) + tunnels.HEIGHT + tunnels.SHELL) for t in passages] +
+                    (transit.lifts() if transit else []), 2)
                 street_mesh = (street_vertices, street_faces, street_materials)
             holes = (network.openings() if network else []) + (transit.openings() if transit else [])
             roads = build_roads(plan, root, street_mesh, holes)

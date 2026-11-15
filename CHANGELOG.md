@@ -7,18 +7,22 @@
   `City_Subway`:
   - the **line**: a twin-track tunnel 8.6 m wide and 5 m high, its upper
     corners vaulted, the track bed 14 m under the street and following its
-    grade, with an evacuation walkway along one side; at a junction where
-    it turns, a turning box;
+    grade, with an evacuation walkway along one side that steps down to
+    the track bed at both ends; at a junction where it turns, a turning
+    box;
   - **stations** under junctions where the line runs straight along
-    arterials (every four junctions or so, and at its ends): a level box
+    arterials (every four junctions or so, every two downtown, and at its
+    ends): a level box
     46 m long with a side platform each side of the tracks (steps down to
     the track bed at their ends), a ticket hall above it at a second
     basement's depth, a stair from each platform up into the hall, and up
     to two **entrances**, stairwells from the hall's ends up to the kerb
     lanes, their openings cut in the street with a parapet round them;
   - the **sewers** that reach a station's junction end in its hall (in
-    place of the junction's chamber), and deep basements beside the hall
-    get a doorway into it;
+    place of the junction's chamber); second basement storeys beside the
+    hall get a doorway into it, and the first storeys of downtown, old town
+    and brutalist buildings a short passage to a ladder shaft that opens
+    into the hall at its floor;
   - **utility branches** midway between stations: a short corridor off the
     walkway to a room, half of them with a ladder shaft up to a hatch in the
     footway (listed with the manholes as `exit`).

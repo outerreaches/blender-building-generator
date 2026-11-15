@@ -668,28 +668,34 @@ def _rect_across(sewer, a0, a1, c0, c1):
 
 
 def _drop(mesh, sewer, b, material, floor_material):
-    """A drop's ladder shaft: floor at the sewer's, open into it below the
-    gap's height, open to the passage above the passage's floor, roofed."""
-    from . import solids
-    wall, far, zs, zb, top = b.drop
+    drop_shaft(mesh, sewer, b.along, b.side, b.drop, OPENING[sewer.kind], material, floor_material)
+
+
+def drop_shaft(mesh, stretch, along, side, drop, opening, material, floor_material):
+    """A drop's ladder shaft beside ``stretch`` (a sewer, or a subway
+    station's hall: anything with a ``line`` and a ``point``): its floor at
+    the stretch's, open into it below ``opening``, open to the passage above
+    the passage's floor, roofed. ``drop``: (the stretch's wall, the shaft's
+    far side, its floor, the passage's floor, its roof's top)."""
+    from . import solids, tunnels
+    wall, far, zs, zb, top = drop
     t = DROP[1]
-    from . import tunnels
     half = tunnels.WIDTH / 2
     lo, hi = sorted((wall, far))
 
     def box(c0, c1, a0, a1, z0, z1, mat):
         if z1 - z0 < 1e-4:
             return
-        r = _rect_across(sewer, a0, a1, c0, c1)
+        r = _rect_across(stretch, a0, a1, c0, c1)
         solids.box(mesh, r[0], r[1], z0, r[2], r[3], z1, mat)
 
-    a = b.along
+    a = along
     box(lo, hi, a - half - t, a + half + t, zs - t, zs, floor_material)
     for a0, a1 in ((a - half - t, a - half), (a + half, a + half + t)):
         box(lo, hi, a0, a1, zs, top - t, material)
-    near = sorted((wall, wall + b.side * t))
-    box(near[0], near[1], a - half, a + half, zs + OPENING[sewer.kind], top - t, material)
-    back = sorted((far - b.side * t, far))
+    near = sorted((wall, wall + side * t))
+    box(near[0], near[1], a - half, a + half, zs + opening, top - t, material)
+    back = sorted((far - side * t, far))
     box(back[0], back[1], a - half, a + half, zs, zb, material)
     box(lo, hi, a - half - t, a + half + t, top - t, top, floor_material)
 

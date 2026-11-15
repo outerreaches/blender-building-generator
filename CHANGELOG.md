@@ -14,8 +14,9 @@
     doorways in its walls;
   - a **manhole** over every chamber whose shaft comes up wholly on the
     road or footway (never on a curb): a 0.9 m square shaft from the
-    chamber's roof to a rim 2 cm proud of the street, the street and the
-    ground cut there. 25% are marked open; the lids are the game's;
+    chamber's roof to a rim 2 cm proud of the street, the street, the
+    ground and the lane paint cut there. 25% are marked open; the lids are
+    the game's;
   - **collapses**: 12% of sections are closed by a 3 m plug in the middle,
     never one whose loss would split the network;
   - **breaches**: a short passage (as a tunnel, up to 12 m) from a second

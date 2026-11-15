@@ -53,7 +53,8 @@ namespace Ares.CityGen
         public Tunnel[] tunnels;        // Between basements (v0.29); also nodes of the graph.
         public Sewer[] sewers;          // Under the streets (v0.30); also nodes of the graph.
         public Manhole[] manholes;      // One per chamber whose shaft reaches the paving (v0.30).
-        public Breach[] breaches;       // Passages from basements to trunks (v0.30).
+        public Breach[] breaches;       // Passages from basements to trunks (v0.30), drops (v0.31).
+        public Subway subway;           // The subway (v0.31); also nodes of the graph.
     }
 
     // A graph for reachability below ground. Node ids are "<building object>/<room name>";
@@ -113,6 +114,7 @@ namespace Ares.CityGen
         public string chamber;          // Node ids at the bottom
         public string street;           // and the top.
         public string shape;
+        public string kind;             // sewer, or exit (a subway utility room's ladder shaft; v0.31).
         public float[] position, bottom;
         public float size, depth;
         public bool open;
@@ -120,6 +122,9 @@ namespace Ares.CityGen
 
     // A short passage from a doorway in a basement's second storey to a gap in
     // a trunk's wall. `start` and `end` are at floor level at its two ends.
+    // A drop (v0.31) runs level from a first storey to a ladder shaft beside
+    // the sewer, which opens into it at its floor: `ladder_bottom` and
+    // `ladder_top` on the shaft's far wall, `ladder_facing` towards the sewer.
     [Serializable]
     public class Breach
     {
@@ -129,6 +134,9 @@ namespace Ares.CityGen
         public float[] start, end;
         public float width, height, length;
         public float door_width, door_height;
+        public int storey;              // -2, or -1 for a drop.
+        public bool drop;
+        public float[] ladder_bottom, ladder_top, ladder_facing;
     }
 
     // A straight tunnel from a doorway in building `a`'s basement wall to one
@@ -145,6 +153,63 @@ namespace Ares.CityGen
         public float width, height, length;
         public float door_width, door_height;
         public bool under_street;
+    }
+
+    // The subway (v0.31). A line's `points` run along its track bed's centre
+    // through each junction of its path. A station's `stairs` are flat
+    // (foot x, y, z, head x, y, z) per stair from a platform up to the hall.
+    [Serializable]
+    public class Subway
+    {
+        public SubwayLine[] lines;
+        public SubwayStation[] stations;
+        public SubwayUtility[] utilities;
+    }
+
+    [Serializable]
+    public class SubwayLine
+    {
+        public string id;
+        public string[] stations;
+        public float[] points;
+        public float width, height;
+    }
+
+    [Serializable]
+    public class SubwayStation
+    {
+        public string id;
+        public string hall, platform;   // Graph node ids.
+        public float[] position;        // Track bed level, under the junction.
+        public float[] forward;         // Along the line.
+        public float length, platform_width, platform_height, track_width;
+        public float hall_floor, hall_length, hall_width;
+        public float[] stairs;
+        public SubwayEntrance[] entrances;
+        public SubwayAccess[] accesses;
+    }
+
+    [Serializable]
+    public class SubwayEntrance
+    {
+        public string id, street;       // Its street node.
+        public float[] foot, head;      // At the hall's floor; at the street.
+        public float width;
+    }
+
+    [Serializable]
+    public class SubwayAccess
+    {
+        public string id, building, room;
+        public float length;
+    }
+
+    [Serializable]
+    public class SubwayUtility
+    {
+        public string id;
+        public string exit;             // Its exit's manhole id, or "".
+        public float[] position;
     }
 
     [Serializable]

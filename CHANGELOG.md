@@ -1,5 +1,42 @@
 # Changelog
 
+## v0.31.0: Subway
+
+- **Subway** (new city setting, on by default). A line under the arterials
+  from one far district through the city's centre to another, one object,
+  `City_Subway`:
+  - the **line**: a twin-track tunnel 8.6 m wide and 5 m high, its upper
+    corners vaulted, the track bed 14 m under the street and following its
+    grade, with an evacuation walkway along one side; at a junction where
+    it turns, a turning box;
+  - **stations** under junctions where the line runs straight along
+    arterials (every four junctions or so, and at its ends): a level box
+    46 m long with a side platform each side of the tracks (steps down to
+    the track bed at their ends), a ticket hall above it at a second
+    basement's depth, a stair from each platform up into the hall, and up
+    to two **entrances**, stairwells from the hall's ends up to the kerb
+    lanes, their openings cut in the street with a parapet round them;
+  - the **sewers** that reach a station's junction end in its hall (in
+    place of the junction's chamber), and deep basements beside the hall
+    get a doorway into it;
+  - **utility branches** midway between stations: a short corridor off the
+    walkway to a room, half of them with a ladder shaft up to a hatch in the
+    footway (listed with the manholes as `exit`).
+- **Drops.** The single basement storeys of old town and brutalist
+  buildings now reach the sewers too: a short level passage from the
+  basement to a ladder shaft beside the trunk or lateral in front, opening
+  into it at its floor (a crouch into a lateral).
+- **Ditches only in the suburbs.** Rural streets (gravel shoulders and
+  ditches) now run only between suburbs, or between a suburb and the open
+  land past the city's edge; industry and other districts keep curbs and
+  footways (plan schema 23).
+- **Metadata.** `subway` (the line's track centre, stations with their
+  platforms, stairs, entrances and accesses, utility rooms); in the
+  `underground` graph `station_hall`, `platform`, `subway` and `utility`
+  nodes with stair, subway, door and shaft links, all reaching the street;
+  manholes get a `kind` (`sewer` or `exit`); breaches a `storey`, and for
+  drops the ladder's ends and facing.
+
 ## v0.30.0: Sewers
 
 - **Sewers** (new city setting, on by default). A walkable network under

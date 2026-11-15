@@ -58,6 +58,7 @@ The original single-building and bulk operators remain available. Architecture u
 | Basements | A storey below ground (two under downtown towers) under many buildings, reached by their own stair (default on) |
 | Tunnels | Tunnels between neighbouring basements, under open ground and streets (default on, with Basements) |
 | Sewers | Walkable sewers under the streets: trunks, crouch-height laterals, a chamber and a manhole at every junction, collapses, breaches into deep basements (default on) |
+| Subway | A line under the arterials through the centre: stations with platforms, a ticket hall and street entrances, utility branches with exits; the sewers meet the halls (default on) |
 | District Ground | Open ground by district: paved downtown with strips of dirt and grass, patchier further out, grass round apartment blocks, gravel in industry, dirt round houses and in the wasteland (default on; off: one material) |
 
 | Starting layout | Core radius | Core density | Outskirts density | Local roads |

@@ -10,7 +10,7 @@ import json
 import math
 import random
 
-VERSION = 22
+VERSION = 23
 ROAD_WIDTHS = {"HIGHWAY": 20.0, "ARTERIAL": 12.0, "COLLECTOR": 8.0, "LOCAL": 6.0}
 ROAD_RANK = {name: i for i, name in enumerate(ROAD_WIDTHS)}
 # Corner radius at a route bend, before the curve_radius multiplier and clamping.
@@ -1748,34 +1748,34 @@ def density_at(settings, x, y):
 TOWN_CENTRE_WEIGHT = 1.7
 
 
-# Cross-sections: streets in the suburbs and on the outskirts (and in a small
-# town, out of its old town) have a gravel shoulder flush with the road and a
-# ditch beyond it instead of a curb and footway (``streets.ditches``), as the
-# ``rural_streets`` setting says.
+# Cross-sections: streets in the suburbs have a gravel shoulder flush with the
+# road and a ditch beyond it instead of a curb and footway
+# (``streets.ditches``), as the ``rural_streets`` setting says. Only the
+# suburbs (since v0.31: ditches by industry or along the edge of other
+# districts looked out of place).
 RURAL_STREETS = ('AUTO', 'ON', 'OFF')   # AUTO: on Rolling Hills (a flat city stays as it was).
-RURAL_STYLES = {'CITY': ('SUBURBAN', 'INDUSTRIAL'),
-                'SMALL_TOWN': ('SUBURBAN', 'INDUSTRIAL', 'RESIDENTIAL')}
+RURAL_STYLES = ('SUBURBAN',)
 RURAL_TIERS = ('LOCAL', 'COLLECTOR')
 
 
 def _rural_streets(settings, locations, roads, terraces):
     """Lattice edges of the streets with a rural section: local and collector
-    streets whose blocks either side are in rural districts, out past the
-    city's edge or off the map (none on a terraced city, whose footways meet
-    its retaining walls; with ``rural_streets`` AUTO, none on a flat one)."""
+    streets with suburbs on both sides, or on one side and the open land past
+    the city's edge (or the map's) on the other (none on a terraced city,
+    whose footways meet its retaining walls; with ``rural_streets`` AUTO,
+    none on a flat one)."""
     mode = settings.rural_streets
     if terraces or mode == 'OFF' or (mode == 'AUTO' and settings.terrain == 'FLAT'):
         return []
     size, radius = settings.block_size, settings.radius
-    styles = RURAL_STYLES.get(settings.preset, RURAL_STYLES['CITY'])
 
-    def rural_block(bx, by):
+    def block(bx, by):
         if max(bx, by) >= radius or min(bx, by) < -radius:
-            return True
+            return 'outside'
         x, y = (bx + .5) * size, (by + .5) * size
         if not in_city(settings, x, y):
-            return True
-        return district_at(settings, x, y, locations).style in styles
+            return 'outside'
+        return 'suburb' if district_at(settings, x, y, locations).style in RURAL_STYLES else 'town'
     found = []
     for (a, b), tier in sorted(roads.items()):
         if tier not in RURAL_TIERS:
@@ -1784,7 +1784,8 @@ def _rural_streets(settings, locations, roads, terraces):
             blocks = ((min(a[0], b[0]), a[1] - 1), (min(a[0], b[0]), a[1]))
         else:
             blocks = ((a[0] - 1, min(a[1], b[1])), (a[0], min(a[1], b[1])))
-        if all(rural_block(*block) for block in blocks):
+        sides = [block(*b) for b in blocks]
+        if 'town' not in sides and 'suburb' in sides:
             found.append([list(a), list(b)])
     return found
 

@@ -42,6 +42,7 @@ class Site:
     under: object
     outer: tuple
     doors: list = field(default_factory=list)    # (storey index, side, centre, width, height)
+    style: str = ''       # The building's style.
 
     def quarter(self):
         turns = self.rotation / (math.pi / 2)
@@ -112,7 +113,7 @@ def site_of(lot, params, curb):
     if under is None:
         return None
     return Site(lot.id, lot.center, lot.rotation, lot.width, lot.depth, curb + lot.level, under,
-                spec.levels[0].rect)
+                spec.levels[0].rect, style=lot.style)
 
 
 def _overlap(a, b):

@@ -138,6 +138,13 @@ def _r(value, digits=3):
 STREET_KINDS = ('surface', 'street')    # Underground nodes that are the street level.
 
 
+def _across(passage, along, across):
+    """Plan point of a passage running across a sewer: ``along`` the sewer,
+    ``across`` (absolute) along the passage."""
+    return (along, across) if passage.axis == 'y' else (across, along)
+SHAFT_SIZE = .9                         # sewers.SHAFT, for exits.
+
+
 def _graph_facts(nodes, links):
     """The underground graph with derived facts: per node ``depth`` (links to
     the nearest street-level node, -1 if none is reached) and ``exits``
@@ -234,6 +241,7 @@ class CityMetadata:
         self.sewers = []
         self.manholes = []
         self.breaches = []
+        self.subway = {'lines': [], 'stations': [], 'utilities': []}
 
     # -- transforms ------------------------------------------------------
     def lot_transform(self, lot):
@@ -366,6 +374,8 @@ class CityMetadata:
             return point((ox + x, oy + y, oz + z))
 
         for chamber in sorted(network.chambers.values(), key=lambda c: c.id):
+            if chamber.hall:
+                continue          # A subway hall: listed with the subway.
             self.under_nodes.append({'id': chamber.id, 'kind': 'chamber', 'building': '', 'room': '',
                                      'floor': -2, 'layer': 'sewer',
                                      'position': at(chamber.x, chamber.y, chamber.floor),
@@ -383,7 +393,7 @@ class CityMetadata:
             self.manholes.append({'id': m.id, 'chamber': chamber.id, 'street': street,
                                   'position': at(m.x, m.y, m.rim), 'bottom': at(m.x, m.y, chamber.floor),
                                   'size': _r(SHAFT), 'shape': 'octagon', 'depth': _r(m.rim - chamber.floor),
-                                  'open': m.open})
+                                  'open': m.open, 'kind': 'sewer'})
         halves = {}
         for sewer in network.sewers:
             clearance = 'walk' if sewer.kind == 'trunk' else 'crouch'
@@ -421,15 +431,131 @@ class CityMetadata:
                 x, y = (along, t.line) if t.axis == 'x' else (t.line, along)
                 return at(x, y, z)
 
-            wall = (t.start, t.za) if t.b == item.sewer and item.side > 0 else (t.end, t.zb)
+            entry = {'id': item.id, 'building': item.site, 'room': item.room, 'sewer': node,
+                     'start': end(t.start, t.za), 'end': end(t.end, t.zb), 'storey': item.storey,
+                     'width': _r(passages.WIDTH), 'height': _r(passages.HEIGHT),
+                     'door_width': _r(passages.DOOR[0]), 'door_height': _r(passages.DOOR[1]),
+                     'length': _r(t.length), 'drop': item.drop is not None,
+                     'ladder_bottom': [], 'ladder_top': [], 'ladder_facing': []}
+            if item.drop is None:
+                wall = (t.start, t.za) if t.b == item.sewer and item.side > 0 else (t.end, t.zb)
+                position = end(*wall)
+            else:
+                # A ladder on the shaft's far wall, from the sewer's floor up to the passage's.
+                from .sewers import DROP
+                sewer_wall, far, zs, zb, top = item.drop
+                position = at(*_across(t, item.along, sewer_wall), zs)
+                face = far - item.side * DROP[1]
+                entry['ladder_bottom'] = at(*_across(t, item.along, face), zs)
+                entry['ladder_top'] = at(*_across(t, item.along, face), zb)
+                facing = (0.0, -item.side) if t.axis == 'y' else (-item.side, 0.0)
+                entry['ladder_facing'] = self.space.direction(*facing)
             self.under_links.append({'a': f'{item.site}/{item.room}', 'b': node, 'kind': 'breach',
                                      'width': _r(passages.DOOR[0]), 'height': _r(passages.HEIGHT),
-                                     'position': end(*wall)})
-            self.breaches.append({'id': item.id, 'building': item.site, 'room': item.room, 'sewer': node,
-                                  'start': end(t.start, t.za), 'end': end(t.end, t.zb),
-                                  'width': _r(passages.WIDTH), 'height': _r(passages.HEIGHT),
-                                  'door_width': _r(passages.DOOR[0]), 'door_height': _r(passages.DOOR[1]),
-                                  'length': _r(t.length)})
+                                     'position': position, 'ladder': item.drop is not None})
+            self.breaches.append(entry)
+
+    def add_subway(self, transit):
+        """The subway: per station a hall and a platform node, the line
+        between stations as runs, utility rooms; stair, subway, door, shaft
+        and access links; and its own lists. Utility exits join the
+        manholes (kind ``exit``)."""
+        from . import subway as sub
+        from . import tunnels as passages
+        ox, oy, oz = self.origin
+        point = self.space.point
+
+        def at(x, y, z):
+            return point((ox + x, oy + y, oz + z))
+
+        def node(ident, kind, position, area, floor):
+            self.under_nodes.append({'id': ident, 'kind': kind, 'building': '', 'room': '', 'floor': floor,
+                                     'layer': 'subway', 'position': position, 'area': _r(area)})
+
+        def link(a, b, kind, width, position, **extra):
+            self.under_links.append(dict({'a': a, 'b': b, 'kind': kind, 'width': _r(width), 'position': position},
+                                         **extra))
+
+        order = {n: k for k, n in enumerate(transit.path)}
+        stops = sorted((order[s.node], s) for s in transit.stations)
+        halls, platforms = {}, {}
+        for k, s in stops:
+            key = sub._key(s.node)
+            hall, platform = f'subway_hall_{key}', f'subway_platform_{key}'
+            halls[s.node], platforms[s.node] = hall, platform
+            node(hall, 'station_hall', at(s.x, s.y, s.hall_floor), 4 * sub.HALL[0] * sub.HALL_SIDE, -2)
+            node(platform, 'platform', at(s.x, s.y, s.track + sub.PLATFORM[1]), 2 * sub.STATION * sub.PLATFORM[0], -4)
+            stairs = []
+            for sign, across, bottom, steps, rise in s.stairs():
+                top = bottom + sign * steps * sub.STAIR[2]
+                x, y = s.point(top, across)
+                link(hall, platform, 'stair', sub.STAIR[0], at(x, y, s.hall_floor), height=_r(s.hall_floor - s.track))
+                stairs.extend(at(*s.point(bottom, across), s.track + sub.PLATFORM[1]) + at(x, y, s.hall_floor))
+            entrances = []
+            for e in s.entrances:
+                head = s.point(e.start + e.sign * e.run, sum(e.across) / 2)
+                street = f'street_{e.id}'
+                node(street, 'street', at(*head, e.top), 0.0, 0)
+                link(hall, street, 'stair', sub.ENTRANCE[0], at(*head, e.top), height=_r(e.top - e.floor))
+                foot = s.point(e.start, sum(e.across) / 2)
+                entrances.append({'id': e.id, 'street': street, 'foot': at(*foot, e.floor), 'head': at(*head, e.top),
+                                  'width': _r(sub.ENTRANCE[0])})
+            accesses = []
+            for a in s.accesses:
+                t = a.tunnel
+                wall = s.line + (sub.HALL_SIDE + sub.HALL_SHELL) * (1 if (t.start + t.end) / 2 > s.line else -1)
+                x, y = (t.line, wall) if s.axis == 'x' else (wall, t.line)
+                link(f'{a.site}/{a.room}', hall, 'door', passages.DOOR[0], at(x, y, s.hall_floor))
+                accesses.append({'id': a.id, 'building': a.site, 'room': a.room, 'length': _r(t.length)})
+            forward = (1.0, 0.0) if s.axis == 'x' else (0.0, 1.0)
+            self.subway['stations'].append({
+                'id': s.id, 'hall': hall, 'platform': platform, 'position': at(s.x, s.y, s.track),
+                'forward': self.space.direction(*forward), 'length': _r(sub.STATION),
+                'platform_width': _r(sub.PLATFORM[0]), 'platform_height': _r(sub.PLATFORM[1]),
+                'track_width': _r(sub.LINE[0]), 'hall_floor': _r(s.hall_floor + oz), 'hall_length': _r(2 * sub.HALL[0]),
+                'hall_width': _r(2 * sub.HALL_SIDE), 'stairs': stairs, 'entrances': entrances, 'accesses': accesses})
+        # The line between stations (and past the last ones, if it goes on): one node per run.
+        cuts = [k for k, _ in stops]
+        bounds = sorted(set([0] + cuts + [len(transit.path) - 1]))
+        runs = []
+        for k0, k1 in zip(bounds, bounds[1:]):
+            ident = f'subway_run_{k0}_{k1}'
+            mid = transit.path[(k0 + k1) // 2]
+            size = self.plan.settings.block_size
+            mx, my = mid[0] * size, mid[1] * size
+            track = next((e.floor_at(e.start) for e in transit.edges if mid in (e.a, e.b)), 0.0)
+            node(ident, 'subway', at(mx, my, track), (k1 - k0) * size * sub.LINE[0], -4)
+            for k in (k0, k1):
+                if k in cuts:
+                    link(ident, platforms[transit.path[k]], 'subway', sub.LINE[0], at(mx, my, track))
+            runs.append((k0, k1, ident))
+        for u in transit.utilities:
+            ka, kb = order[u.edge.a], order[u.edge.b]
+            run = next(ident for k0, k1, ident in runs if k0 <= min(ka, kb) and max(ka, kb) <= k1)
+            x, y = u.edge.point(u.along, u.across)
+            node(u.id, 'utility', at(x, y, u.floor), sub.UTILITY ** 2, -4)
+            dx, dy = u.edge.point(u.along, sub.LINE[0] / 2)
+            link(run, u.id, 'door', passages.WIDTH, at(dx, dy, u.floor))
+            entry = {'id': u.id, 'position': at(x, y, u.floor), 'exit': ''}
+            if u.exit is not None:
+                m = u.exit
+                street = f'street_{m.id}'
+                node(street, 'street', at(m.x, m.y, m.rim), 0.0, 0)
+                link(u.id, street, 'shaft', SHAFT_SIZE, at(m.x, m.y, m.rim), height=_r(m.rim - u.floor), open=m.open)
+                self.manholes.append({'id': m.id, 'chamber': u.id, 'street': street, 'position': at(m.x, m.y, m.rim),
+                                      'bottom': at(m.x, m.y, u.floor), 'size': _r(SHAFT_SIZE), 'shape': 'octagon',
+                                      'depth': _r(m.rim - u.floor), 'open': m.open, 'kind': 'exit'})
+                entry['exit'] = m.id
+            self.subway['utilities'].append(entry)
+        size = self.plan.settings.block_size
+        points = []
+        for n in transit.path:
+            x, y = n[0] * size, n[1] * size
+            track = next((e.floor_at(e.start if (e.a == n) == (e.start <= e.end) else e.end)
+                          for e in transit.edges if n in (e.a, e.b)), 0.0)
+            points.append(at(x, y, track))
+        self.subway['lines'].append({'id': 'line_1', 'stations': [s.id for _, s in stops],
+                                     'points': _flat(points), 'width': _r(sub.LINE[0]), 'height': _r(sub.LINE[1])})
 
     def _interior(self, facts):
         """Rooms, lifts and railings in building space."""
@@ -717,6 +843,7 @@ class CityMetadata:
             'sewers': self.sewers,
             'manholes': self.manholes,
             'breaches': self.breaches,
+            'subway': self.subway,
             'districts': [{'id': loc.id, 'role': loc.role, 'style': loc.style,
                            'position': node_point(loc.node)} for loc in plan.locations],
             'roads': roads,

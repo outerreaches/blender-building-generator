@@ -11,7 +11,7 @@ from .metadata import SPACES as METADATA_SPACES, CityMetadata
 from .spec import BuildingSpec
 from .sites import (KINDS as SITE_KINDS, PAD_THICKNESS, VARIANTS as SITE_VARIANTS,
                     compose as compose_site, compose_yard)
-from . import cutouts, ground_cover, sewers, tunnels
+from . import cutouts, ground_cover, sewers, subway, tunnels
 from .meshdata import MAT_FLOOR, MAT_WALLS, MeshData
 from .streets import (Grading, approach_reach, build_culvert_mesh, build_freeway_mesh,
                       build_ground_mesh, build_outer_road_mesh, build_stair_mesh,
@@ -601,6 +601,11 @@ class MESH_OT_generate_city(bpy.types.Operator):
                          description='Walkable sewers under the streets: trunks under arterials and '
                                      'collectors, crouch-height laterals, a chamber and a manhole at '
                                      'every junction, breaches into deep basements')
+    subway: BoolProperty(name='Subway', default=True,
+                         description='A subway line under the arterials from a far district through the '
+                                     'centre to another: stations with platforms, a ticket hall, street '
+                                     'entrances and doorways into deep basements, utility branches with '
+                                     'some exits; the sewers meet the halls')
     district_ground: BoolProperty(name='District Ground', default=True,
                                   description='Open ground by district: paving downtown with strips of '
                                               'dirt and dry grass, patchier paving further out, grass '
@@ -643,6 +648,7 @@ class MESH_OT_generate_city(bpy.types.Operator):
         if self.basements:
             layout.prop(self, 'tunnels')
         layout.prop(self, 'sewers')
+        layout.prop(self, 'subway')
         layout.prop(self, 'route_guides')
         layout.label(text='Streets meet at grade; only the raised highway bridges them.',
                      icon='INFO')
@@ -691,7 +697,7 @@ class MESH_OT_generate_city(bpy.types.Operator):
             root['basements'] = self.basements
             openings = []
             # Basements are planned first: the tunnels between them put doorways in their walls.
-            recipes, doorways, dug, network = {}, {}, [], None
+            recipes, doorways, dug, network, transit = {}, {}, [], None, None
             grading = Grading(plan) if plan.heights else None
             if self.detail == 'SHELLS':
                 for lot in plan.lots:
@@ -709,9 +715,14 @@ class MESH_OT_generate_city(bpy.types.Operator):
                     corners = site_footprint(poi)
                     pads.append((min(p[0] for p in corners), min(p[1] for p in corners),
                                  max(p[0] for p in corners), max(p[1] for p in corners)))
-                # Sewers first: they keep to the streets, and the tunnels keep clear of them.
+                # The subway first (it is deepest and the halls take junctions), then the sewers, which
+                # keep to the streets and end in the halls; the tunnels keep clear of both.
+                if self.subway:
+                    transit = subway.plan(plan, plan.surface(), sites, street_mesh, pads)
                 if self.sewers:
-                    network = sewers.plan(plan, plan.surface(), sites, street_mesh, pads)
+                    network = sewers.plan(plan, plan.surface(), sites, street_mesh, pads,
+                                          transit.halls() if transit else None,
+                                          transit.solids(halls=False) if transit else ())
                 if self.basements and self.tunnels:
                     lowest = None
                     if grading is not None:
@@ -719,6 +730,7 @@ class MESH_OT_generate_city(bpy.types.Operator):
                     # Foundations on terrain reach down to the lowest ground under the lot: solids
                     # too, but only where they would reach under a tunnel's roof (its slab may hold one).
                     below = list(network.solids()) if network else []
+                    below += transit.solids() if transit else []
                     for lot in plan.lots:
                         corners = footprint_with_approach(lot, plan)
                         bottom = (grading.lowest(corners) if grading is not None else 0.0) - .2
@@ -726,15 +738,23 @@ class MESH_OT_generate_city(bpy.types.Operator):
                                        max(p[0] for p in corners), max(p[1] for p in corners)),
                                       bottom + tunnels.SHELL + tunnels.LAYER_GAP, self.curb_height + lot.level))
                     dug = tunnels.plan(sites, plan, lowest, pads, below)
+                dug_solids = [(t.rect(), min(t.za, t.zb) - tunnels.SHELL,
+                               max(t.za, t.zb) + tunnels.HEIGHT + tunnels.SHELL) for t in dug]
                 if network is not None and sites:
                     sewers.breach(network, sites, plan.settings.seed,
-                                  [(t.rect(), min(t.za, t.zb) - tunnels.SHELL,
-                                    max(t.za, t.zb) + tunnels.HEIGHT + tunnels.SHELL) for t in dug])
+                                  dug_solids + (transit.solids() if transit else []))
+                if transit is not None:
+                    taken = dug_solids + [(b.tunnel.rect(), min(b.tunnel.za, b.tunnel.zb) - tunnels.SHELL,
+                                           max(b.tunnel.za, b.tunnel.zb) + tunnels.HEIGHT + tunnels.SHELL)
+                                          for b in (network.breaches if network else ())]
+                    subway.connect(transit, sites, network, taken)
                 doorways = {site.id: site.doors for site in sites if site.doors}
             root['tunnels'] = len(dug)
             root['sewers'] = self.sewers
+            root['subway'] = self.subway
             # Footway skirts stop short over the tunnels; the streets are cut where the manholes come up.
             passages = list(dug) + ([b.tunnel for b in network.breaches] if network else [])
+            passages += [a.tunnel for st in transit.stations for a in st.accesses] if transit else []
             if passages:
                 street_vertices, street_faces, street_materials = street_mesh
                 street_vertices = list(street_vertices)
@@ -742,15 +762,15 @@ class MESH_OT_generate_city(bpy.types.Operator):
                     street_vertices, street_faces, street_materials,
                     [(t.rect(), max(t.za, t.zb) + tunnels.HEIGHT + tunnels.SHELL) for t in passages], 2)
                 street_mesh = (street_vertices, street_faces, street_materials)
-            roads = build_roads(plan, root, street_mesh, network.openings() if network else ())
+            holes = (network.openings() if network else []) + (transit.openings() if transit else [])
+            roads = build_roads(plan, root, street_mesh, holes)
             roads.location = origin
             if self.lane_markings:
-                # After the sewers: the paint is cut where the manholes come up, like the street.
-                markings = build_markings(plan, root, network.openings() if network else ())
+                # After the sewers and the subway: the paint is cut where they come up, like the street.
+                markings = build_markings(plan, root, holes)
                 if markings is not None:
                     markings.location = origin
-            if network is not None:
-                openings.extend(network.openings())
+            openings.extend(holes)
             build_culverts(plan, root, origin)
             if plan.terraces:
                 build_terrace_works(plan, root, origin)
@@ -832,6 +852,15 @@ class MESH_OT_generate_city(bpy.types.Operator):
                 sewer_object['manholes'] = len(network.manholes)
                 sewer_object.location = origin
                 meta.add_sewers(network)
+            if transit is not None:
+                rails = MeshData()
+                subway.build(rails, transit, MAT_WALLS, MAT_FLOOR)
+                subway_object = mesh_object_from_data('City_Subway', rails, root, merge=False)
+                add_material_slots(subway_object)
+                subway_object['surface_role'] = 'subway'
+                subway_object['stations'] = len(transit.stations)
+                subway_object.location = origin
+                meta.add_subway(transit)
             ground_faces, _ = cutouts.cut(ground_vertices, ground_faces, openings)
             ground = mesh_object('City_Ground', ground_vertices, ground_faces,
                                  root, material('City_Ground', (.23, .21, .17, 1)))

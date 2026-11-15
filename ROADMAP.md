@@ -56,8 +56,8 @@ See [CHANGELOG.md](CHANGELOG.md) for the details.
 - Surviving connectivity in the metadata: rooms and openings as flat
   tables with ids, reachability from the street, road edges mapped to their
   polylines.
-- Navigation checks and vehicle swept-clearance tests.
-- Unity import and play-mode tests.
+- Vehicle swept-clearance tests; play-mode tests. (Unity-side navigation checks of the
+  underground exist in the game project.)
 
 ## Planned: terrain and infrastructure
 
@@ -77,9 +77,6 @@ stay as they are; every feature below is off until its setting is changed.
   than along a valley floor.
 - Grading round compound buildings' outlines: their notches and courts are
   paved yards at floor level for now.
-- Walkable subway tunnels and platforms.
-- Walkable sewers: some reachable, some collapsed, some breaking into the
-  subway tunnels.
 - **Water edge, optional**: a river crossing the city, or a dried-up
   coastline with port infrastructure (quays, cranes, warehouses, a dry
   harbour basin).

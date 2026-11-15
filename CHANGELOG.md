@@ -12,9 +12,9 @@
     box;
   - **stations** under junctions where the line runs straight along
     arterials (every four junctions or so, every two downtown, and at its
-    ends): a level box
-    46 m long with a side platform each side of the tracks (steps down to
-    the track bed at their ends), a ticket hall above it at a second
+    ends): a level box 46 m long with a side platform each side of the
+    tracks (steps down to the track bed at their ends), a ticket hall above
+    it at a second
     basement's depth, a stair from each platform up into the hall, and up
     to two **entrances**, stairwells from the hall's ends up to the kerb
     lanes, their openings cut in the street with a parapet round them;
@@ -59,9 +59,9 @@
     octagonal doorways in its walls; the trench stops 0.5 m short of it;
   - a **manhole** over every chamber whose shaft comes up wholly on the
     road or footway (never on a curb): an octagonal shaft 0.9 m across the
-    flats from the chamber's roof to a rim 2 cm proud of the street, the street, the
-    ground and the lane paint cut there. 25% are marked open; the lids are
-    the game's;
+    flats from the chamber's roof to a rim 2 cm proud of the street, the
+    street, the ground and the lane paint cut there. 25% are marked open;
+    the lids are the game's;
   - **collapses**: 12% of sections are closed by a 3 m plug in the middle,
     never one whose loss would split the network;
   - **breaches**: a short passage (as a tunnel, up to 12 m) from a second
@@ -77,9 +77,10 @@
   now stop above the roof. A foundation reaching down to low ground is a
   solid to the tunnels too where it would reach under a tunnel's roof
   (some ran through one; on BigCity004 16 of 105 are no longer built).
-- **Metadata.** `sewers` (ends, the floor's centre line as `points`,
-  sizes, clearance walk or crouch, condition and plug), `manholes` (rim
-  and floor points, size, depth, open) and `breaches`. In the
+- **Metadata.** `sewers` (ends, the walkways' level along the centre line
+  as `points`, sizes, `profile` and trench size, clearance walk or crouch,
+  condition and plug), `manholes` (rim and floor points, size across the
+  flats, `shape`, depth, open) and `breaches`. In the
   `underground` graph: chamber, sewer and street nodes, a collapsed
   section as its two halves, and sewer, shaft and breach links. Every node
   gains `depth` (links to the nearest surface or street node, -1 if none)

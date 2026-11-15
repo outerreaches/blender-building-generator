@@ -62,6 +62,9 @@ Everything left of `mesh_builder` is pure Python and runs under plain
 | `rubble.py` | Mounds, piles and fills as closed solids |
 | `interior.py` | Game data for interiors: rooms to furnish, lifts, railings, fixtures |
 | `sites.py` | Points of interest: site layouts (buildings + props) on a pad |
+| `basement.py` | Basement storeys: level plans below ground under the building's own stair |
+| `tunnels.py`, `sewers.py`, `subway.py` | The underground between buildings (below) |
+| `cutouts.py` | Openings cut out of surface meshes (ground, streets, paint); skirts shortened over passages |
 | `meshdata.py` | Plain mesh container and edge checks |
 | `mesh_builder.py` | Blender adapter (BMesh, coplanar merge, UVs, seams) |
 
@@ -290,9 +293,35 @@ City placement (`city_plan._place_pois`):
 - **Stops.** Transit stops go mid-block on arterial and collector footways,
   clear of lot and site fronts.
 
+## Underground (v0.28-v0.31)
+
+Basements are planned with the building (`basement.plan`, level plans with
+index -1 and -2 that reuse the floor tiling) and built by `shell` under its
+walls. Everything between buildings is planned city-wide before any
+building is built, because it puts doorways in their basement walls
+(`params['basement_doors']`):
+
+1. `subway.plan`: the line, its stations (their halls take the place of the
+   junctions' sewer chambers), entrances, utility branches.
+2. `sewers.plan(halls=...)`: trunks, laterals, chambers, manholes, plugs.
+3. `tunnels.plan(below=...)`: tunnels between basements, keeping clear in
+   3D of the subway, the sewers and deep foundations.
+4. `sewers.breach` and `subway.connect`: passages from basements to the
+   sewers and halls, clear of all of the above.
+
+Each system keeps its own depth under the street (see
+[CITY_GENERATOR.md](CITY_GENERATOR.md#underground)), so they cross without
+meeting. Sections that are not boxes (the sewers' octagons with a trench,
+the line's vaulted box) are built as a ring of solids, one per edge of the
+section, mitred at the corners (`sewers._ring`), extruded along the floor's
+centre line; every piece is a closed solid and neighbours touch only face
+to face. Openings in the street, the ground and the lane paint
+(`cutouts.cut`, rectangles or convex polygons) are cut once everything is
+planned.
+
 ## Open
 
 - Railings, lift doors and cars, furniture.
 - Non-rectangular footprints (L/T/courtyard): tiers and tilings extend to them.
-- Balconies and fire escapes on residential facades.
+- Fire escapes on residential facades; railings on balconies (they have solid upstands).
 - Interior damage beyond clipping (fallen slabs as ramps, debris on floors).

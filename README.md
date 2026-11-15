@@ -34,15 +34,23 @@ sized for the game's 2 m player capsule.
   leaving through cuttings and over embankments) or terraces (a plateau and
   podiums behind retaining walls and natural slopes, reached by ramps,
   viaducts and stairs), curved roads with filleted junctions and
-  connected driving circuits, footways and curbs (or, on rural streets,
-  gravel shoulders, ditches and culverts), built-out suburbs with
+  connected driving circuits, footways and curbs (or, on the suburbs'
+  rural streets, gravel shoulders, ditches and culverts), built-out suburbs with
   houses round their cul-de-sacs, a dense downtown of party-walled towers
   and superblocks, superblocks in the other districts too (perimeter blocks
-  round courtyards, brutalist estates, industrial compounds), and a raised
+  round courtyards, brutalist estates, industrial compounds), ground
+  materials by district, balconies on the apartment blocks, and a raised
   highway across the city on piers, with
   diamond interchanges, coming down to run out into the wasteland. A **Small
   Town** preset builds a rural town instead: an old-town main street, low
   houses round it and only the sites a town has.
+- **Underground.** Basements under many buildings, tunnels between
+  neighbouring basements, walkable sewers under the streets (octagonal
+  trunks and crouch-height laterals, chambers, manhole shafts cut through
+  the street, collapses, breaches and ladder drops from basements) and a
+  subway line with stations, platforms, ticket halls, street entrances and
+  utility exits. The sewers end in the subway's halls, and everything below
+  ground is one reachability graph in the metadata.
 - **Points of interest.** Eighteen kinds of site, each with two to four
   layouts: gas stations, fast food, auto repair, schools, hospitals, police
   and fire stations, transit stations, parks, parking lots and garages, strip
@@ -55,10 +63,13 @@ sized for the game's 2 m player capsule.
   stalls, counters, desks and cinema seats). Every building also lists its
   rooms to furnish (doors, windows, blank wall runs), its lifts (shaft,
   doors, car) and its railings, since furniture, railings and lift parts are
-  game assets. A 16-bit heightmap of the graded ground can go with them. C#
-  classes for `JsonUtility` are included. Every building is exported with
-  two lighter levels of detail (a shell and a massing), and the ground and
-  streets as tiles.
+  game assets. The underground comes as a graph of rooms, tunnels, sewers,
+  stations and the links between them, with the manholes, breaches and
+  subway listed for the game to place lids, ladders and doors. A 16-bit
+  heightmap of the graded ground can go with them. C# classes for
+  `JsonUtility` are included. Every building is exported with two lighter
+  levels of detail (a shell and a massing), and the ground and streets as
+  tiles.
 - **Deterministic.** The same seed and settings give the same result. The
   generator is pure Python up to a thin Blender adapter.
 

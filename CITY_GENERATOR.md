@@ -588,9 +588,10 @@ deck meets the ground, with its shoulders flush and no street mesh to meet.
 
 With **Rural Streets** on (Auto, the default, turns it on with Rolling
 Hills, so a flat city stays as it was; On and Off whatever the terrain),
-local streets and collectors whose blocks either side are suburban or
-industrial, or out past the city's edge or the map's, have a rural section
-(in a small town, every street out of its old town):
+local streets and collectors with suburbs on both sides, or on one side and
+the open land past the city's edge (or the map's) on the other, have a
+rural section. Only the suburbs (since v0.31): ditches by industry or along
+the edge of other districts looked out of place.
 
 - **Shoulder.** A gravel shoulder flush with the road where the footway
   would be, with no curb. Where a footway meets one (at a junction with an
@@ -613,6 +614,73 @@ industrial, or out past the city's edge or the map's, have a rural section
 A Terraced city's streets keep their curbs and footways: their outer edges
 meet its retaining walls. The plan's `rural` lists the rural streets'
 lattice edges; the metadata lists each ditch and culvert.
+
+## Underground
+
+With **Basements**, **Tunnels**, **Sewers** and **Subway** on (all on by
+default), the city goes on below the streets. Each system keeps to its own
+depth under the street, so they cross without meeting and join only where
+they are meant to:
+
+| System | Floor under the street | Clear size |
+| --- | --- | --- |
+| First basement storey, tunnels off it | about 3.2 m | rooms 3.2 m a storey; tunnels 2 m wide, 2.2 m high |
+| Sewer laterals | 5.5 m | 1.6 m octagon (a crouch), trench 0.3 by 0.12 m |
+| Second basement storey, subway ticket halls | 6.4 m | halls 28 m by 15 m, 3.5 m high |
+| Sewer trunks | 7 m | 3 m wide, 2.6 m high, walkways either side of a 0.6 by 0.3 m trench |
+| Subway line and stations | 14 m (track bed) | line 8.6 m wide, 5 m high; stations 46 m long, 5.5 m high |
+
+- **Basements** (v0.28). A storey below ground under many buildings,
+  reached by the building's own stair carried on down: under 50-60% of
+  homes (brutalist, old town, suburban, residential), two storeys with
+  larger rooms under a third of downtown towers, larger rooms under a few
+  industrial buildings; none yet under site buildings. The ground
+  and the building's foundation are open over them. Their rooms are listed
+  with the others (`floor` -1 or -2, `layer` `basement_1` or `basement_2`).
+- **Tunnels** (v0.29). Straight tunnels between basements whose walls face
+  each other, on either storey: through a shared wall, under the open ground
+  of a block (up to 26 m) or under a street (up to 34 m), with at least
+  0.3 m of ground over them; a doorway at each end. Not under a highway, a
+  rural street or a site's pad, nor through a foundation that reaches below
+  a tunnel's roof. One object, `City_Tunnels`. The footways' skirts (2.5 m
+  deep on terrain) stop above them.
+- **Sewers** (v0.30). Trunks under every arterial and collector; laterals
+  under 40% of the local streets, grown from the trunks so every one
+  reaches a trunk, falling to the trunk's depth over their last 12 m.
+  Octagonal sections with a trench down the floor, which stops 0.5 m short
+  of a chamber. A chamber under every junction a sewer reaches, entered
+  through octagonal doorways. A manhole over every chamber whose shaft
+  comes up wholly on the road or footway (never on a curb): an octagonal
+  shaft 0.9 m across the flats, the street, the ground and the lane paint
+  cut round its rim; 25% marked open (the lids are game assets). 12% of
+  sections are closed by a plug, never one the network needs. One object,
+  `City_Sewers`.
+- **Breaches.** From a second basement storey a short passage down a
+  gentle slope to the trunk in front, through a gap in its wall (v0.30);
+  from the first storey of an old town or brutalist building a level
+  passage to a ladder shaft beside the trunk or lateral, opening into it at
+  its floor (a drop, v0.31).
+- **Subway** (v0.31). One line under the arterials, from a far district
+  through the centre to another on the other side, the track bed 14 m
+  under the street and following its grade, its upper corners vaulted, an
+  evacuation walkway along one side stepping down to the track bed at both
+  ends; a turning box where it turns at a junction. Stations under
+  junctions on straight arterial runs (every four junctions or so, every
+  two downtown, and at the ends): side platforms either side of the tracks
+  with steps at their ends down to the track bed, a ticket hall above in
+  place of the junction's sewer chamber (the sewers of that junction end in
+  it), a stair from each platform up into the hall, and up to two street
+  entrances: stairwells from the hall's ends up into the kerb lanes (the
+  footways are too narrow), their openings cut in the street with a parapet
+  round them. Second basement storeys beside a hall get a doorway into it;
+  the first storeys of downtown, old town and brutalist buildings a ladder
+  drop. Midway between stations a utility branch leaves the walkway: a
+  short corridor to a room, half of them with a ladder shaft up to a hatch
+  in the footway (listed with the manholes as `exit`). One object,
+  `City_Subway`. A second line with a transfer station is next.
+
+Everything below ground is one graph in the metadata (`underground`), so a
+game can check what is reachable from the street, and how far.
 
 ## Points of interest
 
@@ -759,6 +827,12 @@ the same way.
 | `railings` (per building) | Base lines on the walking surface (flat points) with a rail height: `stair` handrails along the well side of each switchback, `guard` rails at the stair opening of the top floor, `ramp` rails along parking ramps |
 | `transit_stops` | Shelters and stops: object, variant, road edge |
 | `markers` | Placements for game assets: every small prop (`bench`, `lamp`, `bollard`, `gas_pump`, `dumpster`, `table`, `booth`, `play_structure`, `swings`, `goal`, `trash_bin`, `air_pump`, `hydrant`, `cart_corral`, `tyre_stack`, `speaker_post`; `modelled` says whether the city mesh has it), `tree` spots, `flagpole` plinths, `fence` lines (post line points and a suggested height) and `parking_stall`s (centre and nose-in direction, for wrecked cars), fixtures inside buildings (`reception_desk`, `shop_counter`, `service_counter`, `bar_counter`, facing the customers, and cinema `seat`s on their tier, facing the screen; with `building` and `floor`; never modelled), and `water` surfaces (centre at the surface, `shape`, `size` = width, depth and water depth; modelled only with **Water** on). Each has its site id and, where it applies, `size` (width, depth, height), `height`, `scale` (trees), `umbrella` or `barrier` |
+| `underground` | Everything below ground as one graph (v0.28+). `nodes`: id, kind (a basement room's kind, `surface` for a building's ground floor, `tunnel`, `chamber`, `sewer`, `street` for a manhole's or entrance's top, `station_hall`, `platform`, `subway` for the line between stations, `utility`), building and room, floor, layer, position, area, `depth` (links to the nearest street-level node, -1 if none) and `exits` (street-level nodes in its connected part). Node ids of rooms are `<building object>/<room name>`. `links`: a, b, kind (`door`, `open`, `stair`, `tunnel`, `sewer`, `shaft`, `breach`, `subway`), width, height, position, and `bridge` (taking it away splits the graph); a sewer link's `clearance` (`walk` or `crouch`), a shaft's `open`, a breach's or access's `ladder` |
+| `tunnels` | Each tunnel: its two buildings and rooms, storey, `start` and `end` at floor level in the middle of each doorway, sizes and whether it passes under a street |
+| `sewers` | Each section: kind (`trunk`, `lateral`), its two chambers, `start`, `end`, `points` (the walkways' level along its centre line), sizes, `profile` (`octagon`), trench width and depth, `clearance`, `condition` (`clear` or `collapsed`, with `plug_start` and `plug_end`) |
+| `manholes` | Each shaft's top (the middle of its rim, the lid's seat) and bottom, `size` across the flats, `shape`, depth, `open`, `kind` (`sewer` or `exit`) and its chamber and street nodes |
+| `breaches` | Passages from basements to the sewers: building, room, storey, sewer node, ends, sizes; for a drop the ladder's `ladder_bottom`, `ladder_top` and `ladder_facing` (towards the sewer) |
+| `subway` | `lines` (track bed centre `points` through each junction of the path, stations in order, sizes); `stations` (track-bed position, forward, sizes, hall floor, `stairs` as foot and head per stair, `entrances` with their foot and head, `accesses` with drops' ladders); `utilities` (room position and its exit's id) |
 | `counts` | Totals per section and per marker type |
 
 Objects also carry custom properties that the FBX passes to Unity as user
@@ -827,17 +901,19 @@ The metadata records these under `delivery`: `lod_suffixes`
 (`["", "_shell", "_mass"]`), `lod_buildings`, `tile_size`, `tiles_merged`
 and `tiled` (each tiled object with its tiles' names).
 
+The underground goes out as `City_Tunnels`, `City_Sewers` and `City_Subway`, tiled like the ground.
+
 Output stays as separate meshes for culling. No texture baking, Unity materials, colliders, NavMesh or static flags are generated; the metadata's markers say where game assets go. `City_LanePaint` is tagged `decoration_no_collision`; exclude it from collision generation. Route guide curves are omitted from FBX.
 
 For scale: a radius-8 city with every building detailed has about 490 buildings and 1,070 mesh objects; its street mesh is about 345k polygons. A radius-14 metro is about 1.85M polygons in 1,700 objects, with ground spanning about 25.6 km.
 
 ## Plan data
 
-A JSON text datablock (`<collection>_plan.json`) stores the versioned plan. Coordinates are relative to the collection's stored `origin`; road nodes multiply by `block_size`, while lot positions/dimensions and path points are metres. Schema version 21 adds `rural_streets` to the settings, `rural` (the rural streets' lattice edges) and `wild` (blocks of graded wild land round the map; on Rolling Hills `heights` reach into it). Version 20 adds `yards` (courtyards and estate grounds: `id`, `kind`, `center`, `width`, `depth`, `style`, `district`, `seed`, `keep_out`, `level`). Version 19 adds `district_superblocks` to the settings. Version 18 adds `highway` to the settings (`RAISED` or `GRADE`), `freeway` to the plan (a raised highway's layout and heights; empty at grade), `deck` to an outer road leaving a raised deck and `freeway` (the interchanges it leaves and rejoins at) to a driving circuit on one. Version 17 grades the wild land round a terraced city with it: `terraces` gains `wild` (blocks of it beyond the map's edge) and its `ground` covers them. Version 16 raised every corner of a terrace's blocks (the streets round its edge run along the top) and keeps terraces in the downtown and residential districts at the city's edge. Version 15 gave a ramp one road class and its junctions' heights along its curved route. Version 14 added each terrace's natural sides: `slopes` (`axis`, downhill `sign`, crest lattice `line`, `cells`) and `corners` (a `cell` joining two slopes, with each slope's `line` and `sign` along `x` and `y`). Version 13 added `plateau_height` and `podiums` to the settings and `terraces` to the plan: `regions` (each terrace's `cells`, `step` and `kind`), `ramps` (lattice `nodes` from the top down and each one's `raises` above the hills), `stairs` (`low` and `high` lattice nodes, `width`) and `ground` (the hills' node heights under the terraces; `heights` are then the road level). Version 12 added `terrain` and `relief` to the settings, `heights` (each lattice node's graded height, where it is not zero) to the plan, and `level` (pad or road height) to every lot, site and stop. Version 11 added `shape` and `irregularity` to the settings. Version 10 added `bulb` to each lot: the cul-de-sac node a house round a turning circle faces (empty for the rest). Those houses are turned to face the circle, so a lot's `rotation` is no longer always a quarter turn. Version 9 added `preset` to the settings (`CITY` or `SMALL_TOWN`). Version 8 added `culdesacs` (turning-circle node and radius). Version 7 added `party_walls` and `group` to each lot (downtown towers built against neighbours). Version 6 added `outer_roads`. Version 5 added `pois` (kind, centre, width along the frontage, depth, rotation, frontage edge, blocks, seed, condition, damage, approach) and `shelters` (position, rotation, variant, road edge); a site's layout is chosen by `sites.compose` from its seed. Version 4 added `kind`, `condition`, `interiors` and `damage` to each lot alongside the version-3 `paths`: one entry per continuous same-tier route with its lattice `nodes`, flattened metre-space `points` and `width`. Locations and lots carry their district `style`; the per-style profile table is code (`STYLE_PROFILE`), not part of the file. No legacy-plan importer is included.
+A JSON text datablock (`<collection>_plan.json`) stores the versioned plan. Coordinates are relative to the collection's stored `origin`; road nodes multiply by `block_size`, while lot positions/dimensions and path points are metres. Schema version 23 (v0.31) makes rural streets only those with suburbs on both sides, or a suburb and the open land. Version 22 (v0.27) turns an estate row's end slabs to the end streets where no street runs along its side. Version 21 adds `rural_streets` to the settings, `rural` (the rural streets' lattice edges) and `wild` (blocks of graded wild land round the map; on Rolling Hills `heights` reach into it). Version 20 adds `yards` (courtyards and estate grounds: `id`, `kind`, `center`, `width`, `depth`, `style`, `district`, `seed`, `keep_out`, `level`). Version 19 adds `district_superblocks` to the settings. Version 18 adds `highway` to the settings (`RAISED` or `GRADE`), `freeway` to the plan (a raised highway's layout and heights; empty at grade), `deck` to an outer road leaving a raised deck and `freeway` (the interchanges it leaves and rejoins at) to a driving circuit on one. Version 17 grades the wild land round a terraced city with it: `terraces` gains `wild` (blocks of it beyond the map's edge) and its `ground` covers them. Version 16 raised every corner of a terrace's blocks (the streets round its edge run along the top) and keeps terraces in the downtown and residential districts at the city's edge. Version 15 gave a ramp one road class and its junctions' heights along its curved route. Version 14 added each terrace's natural sides: `slopes` (`axis`, downhill `sign`, crest lattice `line`, `cells`) and `corners` (a `cell` joining two slopes, with each slope's `line` and `sign` along `x` and `y`). Version 13 added `plateau_height` and `podiums` to the settings and `terraces` to the plan: `regions` (each terrace's `cells`, `step` and `kind`), `ramps` (lattice `nodes` from the top down and each one's `raises` above the hills), `stairs` (`low` and `high` lattice nodes, `width`) and `ground` (the hills' node heights under the terraces; `heights` are then the road level). Version 12 added `terrain` and `relief` to the settings, `heights` (each lattice node's graded height, where it is not zero) to the plan, and `level` (pad or road height) to every lot, site and stop. Version 11 added `shape` and `irregularity` to the settings. Version 10 added `bulb` to each lot: the cul-de-sac node a house round a turning circle faces (empty for the rest). Those houses are turned to face the circle, so a lot's `rotation` is no longer always a quarter turn. Version 9 added `preset` to the settings (`CITY` or `SMALL_TOWN`). Version 8 added `culdesacs` (turning-circle node and radius). Version 7 added `party_walls` and `group` to each lot (downtown towers built against neighbours). Version 6 added `outer_roads`. Version 5 added `pois` (kind, centre, width along the frontage, depth, rotation, frontage edge, blocks, seed, condition, damage, approach) and `shelters` (position, rotation, variant, road edge); a site's layout is chosen by `sites.compose` from its seed. Version 4 added `kind`, `condition`, `interiors` and `damage` to each lot alongside the version-3 `paths`: one entry per continuous same-tier route with its lattice `nodes`, flattened metre-space `points` and `width`. Locations and lots carry their district `style`; the per-style profile table is code (`STYLE_PROFILE`), not part of the file. No legacy-plan importer is included.
 
 ## Code and verification
 
-`city_plan.py`: pure settings, district assignment, seeded routing, route grouping and corner fillets, circuits, points of interest, parcels, transit stops. `streets.py`: pure distance-field surface and terrain tessellation. `styles.py`: district building recipes (massing, openings, roofs, conditions). `sites.py`: point-of-interest layouts. `metadata.py`: the game metadata. The building core (`spec`, `layouts`, `damage`, `solids`, `shell`, `rubble`) is described in [ARCHITECTURE.md](ARCHITECTURE.md). `building_assets.py`: shell, rubble, site and transit-stop objects. `city_operators.py`: Blender adapter. `city_export.py`: city-only FBX export.
+`city_plan.py`: pure settings, district assignment, seeded routing, route grouping and corner fillets, circuits, points of interest, parcels, transit stops. `streets.py`: pure distance-field surface and terrain tessellation. `styles.py`: district building recipes (massing, openings, roofs, conditions). `sites.py`: point-of-interest layouts. `metadata.py`: the game metadata. The building core (`spec`, `layouts`, `damage`, `solids`, `shell`, `rubble`) is described in [ARCHITECTURE.md](ARCHITECTURE.md). `basement.py`: basement storeys. `tunnels.py`, `sewers.py`, `subway.py`: the underground (pure Python; geometry as closed solids). `cutouts.py`: cutting openings out of the ground, street and paint, and shortening skirts. `ground_cover.py`: ground materials by district. `building_assets.py`: shell, rubble, site and transit-stop objects. `city_operators.py`: Blender adapter. `city_export.py`: city-only FBX export.
 
 The project's tests (not yet published here) cover planning, district assignment, condition weights and the interior budget, circuit closure and tier diversity across seeds, route coverage and fillet continuity, parcel clearance against curved corridors, distance-field classification, crack and overlap topology, curb heights, terrain coverage, the style recipes, point-of-interest placement and every site layout, and the metadata. In Blender they cover registration, every operator, mesh validation and rollback, UVs, city-only export, selection restoration, triangulation and world bounds after FBX reimport. They run on Blender 5.1; the declared Blender 4.5 minimum is not tested separately, and Unity import and play-mode tests are pending.
 
@@ -846,9 +922,9 @@ The project's tests (not yet published here) cover planning, district assignment
 See [ROADMAP.md](ROADMAP.md) for what is planned.
 
 1. **Parcels and block structure:** parcels are still axis-aligned sub-cells of a square lattice, so block edges and building rows remain rectilinear even though the streets curve. Downtown blocks are now built out with party-walled towers and superblocks, the other districts join blocks into superblocks of their own, and the suburbs set houses well back, but L/U/courtyard footprints, curved frontages and irregular block subdivision are the next step.
-2. **Vertical routes and terrain:** rail and subway lines, tunnel entrances and an optional river or dried coastline with a port (see ROADMAP "Later"). The raised highway is the only road bridging others; it still runs straight along the lattice.
+2. **Vertical routes and terrain:** rail, a second subway line, road tunnel entrances and an optional river or dried coastline with a port (see ROADMAP). The raised highway is the only road bridging others; it still runs straight along the lattice.
 3. **Asset variety:** the six archetypes cover massing and roofs, and v0.11 adds the common sites (hospital, schools, stations, malls, parking); a courthouse or city hall, auto repair, an enclosed mall, authored facade kits, rooftop clutter and per-district palettes remain.
-4. **Game delivery:** chunk/LOD export, collision proxies, navigation checks, vehicle swept-clearance tests and connected ruin/vegetation dressing.
+4. **Game delivery:** levels of detail and tiles shipped in v0.26; combined far massing, collision proxies, vehicle swept-clearance tests and connected ruin/vegetation dressing remain.
 
 Limits:
 

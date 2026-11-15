@@ -299,7 +299,15 @@ with diamond interchanges. A proper freeway goes further:
 
 The megacity's stacked decks (§7) build on it.
 
-## 5. Underground (later, groundwork now)
+## 5. Underground
+
+> **Built** (v0.28-v0.31): basements, tunnels between them, walkable sewers
+> (trunks under arterials and collectors, crouch-height laterals under
+> local streets, chambers and manholes at junctions, collapses, breaches
+> into basements) and a subway line with stations; the sewers meet the
+> subway in its ticket halls rather than breaking into its tunnels. See
+> [CITY_GENERATOR.md](../../CITY_GENERATOR.md#underground). The plan below
+> is kept as it was written.
 
 **Subway (later).** Walkable tunnels and platforms are built inside the
 corridors reserved in §4, with platform rooms listed like other interior

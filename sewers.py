@@ -31,7 +31,10 @@ LATERAL = (1.6, 1.6, 5.5)
 CHAMBER = {'trunk': 5.0, 'lateral': 2.8}   # Clear size of a chamber (square).
 SLOPE = 1 / 8              # A lateral's fall into a trunk chamber.
 STEP = 8.0                 # Longest straight piece along a sewer.
-SHAFT = .9                 # A manhole's clear opening,
+CHAMFERS = {'trunk': (.4, .7), 'lateral': (.4, .4)}   # Lower and upper chamfers of the octagonal section.
+TRENCH = {'trunk': (.6, .3), 'lateral': (.3, .12)}    # Width and depth of the trench along the floor,
+TRENCH_END = .5            # which stops this far short of a chamber.
+SHAFT = .9                 # A manhole's clear opening (an octagon, across the flats),
 SHAFT_WALL = .15           # its walls,
 RIM = .02                  # and how far its rim stands above the street.
 OPEN = .25                 # Share of manholes that start open.
@@ -130,9 +133,14 @@ class Sewer:
         return (along, self.line + across) if self.axis == 'x' else (self.line + across, along)
 
     def span(self):
-        """Lowest floor and highest roof top."""
+        """Lowest point of its trench's shell and highest roof top."""
         floors = [f for _, f in self.sections]
-        return min(floors) - SHELL, max(floors) + self.height + SHELL
+        return min(floors) - TRENCH[self.kind][1] - SHELL, max(floors) + self.height + SHELL
+
+    def trench(self, a0, a1):
+        """Whether the trench runs from a0 to a1."""
+        return (self.length > 2 * TRENCH_END + .5 and a0 >= self.start + TRENCH_END - 1e-6
+                and a1 <= self.end - TRENCH_END + 1e-6)
 
 
 @dataclass
@@ -174,9 +182,50 @@ class Network:
         return found
 
     def openings(self):
-        """Where the street and the ground are cut: (centre x, centre y, width,
-        depth, rotation), as ``cutouts.cut`` takes them."""
-        return [(m.x, m.y, m.outer, m.outer, 0.0) for m in self.manholes]
+        """Where the street, the ground and the lane paint are cut: each
+        shaft's outer octagon, a polygon as ``cutouts.cut`` takes it."""
+        return [octagon(m.x, m.y, m.outer) for m in self.manholes]
+
+
+def octagon(x, y, across):
+    """A regular octagon, CCW, flats facing the axes; ``across`` the flats."""
+    r = across / 2 / math.cos(math.pi / 8)
+    return [(x + r * math.cos(math.pi / 8 + k * math.pi / 4), y + r * math.sin(math.pi / 8 + k * math.pi / 4))
+            for k in range(8)]
+
+
+def section(kind, trench=True):
+    """A sewer's clear section, CCW in (across, up) from the walkways' level:
+    an octagon, its lower chamfers small to keep the walkways wide, with a
+    trench down the middle of the floor."""
+    width, height, _ = TRUNK if kind == 'trunk' else LATERAL
+    low, high = CHAMFERS[kind]
+    half = width / 2
+    points = [(-half + low, 0.0)]
+    if trench:
+        tw, td = TRENCH[kind]
+        points += [(-tw / 2, 0.0), (-tw / 2, -td), (tw / 2, -td), (tw / 2, 0.0)]
+    return points + [(half - low, 0.0), (half, low), (half, height - high), (half - high, height),
+                     (-half + high, height), (-half, height - high), (-half, low)]
+
+
+def _ring(points, thickness):
+    """The shell round a CCW section: per edge a quad (the inner edge, then
+    the outer edge back), mitred at the corners."""
+    count = len(points)
+    lines = []
+    for i in range(count):
+        (x0, y0), (x1, y1) = points[i], points[(i + 1) % count]
+        dx, dy = x1 - x0, y1 - y0
+        length = math.hypot(dx, dy)
+        lines.append(((x0 + dy / length * thickness, y0 - dx / length * thickness), (dx, dy)))
+    outer = []
+    for i in range(count):
+        (px, py), (dx, dy) = lines[i - 1]
+        (qx, qy), (ex, ey) = lines[i]
+        a = ((qx - px) * ey - (qy - py) * ex) / (dx * ey - dy * ex)
+        outer.append((px + a * dx, py + a * dy))
+    return [(points[i], points[(i + 1) % count], outer[(i + 1) % count], outer[i]) for i in range(count)]
 
 
 def _overlap(a, b):
@@ -407,7 +456,7 @@ def plan(city, surface=None, sites=(), street=None, avoid=()):
             return depth
 
         sections = _sections(start, end, line, axis, depth_at, level, ca.floor, cb.floor,
-                             lateral_into_a, lateral_into_b)
+                             lateral_into_a, lateral_into_b, (start + TRENCH_END, end - TRENCH_END))
         sewer = Sewer(f'sewer_{_key(ca.node)}__{_key(cb.node)}', ca.id, cb.id, kind, axis, line,
                       start, end, sections)
         if blocked(sewer.rect(CLEAR), *sewer.span()):
@@ -419,8 +468,8 @@ def plan(city, surface=None, sites=(), street=None, avoid=()):
     for sewer in sewers:
         ca, cb = chambers[sewer.a], chambers[sewer.b]
         sign = '+x' if sewer.axis == 'x' else '+y'
-        ca.doors.append((sign, sewer.width, sewer.height))
-        cb.doors.append((sign.replace('+', '-'), sewer.width, sewer.height))
+        ca.doors.append((sign, sewer.kind))
+        cb.doors.append((sign.replace('+', '-'), sewer.kind))
     # Collapses: a plug in the middle of a seeded share of sections, never one the network needs.
     for sewer in sorted(sewers, key=lambda s: stream(seed, 'collapse-order', s.id).random()):
         if sewer.length < PLUG + 6.0 or stream(seed, 'collapse', sewer.id).random() >= COLLAPSE:
@@ -565,7 +614,7 @@ def build(mesh, network, material, floor_material, plug_material=None):
     from . import tunnels
     plug_material = floor_material if plug_material is None else plug_material
     for chamber in network.chambers.values():
-        _chamber(mesh, chamber, material, floor_material)
+        _chamber(mesh, chamber, material, floor_material, floor_material)
     for sewer in network.sewers:
         _sewer(mesh, sewer, material, floor_material, plug_material)
     for item in network.breaches:
@@ -574,7 +623,52 @@ def build(mesh, network, material, floor_material, plug_material=None):
         _shaft(mesh, manhole, material)
 
 
-def _chamber(mesh, chamber, material, floor_material):
+def _volume(first, second):
+    count = len(first)
+    faces = [list(reversed(first)), list(second)] + [
+        [first[i], first[(i + 1) % count], second[(i + 1) % count], second[i]] for i in range(count)]
+    total = 0.0
+    for face in faces:
+        o = face[0]
+        for k in range(1, len(face) - 1):
+            b, c = face[k], face[k + 1]
+            total += (o[0] * (b[1] * c[2] - b[2] * c[1]) - o[1] * (b[0] * c[2] - b[2] * c[0])
+                      + o[2] * (b[0] * c[1] - b[1] * c[0]))
+    return total / 6
+
+
+def _solid(mesh, first, second, material):
+    """A closed solid between two sections whose corners correspond."""
+    if _volume(first, second) < 0:
+        first, second = first[::-1], second[::-1]
+    a = [mesh.vert(co) for co in first]
+    b = [mesh.vert(co) for co in second]
+    mesh.face(list(reversed(a)), material)
+    mesh.face(b, material)
+    count = len(a)
+    for i in range(count):
+        j = (i + 1) % count
+        mesh.face((a[i], a[j], b[j], b[i]), material)
+
+
+def _flat(mesh, outline, z0, z1, material):
+    _solid(mesh, [(x, y, z0) for x, y in outline], [(x, y, z1) for x, y in outline], material)
+
+
+def _doorway(kind, centre, floor, frame):
+    """A sewer's opening in a chamber's wall: its section without the trench."""
+    from . import solids
+    width, height, _ = TRUNK if kind == 'trunk' else LATERAL
+    low, high = CHAMFERS[kind]
+    half = width / 2
+    bottom = [(centre - half, floor + low), (centre - half + low, floor), (centre + half - low, floor),
+              (centre + half, floor + low)]
+    top = [(centre - half, floor + height - high), (centre - half + high, floor + height),
+           (centre + half - high, floor + height), (centre + half, floor + height - high)]
+    return solids.Opening(centre - half, centre + half, bottom, top, frame, 'door')
+
+
+def _chamber(mesh, chamber, material, floor_material, frame):
     from . import solids
     h, s = chamber.size / 2, SHELL
     x0, y0, x1, y1 = chamber.x - h - s, chamber.y - h - s, chamber.x + h + s, chamber.y + h + s
@@ -588,65 +682,109 @@ def _chamber(mesh, chamber, material, floor_material):
     boxes = {'-y': (x0, y0, x1, y0 + s), '+y': (x0, y1 - s, x1, y1),
              '-x': (x0, chamber.y - h, x0 + s, chamber.y + h), '+x': (x1 - s, chamber.y - h, x1, chamber.y + h)}
     for side, (origin, direction, length, centre) in walls.items():
-        doors = [(w, d) for door_side, w, d in chamber.doors if door_side == side]
-        if doors:
-            width, height = max(doors)
-            opening = solids.Opening.rect(centre - width / 2, centre + width / 2, f, f + height,
-                                          floor_material, 'door')
+        kinds = [kind for door_side, kind in chamber.doors if door_side == side]
+        if kinds:
+            kind = 'trunk' if 'trunk' in kinds else 'lateral'
             solids.wall_solid(mesh, origin, direction, s, 0.0, length, f, [(0.0, top), (length, top)],
-                              [opening], material)
+                              [_doorway(kind, centre, f, frame)], material)
         else:
             b = boxes[side]
             solids.box(mesh, b[0], b[1], f, b[2], b[3], top, material)
-    # The roof, round the shaft's opening if it has a manhole.
+    # The roof, round the shaft's octagonal opening if it has a manhole.
     m = chamber.manhole
     if m is None:
         solids.box(mesh, x0, y0, top, x1, y1, top + s, floor_material)
         return
-    hx0, hy0, hx1, hy1 = m.x - SHAFT / 2, m.y - SHAFT / 2, m.x + SHAFT / 2, m.y + SHAFT / 2
+    c = SHAFT / 2
+    hx0, hy0, hx1, hy1 = m.x - c, m.y - c, m.x + c, m.y + c
     solids.box(mesh, x0, y0, top, x1, hy0, top + s, floor_material)
     solids.box(mesh, x0, hy1, top, x1, y1, top + s, floor_material)
     solids.box(mesh, x0, hy0, top, hx0, hy1, top + s, floor_material)
     solids.box(mesh, hx1, hy0, top, x1, hy1, top + s, floor_material)
+    ring = octagon(m.x, m.y, SHAFT)
+    for k, corner in zip((0, 2, 4, 6), ((hx1, hy1), (hx0, hy1), (hx0, hy0), (hx1, hy0))):
+        _flat(mesh, [ring[k], corner, ring[k + 1]], top, top + s, floor_material)
 
 
 def _shaft(mesh, manhole, material):
-    from . import solids
-    c, t = SHAFT / 2, SHAFT_WALL
     x, y, z0, z1 = manhole.x, manhole.y, manhole.base, manhole.rim
     if z1 - z0 < .05:
         return
-    solids.box(mesh, x - c - t, y - c - t, z0, x + c + t, y - c, z1, material)
-    solids.box(mesh, x - c - t, y + c, z0, x + c + t, y + c + t, z1, material)
-    solids.box(mesh, x - c - t, y - c, z0, x - c, y + c, z1, material)
-    solids.box(mesh, x + c, y - c, z0, x + c + t, y + c, z1, material)
+    inner, outer = octagon(x, y, SHAFT), octagon(x, y, manhole.outer)
+    for k in range(8):
+        j = (k + 1) % 8
+        _flat(mesh, [inner[k], inner[j], outer[j], outer[k]], z0, z1, material)
+
+
+def _gap_pieces(kind, sign):
+    """Where a breach comes in on a trunk: the section's shell on that side
+    loses its chamfers and wall below the passage's roof, and gains a floor
+    out to the passage and a lintel over it. Returns (edges dropped,
+    polygons added)."""
+    from . import tunnels
+    width, height, _ = TRUNK
+    low, high = CHAMFERS[kind]
+    half, roof = width / 2, tunnels.HEIGHT
+    points = section(kind)
+    ring = _ring(points, SHELL)
+    first = 5                                     # Right side: lower chamfer, wall, upper chamfer.
+    assert points[first] == (half - low, 0.0) and roof > height - high
+    corner = ring[first][3]                       # Outer mitre under the walkway's edge.
+    top_inner, top_outer = ring[first + 3][0], ring[first + 3][3]
+    t = (roof - (height - high)) / high
+    chamfer = (half - t * high, roof)
+    floor = [(half - low, 0.0), (half + SHELL, 0.0), (half + SHELL, -SHELL), corner]
+    lintel = [chamfer, (half + SHELL, roof), (half + SHELL, height + SHELL), top_outer, top_inner]
+    dropped = {first, first + 1, first + 2}
+    if sign < 0:
+        # The section is symmetric: the mirror of edge i runs between the mirrors of its ends.
+        count = len(points)
+        mirror = {p: i for i, p in enumerate(points)}
+        dropped = {mirror[(-points[(i + 1) % count][0], points[(i + 1) % count][1])] for i in dropped}
+        floor = [(-u, v) for u, v in floor]
+        lintel = [(-u, v) for u, v in lintel]
+    return dropped, [floor, lintel]
 
 
 def _sewer(mesh, sewer, material, floor_material, plug_material):
-    from . import solids, tunnels
-    half, s, height = sewer.width / 2, SHELL, sewer.height
-    line = sewer.line
+    from . import tunnels
+    kind = sewer.kind
+    full, plain = _ring(section(kind), SHELL), _ring(section(kind, trench=False), SHELL)
+    tw, td = TRENCH[kind]
+    # Where the trench ends: a block under the trench-less floor closes it.
+    filler = [(-tw / 2 - SHELL, -td - SHELL), (tw / 2 + SHELL, -td - SHELL), (tw / 2 + SHELL, -SHELL),
+              (-tw / 2 - SHELL, -SHELL)]
+    width, height, _ = TRUNK if kind == 'trunk' else LATERAL
+    low, high = CHAMFERS[kind]
+    half = width / 2
+    void = [(-half + low, 0.0), (half - low, 0.0), (half, low), (half, height - high), (half - high, height),
+            (-half + high, height), (-half, height - high), (-half, low)]
+    trench_void = [(-tw / 2, -td), (tw / 2, -td), (tw / 2, 0.0), (-tw / 2, 0.0)]
     gaps = [(b.along - tunnels.WIDTH / 2, b.along + tunnels.WIDTH / 2, b.side) for b in sewer.breaches]
 
-    def piece(a0, a1, c0, c1, bottom, top, mat):
+    def extrude(polygon, a0, a1, mat):
         f0, f1 = sewer.floor_at(a0), sewer.floor_at(a1)
-        corners = []
-        for z in (bottom, top):
-            for along, across, floor in ((a0, c0, f0), (a1, c0, f1), (a1, c1, f1), (a0, c1, f0)):
-                x, y = (along, across) if sewer.axis == 'x' else (across, along)
-                corners.append((x, y, floor + z))
-        if sewer.axis == 'y':
-            corners = [corners[i] for i in (3, 2, 1, 0, 7, 6, 5, 4)]
-        solids.hexahedron(mesh, corners, mat)
+        _solid(mesh, [(*sewer.point(a0, u), f0 + v) for u, v in polygon],
+               [(*sewer.point(a1, u), f1 + v) for u, v in polygon], mat)
 
     for (a0, _), (a1, _) in zip(sewer.sections, sewer.sections[1:]):
         if a1 - a0 < 1e-4:
             continue
-        piece(a0, a1, line - half - s, line + half + s, -s, 0.0, floor_material)
-        for sign, c0, c1 in ((-1, line - half - s, line - half), (1, line + half, line + half + s)):
-            gap = any(g0 - 1e-6 <= a0 and a1 <= g1 + 1e-6 and side == sign for g0, g1, side in gaps)
-            # A breach leaves a lintel over the passage.
-            piece(a0, a1, c0, c1, tunnels.HEIGHT if gap else 0.0, height, material)
-        piece(a0, a1, line - half - s, line + half + s, height, height + s, floor_material)
+        trench = sewer.trench(a0, a1)
+        quads = list(full if trench else plain)
+        extra = [] if trench else [filler]
+        for g0, g1, side in gaps:
+            if g0 - 1e-6 <= a0 and a1 <= g1 + 1e-6:
+                assert trench, sewer.id
+                dropped, added = _gap_pieces(kind, side)
+                quads = [q for i, q in enumerate(quads) if i not in dropped]
+                extra += added
+        for quad in quads:
+            on_floor = quad[0][1] <= 1e-6 and quad[1][1] <= 1e-6
+            extrude(quad, a0, a1, floor_material if on_floor else material)
+        for polygon in extra:
+            extrude(polygon, a0, a1, floor_material)
         if sewer.plug is not None and sewer.plug[0] - 1e-6 <= a0 and a1 <= sewer.plug[1] + 1e-6:
-            piece(a0, a1, line - half, line + half, 0.0, height, plug_material)
+            extrude(void, a0, a1, plug_material)
+            if trench:
+                extrude(trench_void, a0, a1, plug_material)

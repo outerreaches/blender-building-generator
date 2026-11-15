@@ -3,18 +3,22 @@
 ## v0.30.0: Sewers
 
 - **Sewers** (new city setting, on by default). A walkable network under
-  the streets, one object, `City_Sewers`:
-  - **trunks** under every arterial and collector, 3 m wide and 2.6 m high,
-    their floor 7 m under the road;
+  the streets, one object, `City_Sewers`. Their section is an octagon
+  with a trench down the middle of the floor and a walkway either side,
+  so they look nothing like the square basement tunnels:
+  - **trunks** under every arterial and collector, 3 m wide and 2.6 m high
+    (walkways 0.8 m, trench 0.6 by 0.3 m), their walkways 7 m under the
+    road;
   - **laterals** under 40% of the local streets, grown out from the trunks
-    so every one reaches a trunk: 1.6 m square (a crouch), 5.5 m down,
-    falling to the trunk's depth over their last 12 m into a trunk chamber;
+    so every one reaches a trunk: 1.6 m across (a crouch; trench 0.3 by
+    0.12 m), 5.5 m down, falling to the trunk's depth over their last 12 m
+    into a trunk chamber;
   - a **chamber** under every junction a sewer reaches (5 m square under
     trunks, 2.8 m under laterals only), the sewers entering through
-    doorways in its walls;
+    octagonal doorways in its walls; the trench stops 0.5 m short of it;
   - a **manhole** over every chamber whose shaft comes up wholly on the
-    road or footway (never on a curb): a 0.9 m square shaft from the
-    chamber's roof to a rim 2 cm proud of the street, the street, the
+    road or footway (never on a curb): an octagonal shaft 0.9 m across the
+    flats from the chamber's roof to a rim 2 cm proud of the street, the street, the
     ground and the lane paint cut there. 25% are marked open; the lids are
     the game's;
   - **collapses**: 12% of sections are closed by a 3 m plug in the middle,

@@ -357,7 +357,7 @@ class CityMetadata:
         """Sewers: chambers, sections (a collapsed one as its two halves),
         manholes up to street nodes, and breaches into basements; graph
         nodes and links, and their own lists."""
-        from .sewers import SHAFT
+        from .sewers import SHAFT, TRENCH
         from . import tunnels as passages
         ox, oy, oz = self.origin
         point = self.space.point
@@ -382,7 +382,8 @@ class CityMetadata:
                                      'position': at(m.x, m.y, m.rim)})
             self.manholes.append({'id': m.id, 'chamber': chamber.id, 'street': street,
                                   'position': at(m.x, m.y, m.rim), 'bottom': at(m.x, m.y, chamber.floor),
-                                  'size': _r(SHAFT), 'depth': _r(m.rim - chamber.floor), 'open': m.open})
+                                  'size': _r(SHAFT), 'shape': 'octagon', 'depth': _r(m.rim - chamber.floor),
+                                  'open': m.open})
         halves = {}
         for sewer in network.sewers:
             clearance = 'walk' if sewer.kind == 'trunk' else 'crouch'
@@ -407,7 +408,10 @@ class CityMetadata:
                                 'length': _r(sewer.length), 'clearance': clearance,
                                 'condition': 'collapsed' if sewer.plug else 'clear',
                                 'plug_start': plug[0] if plug else [], 'plug_end': plug[1] if plug else [],
-                                # The floor's centre line, straight between these.
+                                # An octagon with a trench down the floor; the walkways' level along
+                                # the centre line, straight between these points.
+                                'profile': 'octagon', 'trench_width': _r(TRENCH[sewer.kind][0]),
+                                'trench_depth': _r(TRENCH[sewer.kind][1]),
                                 'points': _flat(at(*sewer.point(a), f) for a, f in sewer.sections)})
         for item in network.breaches:
             t = item.tunnel

@@ -82,9 +82,10 @@ namespace Ares.CityGen
     }
 
     // A sewer from chamber `a` to chamber `b`, straight under a street's centre
-    // line. `points` is the floor's centre line (flat x, y, z), straight between
-    // points; it follows the street's grade and a lateral's fall into a trunk
-    // chamber. A collapsed one is closed by a plug from `plug_start` to
+    // line: an octagonal section (`profile`) with a trench down the floor that
+    // stops short of the chambers. `points` is the walkways' level along the
+    // centre line (flat x, y, z), straight between points; it follows the
+    // street's grade and a lateral's fall into a trunk chamber. A collapsed one is closed by a plug from `plug_start` to
     // `plug_end` and is two nodes in the graph, `<id>:a` and `<id>:b`.
     [Serializable]
     public class Sewer
@@ -98,17 +99,20 @@ namespace Ares.CityGen
         public string condition;        // clear or collapsed.
         public float[] plug_start, plug_end;
         public float[] points;
+        public string profile;          // octagon (v0.30).
+        public float trench_width, trench_depth;
     }
 
     // A shaft from the street down into a chamber. `position` is the middle of
     // its rim's top (the lid's seat), `bottom` the chamber floor under it; the
-    // opening is `size` square. `open`: the lid starts off (a seeded share).
+    // opening is a `shape` (octagon, flats facing the axes) `size` across. `open`: the lid starts off (a seeded share).
     [Serializable]
     public class Manhole
     {
         public string id;
         public string chamber;          // Node ids at the bottom
         public string street;           // and the top.
+        public string shape;
         public float[] position, bottom;
         public float size, depth;
         public bool open;

@@ -37,12 +37,20 @@ def _area(polygon):
 def cut(vertices, faces, openings, least=1e-4):
     """Faces of the mesh outside every opening; vertices made by the cuts are
     appended to ``vertices``. An opening is (centre x, centre y, width, depth,
-    rotation): a rectangle turned about its centre. Returns the new face
-    list and, for each, the index of the face it came from."""
+    rotation), a rectangle turned about its centre, or a list of (x, y): a
+    convex polygon, CCW. Returns the new face list and, for each, the index
+    of the face it came from."""
     if not openings:
         return list(faces), list(range(len(faces)))
     frames = []
-    for cx, cy, width, depth, rotation in openings:
+    for opening in openings:
+        if isinstance(opening[0], (tuple, list)):
+            cx = sum(p[0] for p in opening) / len(opening)
+            cy = sum(p[1] for p in opening) / len(opening)
+            frames.append((cx, cy, None, list(opening), None, None,
+                           max(math.hypot(p[0] - cx, p[1] - cy) for p in opening)))
+            continue
+        cx, cy, width, depth, rotation = opening
         frames.append((cx, cy, width / 2, depth / 2, math.cos(rotation), math.sin(rotation),
                        math.hypot(width, depth) / 2))
     # Openings by coarse cell, to find the few a face may touch.
@@ -74,6 +82,14 @@ def cut(vertices, faces, openings, least=1e-4):
                 continue
             following = []
             for piece in pieces:
+                if hw is None:
+                    split = _cut_polygon(piece, hd, least)
+                    if split is None:
+                        following.append(piece)
+                    else:
+                        whole = False
+                        following.extend(split)
+                    continue
                 local = [((x - cx) * c + (y - cy) * s, -(x - cx) * s + (y - cy) * c, z, index)
                          for x, y, z, index in piece]
                 us = [p[0] for p in local]
@@ -108,6 +124,48 @@ def cut(vertices, faces, openings, least=1e-4):
             kept.append(tuple(indices))
             sources.append(source)
     return kept, sources
+
+
+def _half(points, px, py, nx, ny, outside):
+    """The part of a polygon on one side of the line through (px, py) with
+    normal (nx, ny): ``outside`` the side the normal points to."""
+    result = []
+    count = len(points)
+    for i in range(count):
+        a, b = points[i], points[(i + 1) % count]
+        da = (a[0] - px) * nx + (a[1] - py) * ny
+        db = (b[0] - px) * nx + (b[1] - py) * ny
+        ina = da >= 0 if outside else da <= 0
+        inb = db >= 0 if outside else db <= 0
+        if ina:
+            result.append(a)
+        if ina != inb:
+            t = da / (da - db)
+            result.append((a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t,
+                           a[2] + (b[2] - a[2]) * t, None))
+    return result
+
+
+def _cut_polygon(piece, polygon, least):
+    """The parts of a face piece outside a convex CCW polygon, or None when
+    the piece does not reach into it."""
+    xs = [p[0] for p in polygon]
+    ys = [p[1] for p in polygon]
+    if (min(p[0] for p in piece) >= max(xs) or max(p[0] for p in piece) <= min(xs) or
+            min(p[1] for p in piece) >= max(ys) or max(p[1] for p in piece) <= min(ys)):
+        return None
+    parts, rest = [], piece
+    count = len(polygon)
+    for k in range(count):
+        (px, py), (qx, qy) = polygon[k], polygon[(k + 1) % count]
+        nx, ny = qy - py, -(qx - px)
+        outside = _half(rest, px, py, nx, ny, True)
+        rest = _half(rest, px, py, nx, ny, False)
+        if len(outside) >= 3 and _area(outside) > least:
+            parts.append(outside)
+        if len(rest) < 3 or _area(rest) <= least:
+            return None           # Wholly outside one side, or only touching.
+    return parts
 
 
 def lift(vertices, faces, materials, boxes, material, gap=.02):

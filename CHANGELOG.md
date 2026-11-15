@@ -1,5 +1,44 @@
 # Changelog
 
+## v0.30.0: Sewers
+
+- **Sewers** (new city setting, on by default). A walkable network under
+  the streets, one object, `City_Sewers`:
+  - **trunks** under every arterial and collector, 3 m wide and 2.6 m high,
+    their floor 7 m under the road;
+  - **laterals** under 40% of the local streets, grown out from the trunks
+    so every one reaches a trunk: 1.6 m square (a crouch), 5.5 m down,
+    falling to the trunk's depth over their last 12 m into a trunk chamber;
+  - a **chamber** under every junction a sewer reaches (5 m square under
+    trunks, 2.8 m under laterals only), the sewers entering through
+    doorways in its walls;
+  - a **manhole** over every chamber whose shaft comes up wholly on the
+    road or footway (never on a curb): a 0.9 m square shaft from the
+    chamber's roof to a rim 2 cm proud of the street, the street and the
+    ground cut there. 25% are marked open; the lids are the game's;
+  - **collapses**: 12% of sections are closed by a 3 m plug in the middle,
+    never one whose loss would split the network;
+  - **breaches**: a short passage (as a tunnel, up to 12 m) from a second
+    basement storey to the trunk passing in front of it, through a gap in
+    the trunk's wall; half of the candidates, two at most per section.
+
+  Sewers follow the street's grade at a fixed depth, so they stay clear of
+  basements and of first-storey tunnels; tunnels are planned after them
+  and keep 0.15 m of earth from them.
+- **Fixes to v0.29 tunnels.** On terrain the footways' skirts reach 2.5 m
+  down and hung into most tunnels under a street (on BigCity004 into 19 of
+  26, two of them cut the NavMesh): over tunnels and breaches the skirts
+  now stop above the roof. Foundations reaching down to low ground are
+  solids to the tunnels too (a few tunnels ran through one).
+- **Metadata.** `sewers` (ends, the floor's centre line as `points`,
+  sizes, clearance walk or crouch, condition and plug), `manholes` (rim
+  and floor points, size, depth, open) and `breaches`. In the
+  `underground` graph: chamber, sewer and street nodes, a collapsed
+  section as its two halves, and sewer, shaft and breach links. Every node
+  gains `depth` (links to the nearest surface or street node, -1 if none)
+  and `exits` (street-level nodes in its connected part), every link
+  `bridge` (taking it away splits the graph).
+
 ## v0.29.0: Tunnels between basements
 
 - **Tunnels** (new city setting, on by default, with Basements). Basements

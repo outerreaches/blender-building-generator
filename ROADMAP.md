@@ -27,6 +27,7 @@
 | v0.27 | Ground materials by district; balconies on brutalist and residential blocks; stairs in every damaged site building; drill and clock towers with stairs |
 | v0.28 | Basements, part one: a storey or two under many buildings, their rooms and an underground graph in the metadata |
 | v0.29 | Tunnels between basements: through shared walls, under open ground and under streets, on two storeys, in the underground graph |
+| v0.30 | Sewers: trunks, crouch-height laterals, chambers and manhole shafts cut through the street, collapses and breaches into basements; graph facts (depth, exits, bridges) |
 
 See [CHANGELOG.md](CHANGELOG.md) for the details.
 
@@ -37,7 +38,7 @@ See [CHANGELOG.md](CHANGELOG.md) for the details.
 - Pitched roofs over L-shaped houses (per-wing roofs), so suburbs get them too;
   set-back towers on non-rectangular podiums.
 - Fire escapes on residential facades; railings instead of solid upstands on balconies.
-- Underground, next: tunnels that turn a corner (larger clusters), basements under site buildings, sewers with manhole shafts and outfalls, breaches between sewers and basements; edge points of roofs and broken floors in the metadata.
+- Underground, next: tunnels that turn a corner (larger clusters), basements under site buildings, sewer outfalls at the city edge, silted sections; edge points of roofs and broken floors in the metadata.
 - Interior damage beyond clipping: fallen slabs as ramps.
 
 **City**
@@ -64,9 +65,9 @@ stay as they are; every feature below is off until its setting is changed.
 
 | Version | Scope |
 | --- | --- |
-| v0.30 | Levels: elevated, at-grade and below-grade structures; road tunnels at the map edge; rail with level crossings and a freight siding; subway routes with station entrances; the sewer network as data, with manholes |
-| v0.31 | Freeway to North American practice: the raised highway on a free-flowing alignment with gentle curves (curve radii and grades for its design speed) instead of straight along the lattice, and partial cloverleafs where there is room |
-| v0.32 | Megacity preset: megablocks, stacked highway decks, skybridges and collapsed spans, built from instanced modules with a low-poly skyline ring |
+| v0.31 | Levels: elevated, at-grade and below-grade structures; road tunnels at the map edge; rail with level crossings and a freight siding; subway routes with station entrances |
+| v0.32 | Freeway to North American practice: the raised highway on a free-flowing alignment with gentle curves (curve radii and grades for its design speed) instead of straight along the lattice, and partial cloverleafs where there is room |
+| v0.33 | Megacity preset: megablocks, stacked highway decks, skybridges and collapsed spans, built from instanced modules with a low-poly skyline ring |
 
 ## Later
 

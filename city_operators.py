@@ -11,7 +11,7 @@ from .metadata import SPACES as METADATA_SPACES, CityMetadata
 from .spec import BuildingSpec
 from .sites import (KINDS as SITE_KINDS, PAD_THICKNESS, VARIANTS as SITE_VARIANTS,
                     compose as compose_site, compose_yard)
-from . import cutouts, ground_cover, tunnels
+from . import cutouts, ground_cover, sewers, tunnels
 from .meshdata import MAT_FLOOR, MAT_WALLS, MeshData
 from .streets import (Grading, approach_reach, build_culvert_mesh, build_freeway_mesh,
                       build_ground_mesh, build_outer_road_mesh, build_stair_mesh,
@@ -69,9 +69,15 @@ def box_between(name, low, high, collection, mat):
 UNPAVED_PADS = ('SUBURBAN', 'RESIDENTIAL', 'INDUSTRIAL')
 
 
-def build_roads(plan, collection):
-    """City streets, plus the highways running on out into the wasteland."""
-    vertices, faces, indices = build_street_mesh(plan)
+def build_roads(plan, collection, mesh=None, openings=()):
+    """City streets, plus the highways running on out into the wasteland.
+    ``mesh``: the street mesh if already made; ``openings``: holes cut in it
+    (manholes), as ``cutouts.cut`` takes them."""
+    vertices, faces, indices = mesh if mesh is not None else build_street_mesh(plan)
+    if openings:
+        vertices = list(vertices)
+        faces, sources = cutouts.cut(vertices, faces, openings)
+        indices = [indices[i] for i in sources]
     obj = mesh_object('City_Streets', vertices, faces, collection,
                       material('City_Asphalt', (.085, .09, .10, 1)))
     obj.data.materials.append(material('City_Pavement', (.42, .41, .38, 1)))
@@ -587,6 +593,10 @@ class MESH_OT_generate_city(bpy.types.Operator):
     tunnels: BoolProperty(name='Tunnels', default=True,
                           description='Tunnels between neighbouring basements: through a shared wall, '
                                       'under the open ground of a block, under a street')
+    sewers: BoolProperty(name='Sewers', default=True,
+                         description='Walkable sewers under the streets: trunks under arterials and '
+                                     'collectors, crouch-height laterals, a chamber and a manhole at '
+                                     'every junction, breaches into deep basements')
     district_ground: BoolProperty(name='District Ground', default=True,
                                   description='Open ground by district: paving downtown with strips of '
                                               'dirt and dry grass, patchier paving further out, grass '
@@ -628,6 +638,7 @@ class MESH_OT_generate_city(bpy.types.Operator):
         layout.prop(self, 'basements')
         if self.basements:
             layout.prop(self, 'tunnels')
+        layout.prop(self, 'sewers')
         layout.prop(self, 'route_guides')
         layout.label(text='Streets meet at grade; only the raised highway bridges them.',
                      icon='INFO')
@@ -666,8 +677,7 @@ class MESH_OT_generate_city(bpy.types.Operator):
                 marker.empty_display_type = 'CIRCLE'
                 marker.empty_display_size = 5 if loc.role == 'SECONDARY' else 10
                 marker['role'], marker['style'] = loc.role, loc.style
-            roads = build_roads(plan, root)
-            roads.location = origin
+            street_mesh = build_street_mesh(plan)
             if self.lane_markings:
                 markings = build_markings(plan, root)
                 if markings is not None:
@@ -681,35 +691,65 @@ class MESH_OT_generate_city(bpy.types.Operator):
             root['basements'] = self.basements
             openings = []
             # Basements are planned first: the tunnels between them put doorways in their walls.
-            recipes, doorways, dug = {}, {}, []
+            recipes, doorways, dug, network = {}, {}, [], None
+            grading = Grading(plan) if plan.heights else None
             if self.detail == 'SHELLS':
                 for lot in plan.lots:
                     recipes[lot.id] = building_recipe(lot.style, lot.width, lot.depth, lot.floors,
                                                       lot.seed, lot.damage, lot.interiors,
                                                       lot.condition, lot.party_walls,
                                                       basements=self.basements)
-                if self.basements and self.tunnels:
+                sites = []
+                if self.basements:
                     sites = [site for site in (tunnels.site_of(lot, recipes[lot.id], self.curb_height)
                                                for lot in plan.lots if lot.condition != 'COLLAPSED')
                              if site is not None]
-                    pads = []
-                    for poi in plan.pois:
-                        corners = site_footprint(poi)
-                        pads.append((min(p[0] for p in corners), min(p[1] for p in corners),
-                                     max(p[0] for p in corners), max(p[1] for p in corners)))
+                pads = []
+                for poi in plan.pois:
+                    corners = site_footprint(poi)
+                    pads.append((min(p[0] for p in corners), min(p[1] for p in corners),
+                                 max(p[0] for p in corners), max(p[1] for p in corners)))
+                # Sewers first: they keep to the streets, and the tunnels keep clear of them.
+                if self.sewers:
+                    network = sewers.plan(plan, plan.surface(), sites, street_mesh, pads)
+                if self.basements and self.tunnels:
                     lowest = None
-                    if plan.heights:
-                        ground_level = Grading(plan)
-                        lowest = lambda r: ground_level.lowest([(r[0], r[1]), (r[2], r[1]), (r[2], r[3]), (r[0], r[3])])  # noqa: E731
-                    dug = tunnels.plan(sites, plan, lowest, pads)
-                    doorways = {site.id: site.doors for site in sites if site.doors}
+                    if grading is not None:
+                        lowest = lambda r: grading.lowest([(r[0], r[1]), (r[2], r[1]), (r[2], r[3]), (r[0], r[3])])  # noqa: E731
+                    # Foundations on terrain reach down to the lowest ground under the lot: solids too.
+                    below = list(network.solids()) if network else []
+                    for lot in plan.lots:
+                        corners = footprint_with_approach(lot, plan)
+                        bottom = (grading.lowest(corners) if grading is not None else 0.0) - .2
+                        below.append(((min(p[0] for p in corners), min(p[1] for p in corners),
+                                       max(p[0] for p in corners), max(p[1] for p in corners)),
+                                      bottom, self.curb_height + lot.level))
+                    dug = tunnels.plan(sites, plan, lowest, pads, below)
+                if network is not None and sites:
+                    sewers.breach(network, sites, plan.settings.seed,
+                                  [(t.rect(), min(t.za, t.zb) - tunnels.SHELL,
+                                    max(t.za, t.zb) + tunnels.HEIGHT + tunnels.SHELL) for t in dug])
+                doorways = {site.id: site.doors for site in sites if site.doors}
             root['tunnels'] = len(dug)
+            root['sewers'] = self.sewers
+            # Footway skirts stop short over the tunnels; the streets are cut where the manholes come up.
+            passages = list(dug) + ([b.tunnel for b in network.breaches] if network else [])
+            if passages:
+                street_vertices, street_faces, street_materials = street_mesh
+                street_vertices = list(street_vertices)
+                street_faces, street_materials = cutouts.lift(
+                    street_vertices, street_faces, street_materials,
+                    [(t.rect(), max(t.za, t.zb) + tunnels.HEIGHT + tunnels.SHELL) for t in passages], 2)
+                street_mesh = (street_vertices, street_faces, street_materials)
+            roads = build_roads(plan, root, street_mesh, network.openings() if network else ())
+            roads.location = origin
+            if network is not None:
+                openings.extend(network.openings())
             build_culverts(plan, root, origin)
             if plan.terraces:
                 build_terrace_works(plan, root, origin)
             if plan.freeway:
                 build_freeway(plan, root, origin)
-            grading = Grading(plan) if plan.heights else None
             context.window_manager.progress_begin(0, max(1, len(plan.lots)))
             meta = CityMetadata(plan, tuple(origin), self.metadata_space, self.small_props,
                                 addon_version(), root.name, self.interior_metadata, self.water)
@@ -777,6 +817,15 @@ class MESH_OT_generate_city(bpy.types.Operator):
                 tunnel_object['surface_role'] = 'tunnels'
                 tunnel_object.location = origin
                 meta.add_tunnels(dug)
+            if network is not None and network.chambers:
+                drains = MeshData()
+                sewers.build(drains, network, MAT_WALLS, MAT_FLOOR)
+                sewer_object = mesh_object_from_data('City_Sewers', drains, root, merge=False)
+                add_material_slots(sewer_object)
+                sewer_object['surface_role'] = 'sewers'
+                sewer_object['manholes'] = len(network.manholes)
+                sewer_object.location = origin
+                meta.add_sewers(network)
             ground_faces, _ = cutouts.cut(ground_vertices, ground_faces, openings)
             ground = mesh_object('City_Ground', ground_vertices, ground_faces,
                                  root, material('City_Ground', (.23, .21, .17, 1)))

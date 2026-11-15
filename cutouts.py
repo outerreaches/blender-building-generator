@@ -108,3 +108,89 @@ def cut(vertices, faces, openings, least=1e-4):
             kept.append(tuple(indices))
             sources.append(source)
     return kept, sources
+
+
+def lift(vertices, faces, materials, boxes, material, gap=.02):
+    """Shorten the vertical faces of one material (street skirts) where they
+    hang into something underground: over each box (world rect, top) a
+    face's bottom is raised to ``gap`` above ``top``, and a piece left with
+    nothing to show is dropped. A face is split where it crosses a box's
+    side. New vertices are appended to ``vertices``; returns the new faces
+    and their materials."""
+    if not boxes:
+        return list(faces), list(materials)
+    kept, kinds = [], []
+    for face, kind in zip(faces, materials):
+        corners = _skirt(vertices, face) if kind == material else None
+        hit = []
+        if corners is not None:
+            top_p, top_q = vertices[corners[0]], vertices[corners[1]]
+            for rect, top in boxes:
+                span = _segment_span(top_p, top_q, rect)
+                if span is not None:
+                    hit.append((span, top))
+        if not hit:
+            kept.append(face)
+            kinds.append(kind)
+            continue
+        tp, tq, bq, bp = corners
+        cuts = sorted({0.0, 1.0} | {t for span, _ in hit for t in span})
+
+        def at(i, j, t):
+            a, b = vertices[i], vertices[j]
+            return tuple(a[k] + (b[k] - a[k]) * t for k in range(3))
+
+        for u0, u1 in zip(cuts, cuts[1:]):
+            if u1 - u0 < 1e-9:
+                continue
+            mid = (u0 + u1) / 2
+            floor = max((top + gap for (s0, s1), top in hit if s0 <= mid <= s1), default=None)
+            a_top, b_top = at(tp, tq, u0), at(tp, tq, u1)
+            a_low, b_low = at(bp, bq, u0), at(bp, bq, u1)
+            if floor is not None:
+                a_low = (a_low[0], a_low[1], max(floor, a_low[2]))
+                b_low = (b_low[0], b_low[1], max(floor, b_low[2]))
+                if a_low[2] >= a_top[2] - 1e-3 or b_low[2] >= b_top[2] - 1e-3:
+                    continue
+            piece = []
+            for co, original in ((a_top, tp if u0 == 0.0 else None), (b_top, tq if u1 == 1.0 else None),
+                                 (b_low, bq if u1 == 1.0 and floor is None else None),
+                                 (a_low, bp if u0 == 0.0 and floor is None else None)):
+                if original is None:
+                    vertices.append(co)
+                    original = len(vertices) - 1
+                piece.append(original)
+            kept.append(tuple(piece))
+            kinds.append(kind)
+    return kept, kinds
+
+
+def _skirt(vertices, face):
+    """A vertical quad's corners as (top p, top q, bottom under q, bottom
+    under p) in the face's own winding, else None."""
+    if len(face) != 4:
+        return None
+    for k in range(4):
+        a, b, c, d = (vertices[face[(k + i) % 4]] for i in range(4))
+        if (abs(b[0] - c[0]) < 1e-6 and abs(b[1] - c[1]) < 1e-6 and
+                abs(a[0] - d[0]) < 1e-6 and abs(a[1] - d[1]) < 1e-6 and
+                b[2] > c[2] + 1e-6 and a[2] > d[2] + 1e-6 and math.dist(a[:2], b[:2]) > 1e-6):
+            return tuple(face[(k + i) % 4] for i in range(4))
+    return None
+
+
+def _segment_span(p, q, rect):
+    """Where segment pq (in plan) lies inside a rectangle, as (t0, t1), else None."""
+    t0, t1 = 0.0, 1.0
+    for d, lo, hi, start in ((q[0] - p[0], rect[0], rect[2], p[0]), (q[1] - p[1], rect[1], rect[3], p[1])):
+        if abs(d) < 1e-12:
+            if start <= lo or start >= hi:
+                return None
+            continue
+        a, b = (lo - start) / d, (hi - start) / d
+        if a > b:
+            a, b = b, a
+        t0, t1 = max(t0, a), min(t1, b)
+        if t0 >= t1:
+            return None
+    return (t0, t1)

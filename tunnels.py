@@ -25,6 +25,7 @@ CLEAR = .5            # Least distance to another basement or tunnel.
 SHARE = .6            # Share of the candidates within a block that are built,
 SHARE_STREET = .35    # and of those across a street.
 NEAREST = 2           # Candidates a basement offers per storey.
+LAYER_GAP = .15       # Least earth between a tunnel and a sewer above or below it.
 
 
 @dataclass
@@ -190,11 +191,12 @@ def candidates(sites, index):
     return found
 
 
-def plan(sites, city, ground=None, avoid=()):
+def plan(sites, city, ground=None, avoid=(), below=()):
     """Tunnels of a city. ``sites``: its basements (their ``doors`` are
     filled in); ``city``: the plan (roads, seed); ``ground(rect)``: the
     lowest ground over a world box (None: level ground at 0); ``avoid``:
-    world boxes nothing may pass under (site pads)."""
+    world boxes nothing may pass under (site pads); ``below``: solids already
+    underground (the sewers) as (world box, lowest, highest)."""
     size = city.settings.block_size
     seed = city.settings.seed
     roads = [((r.a[0] * size, r.a[1] * size), (r.b[0] * size, r.b[1] * size), r.tier, (r.a, r.b))
@@ -233,6 +235,9 @@ def plan(sites, city, ground=None, avoid=()):
                 if any(_overlap(rect, box) for ident, box in solid.items() if ident not in (a.id, b.id)):
                     continue
                 if any(_overlap(rect, box) for box in avoid):
+                    continue
+                low, high = min(za, zb) - SHELL - LAYER_GAP, max(za, zb) + HEIGHT + SHELL + LAYER_GAP
+                if any(_overlap(rect, box) and bottom < high and low < top for box, bottom, top in below):
                     continue
                 if any(_overlap(rect, other.rect()) and abs(min(other.za, other.zb) - min(za, zb)) < HEIGHT + 2 * SHELL + .3
                        for other in built):

@@ -51,10 +51,14 @@ namespace Ares.CityGen
         public Delivery delivery;       // What this export wrote for the engine (v0.26).
         public Underground underground; // Rooms below ground and what joins them (v0.28).
         public Tunnel[] tunnels;        // Between basements (v0.29); also nodes of the graph.
+        public Sewer[] sewers;          // Under the streets (v0.30); also nodes of the graph.
+        public Manhole[] manholes;      // One per chamber whose shaft reaches the paving (v0.30).
+        public Breach[] breaches;       // Passages from basements to trunks (v0.30).
     }
 
     // A graph for reachability below ground. Node ids are "<building object>/<room name>";
     // each building with a basement also has "<building object>/surface", its ground floor.
+    // Sewers (v0.30) add chamber, sewer and street nodes; a street node is a manhole's top.
     [Serializable]
     public class Underground
     {
@@ -66,13 +70,61 @@ namespace Ares.CityGen
     public class UndergroundNode
     {
         public string id;
-        public string kind;             // The room's kind, or "surface".
+        public string kind;             // The room's kind, "surface", "tunnel", "chamber", "sewer" or "street".
         public string building;
         public string room;             // Its name among the building's rooms ("" for surface).
-        public int floor;               // -1, -2; 0 for surface.
-        public string layer;            // basement_1, basement_2, surface.
+        public int floor;               // -1, -2; 0 for surface and street.
+        public string layer;            // basement_1, basement_2, surface, sewer, sewer_lateral, street.
         public float[] position;        // City space, at floor level.
         public float area;              // Square metres.
+        public int depth;               // Links to the nearest surface or street node; -1: none reached (v0.30).
+        public int exits;               // Surface and street nodes in its connected part (v0.30).
+    }
+
+    // A sewer from chamber `a` to chamber `b`, straight under a street's centre
+    // line. `points` is the floor's centre line (flat x, y, z), straight between
+    // points; it follows the street's grade and a lateral's fall into a trunk
+    // chamber. A collapsed one is closed by a plug from `plug_start` to
+    // `plug_end` and is two nodes in the graph, `<id>:a` and `<id>:b`.
+    [Serializable]
+    public class Sewer
+    {
+        public string id;
+        public string kind;             // trunk (walk) or lateral (crouch).
+        public string a, b;             // Chamber node ids.
+        public float[] start, end;
+        public float width, height, length;
+        public string clearance;        // walk or crouch.
+        public string condition;        // clear or collapsed.
+        public float[] plug_start, plug_end;
+        public float[] points;
+    }
+
+    // A shaft from the street down into a chamber. `position` is the middle of
+    // its rim's top (the lid's seat), `bottom` the chamber floor under it; the
+    // opening is `size` square. `open`: the lid starts off (a seeded share).
+    [Serializable]
+    public class Manhole
+    {
+        public string id;
+        public string chamber;          // Node ids at the bottom
+        public string street;           // and the top.
+        public float[] position, bottom;
+        public float size, depth;
+        public bool open;
+    }
+
+    // A short passage from a doorway in a basement's second storey to a gap in
+    // a trunk's wall. `start` and `end` are at floor level at its two ends.
+    [Serializable]
+    public class Breach
+    {
+        public string id;
+        public string building, room;
+        public string sewer;            // The sewer node it opens into.
+        public float[] start, end;
+        public float width, height, length;
+        public float door_width, door_height;
     }
 
     // A straight tunnel from a doorway in building `a`'s basement wall to one
@@ -96,9 +148,13 @@ namespace Ares.CityGen
     {
         public string a;
         public string b;
-        public string kind;             // door, open (no wall between), stair, tunnel.
+        public string kind;             // door, open (no wall between), stair, tunnel, sewer, shaft, breach.
         public float width;             // Of a doorway; 0 otherwise.
         public float[] position;
+        public float height;            // Sewers, shafts and breaches (v0.30).
+        public string clearance;        // Sewers: walk or crouch.
+        public bool open;               // Shafts: the lid starts off.
+        public bool bridge;             // Taking it away splits the graph (v0.30).
     }
 
     // Levels of detail: a building `lot_x` has children `lot_x` + suffix for

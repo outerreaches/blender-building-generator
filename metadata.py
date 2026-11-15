@@ -135,6 +135,80 @@ def _r(value, digits=3):
     return round(float(value), digits)
 
 
+STREET_KINDS = ('surface', 'street')    # Underground nodes that are the street level.
+
+
+def _graph_facts(nodes, links):
+    """The underground graph with derived facts: per node ``depth`` (links to
+    the nearest street-level node, -1 if none is reached) and ``exits``
+    (street-level nodes in its connected part); per link ``bridge`` (taking
+    it away splits its part)."""
+    index = {node['id']: k for k, node in enumerate(nodes)}
+    near = [[] for _ in nodes]
+    for number, link in enumerate(links):
+        a, b = index.get(link['a']), index.get(link['b'])
+        if a is None or b is None or a == b:
+            continue
+        near[a].append((b, number))
+        near[b].append((a, number))
+    streets = [k for k, node in enumerate(nodes) if node['kind'] in STREET_KINDS]
+    depth = [-1] * len(nodes)
+    queue = list(streets)
+    for k in streets:
+        depth[k] = 0
+    head = 0
+    while head < len(queue):
+        v = queue[head]
+        head += 1
+        for w, _ in near[v]:
+            if depth[w] < 0:
+                depth[w] = depth[v] + 1
+                queue.append(w)
+    part = [-1] * len(nodes)
+    exits = []
+    for root in range(len(nodes)):
+        if part[root] >= 0:
+            continue
+        label, count, todo = len(exits), 0, [root]
+        part[root] = label
+        while todo:
+            v = todo.pop()
+            count += nodes[v]['kind'] in STREET_KINDS
+            for w, _ in near[v]:
+                if part[w] < 0:
+                    part[w] = label
+                    todo.append(w)
+        exits.append(count)
+    # Bridges (Tarjan, iterative): a link is one when nothing else joins its far side back.
+    seen, low, bridges, clock = [-1] * len(nodes), [0] * len(nodes), set(), 0
+    for root in range(len(nodes)):
+        if seen[root] >= 0:
+            continue
+        seen[root] = low[root] = clock
+        clock += 1
+        stack = [(root, -1, iter(near[root]))]
+        while stack:
+            v, via, edges = stack[-1]
+            for w, number in edges:
+                if number == via:
+                    continue
+                if seen[w] < 0:
+                    seen[w] = low[w] = clock
+                    clock += 1
+                    stack.append((w, number, iter(near[w])))
+                    break
+                low[v] = min(low[v], seen[w])
+            else:
+                stack.pop()
+                if stack:
+                    u = stack[-1][0]
+                    low[u] = min(low[u], low[v])
+                    if low[v] > seen[u]:
+                        bridges.add(via)
+    return {'nodes': [dict(node, depth=depth[k], exits=exits[part[k]]) for k, node in enumerate(nodes)],
+            'links': [dict(link, bridge=k in bridges) for k, link in enumerate(links)]}
+
+
 class CityMetadata:
     """Collects metadata while a city is generated; ``as_dict`` builds the JSON."""
 
@@ -157,6 +231,9 @@ class CityMetadata:
         self.under_nodes = []           # The underground graph: rooms below ground
         self.under_links = []           # and what joins them.
         self.tunnels = []
+        self.sewers = []
+        self.manholes = []
+        self.breaches = []
 
     # -- transforms ------------------------------------------------------
     def lot_transform(self, lot):
@@ -275,6 +352,80 @@ class CityMetadata:
                                  'width': _r(WIDTH), 'height': _r(HEIGHT), 'door_width': _r(DOOR[0]),
                                  'door_height': _r(DOOR[1]), 'length': _r(tunnel.length),
                                  'under_street': tunnel.street})
+
+    def add_sewers(self, network):
+        """Sewers: chambers, sections (a collapsed one as its two halves),
+        manholes up to street nodes, and breaches into basements; graph
+        nodes and links, and their own lists."""
+        from .sewers import SHAFT
+        from . import tunnels as passages
+        ox, oy, oz = self.origin
+        point = self.space.point
+
+        def at(x, y, z):
+            return point((ox + x, oy + y, oz + z))
+
+        for chamber in sorted(network.chambers.values(), key=lambda c: c.id):
+            self.under_nodes.append({'id': chamber.id, 'kind': 'chamber', 'building': '', 'room': '',
+                                     'floor': -2, 'layer': 'sewer',
+                                     'position': at(chamber.x, chamber.y, chamber.floor),
+                                     'area': _r(chamber.size * chamber.size)})
+            m = chamber.manhole
+            if m is None:
+                continue
+            street = f'street_{chamber.node[0]}_{chamber.node[1]}'
+            self.under_nodes.append({'id': street, 'kind': 'street', 'building': '', 'room': '',
+                                     'floor': 0, 'layer': 'street', 'position': at(m.x, m.y, m.rim),
+                                     'area': 0.0})
+            self.under_links.append({'a': chamber.id, 'b': street, 'kind': 'shaft', 'width': _r(SHAFT),
+                                     'height': _r(m.rim - chamber.floor), 'open': m.open,
+                                     'position': at(m.x, m.y, m.rim)})
+            self.manholes.append({'id': m.id, 'chamber': chamber.id, 'street': street,
+                                  'position': at(m.x, m.y, m.rim), 'bottom': at(m.x, m.y, chamber.floor),
+                                  'size': _r(SHAFT), 'depth': _r(m.rim - chamber.floor), 'open': m.open})
+        halves = {}
+        for sewer in network.sewers:
+            clearance = 'walk' if sewer.kind == 'trunk' else 'crouch'
+            parts = ([(sewer.id, sewer.start, sewer.end)] if sewer.plug is None else
+                     [(sewer.id + ':a', sewer.start, sewer.plug[0]), (sewer.id + ':b', sewer.plug[1], sewer.end)])
+            halves[sewer.id] = parts
+            for ident, a0, a1 in parts:
+                middle = (a0 + a1) / 2
+                self.under_nodes.append({'id': ident, 'kind': 'sewer', 'building': '', 'room': '', 'floor': -2,
+                                         'layer': 'sewer' if sewer.kind == 'trunk' else 'sewer_lateral',
+                                         'position': at(*sewer.point(middle), sewer.floor_at(middle)),
+                                         'area': _r((a1 - a0) * sewer.width)})
+            for chamber, ident, along in ((sewer.a, parts[0][0], sewer.start), (sewer.b, parts[-1][0], sewer.end)):
+                self.under_links.append({'a': chamber, 'b': ident, 'kind': 'sewer', 'width': _r(sewer.width),
+                                         'height': _r(sewer.height), 'clearance': clearance,
+                                         'position': at(*sewer.point(along), sewer.floor_at(along))})
+            plug = ([at(*sewer.point(a), sewer.floor_at(a)) for a in sewer.plug] if sewer.plug else [])
+            self.sewers.append({'id': sewer.id, 'kind': sewer.kind, 'a': sewer.a, 'b': sewer.b,
+                                'start': at(*sewer.point(sewer.start), sewer.floor_at(sewer.start)),
+                                'end': at(*sewer.point(sewer.end), sewer.floor_at(sewer.end)),
+                                'width': _r(sewer.width), 'height': _r(sewer.height),
+                                'length': _r(sewer.length), 'clearance': clearance,
+                                'condition': 'collapsed' if sewer.plug else 'clear',
+                                'plug_start': plug[0] if plug else [], 'plug_end': plug[1] if plug else [],
+                                # The floor's centre line, straight between these.
+                                'points': _flat(at(*sewer.point(a), f) for a, f in sewer.sections)})
+        for item in network.breaches:
+            t = item.tunnel
+            node = next(ident for ident, a0, a1 in halves[item.sewer] if a0 - 1e-6 <= item.along <= a1 + 1e-6)
+
+            def end(along, z, t=t):
+                x, y = (along, t.line) if t.axis == 'x' else (t.line, along)
+                return at(x, y, z)
+
+            wall = (t.start, t.za) if t.b == item.sewer and item.side > 0 else (t.end, t.zb)
+            self.under_links.append({'a': f'{item.site}/{item.room}', 'b': node, 'kind': 'breach',
+                                     'width': _r(passages.DOOR[0]), 'height': _r(passages.HEIGHT),
+                                     'position': end(*wall)})
+            self.breaches.append({'id': item.id, 'building': item.site, 'room': item.room, 'sewer': node,
+                                  'start': end(t.start, t.za), 'end': end(t.end, t.zb),
+                                  'width': _r(passages.WIDTH), 'height': _r(passages.HEIGHT),
+                                  'door_width': _r(passages.DOOR[0]), 'door_height': _r(passages.DOOR[1]),
+                                  'length': _r(t.length)})
 
     def _interior(self, facts):
         """Rooms, lifts and railings in building space."""
@@ -557,8 +708,11 @@ class CityMetadata:
                                        if getattr(plan, 'wild', 0) else 0.0),
                      'plateau_height': settings.plateau_height, 'podiums': settings.podiums,
                      'highway': settings.highway},
-            'underground': {'nodes': self.under_nodes, 'links': self.under_links},
+            'underground': _graph_facts(self.under_nodes, self.under_links),
             'tunnels': self.tunnels,
+            'sewers': self.sewers,
+            'manholes': self.manholes,
+            'breaches': self.breaches,
             'districts': [{'id': loc.id, 'role': loc.role, 'style': loc.style,
                            'position': node_point(loc.node)} for loc in plan.locations],
             'roads': roads,

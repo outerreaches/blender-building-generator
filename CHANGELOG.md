@@ -14,8 +14,8 @@
     arterials (every four junctions or so, every two downtown, and at its
     ends): a level box 46 m long with a side platform each side of the
     tracks (steps down to the track bed at their ends), a ticket hall above
-    it at a second
-    basement's depth, a stair from each platform up into the hall, and up
+    it at a second basement's depth, a stair from each platform up into the
+    hall, and up
     to two **entrances**, stairwells from the hall's ends up to the kerb
     lanes, their openings cut in the street with a parapet round them;
   - the **sewers** that reach a station's junction end in its hall (in
@@ -39,7 +39,8 @@
   `underground` graph `station_hall`, `platform`, `subway` and `utility`
   nodes with stair, subway, door and shaft links, all reaching the street;
   manholes get a `kind` (`sewer` or `exit`); breaches a `storey`, and for
-  drops the ladder's ends and facing.
+  drops the ladder's ends and facing; a breach or access link that ends in
+  a drop is marked `ladder`.
 
 ## v0.30.0: Sewers
 
@@ -72,11 +73,12 @@
   basements and of first-storey tunnels; tunnels are planned after them
   and keep 0.15 m of earth from them.
 - **Fixes to v0.29 tunnels.** On terrain the footways' skirts reach 2.5 m
-  down and hung into most tunnels under a street (on BigCity004 into 19 of
-  26, two of them cut the NavMesh): over tunnels and breaches the skirts
+  down and hung into most tunnels under a street (on the test city into 19
+  of 26, two of them cut the NavMesh): over tunnels and breaches the skirts
   now stop above the roof. A foundation reaching down to low ground is a
   solid to the tunnels too where it would reach under a tunnel's roof
-  (some ran through one; on BigCity004 16 of 105 are no longer built).
+  (some ran through one; on the test city 16 of 105 are no longer
+  built).
 - **Metadata.** `sewers` (ends, the walkways' level along the centre line
   as `points`, sizes, `profile` and trench size, clearance walk or crouch,
   condition and plug), `manholes` (rim and floor points, size across the

@@ -220,13 +220,14 @@ namespace Ares.CityGen
     {
         public string a;
         public string b;
-        public string kind;             // door, open (no wall between), stair, tunnel, sewer, shaft, breach.
+        public string kind;             // door, open (no wall between), stair, tunnel, sewer, shaft, breach, subway.
         public float width;             // Of a doorway; 0 otherwise.
         public float[] position;
         public float height;            // Sewers, shafts and breaches (v0.30).
         public string clearance;        // Sewers: walk or crouch.
         public bool open;               // Shafts: the lid starts off.
         public bool bridge;             // Taking it away splits the graph (v0.30).
+        public bool ladder;             // A breach or access that ends in a drop: climbed, not walked (v0.31).
     }
 
     // Levels of detail: a building `lot_x` has children `lot_x` + suffix for

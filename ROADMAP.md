@@ -22,7 +22,6 @@
 | v0.23 | Raised highway: a straight viaduct across the city on piers, the streets passing under it; diamond interchanges whose ramps climb alongside the deck and taper into it; at grade again out in the wasteland. Stairs and walls in every standing building, gutted ones with rubble on the floors, column frames (v0.23.4); superblocks in the old town, residential, brutalist and industrial districts (v0.23.5); courtyards, estate grounds and uneven plots (v0.23.6) |
 | v0.24 | Building footprints: L, T, U and courtyard buildings made of wings, with corridors along every wing, a stair to every storey and a door out to the court; whole-block buildings in the old town, residential and brutalist districts |
 | v0.25 | Cross-sections: forecourts that follow a sloping street (no more stepped bases), the ground graded to them; wild hills round Rolling Hills cities, the highway leaving through them in cuttings (with ditches) and on embankments; rural streets with gravel shoulders, V-ditches, culverts and driveways |
-
 | v0.26 | Game delivery, part one: a shell and a massing level of detail for every building; the ground, streets and other city-wide meshes exported as tiles |
 | v0.27 | Ground materials by district; balconies on brutalist and residential blocks; stairs in every damaged site building; drill and clock towers with stairs |
 | v0.28 | Basements, part one: a storey or two under many buildings, their rooms and an underground graph in the metadata |
@@ -56,8 +55,7 @@ See [CHANGELOG.md](CHANGELOG.md) for the details.
 - Surviving connectivity in the metadata: rooms and openings as flat
   tables with ids, reachability from the street, road edges mapped to their
   polylines.
-- Vehicle swept-clearance tests; play-mode tests. (Unity-side navigation checks of the
-  underground exist in the game project.)
+- Vehicle swept-clearance tests; play-mode tests.
 
 ## Planned: terrain and infrastructure
 

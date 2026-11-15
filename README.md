@@ -35,8 +35,8 @@ sized for the game's 2 m player capsule.
   podiums behind retaining walls and natural slopes, reached by ramps,
   viaducts and stairs), curved roads with filleted junctions and
   connected driving circuits, footways and curbs (or, on the suburbs'
-  rural streets, gravel shoulders, ditches and culverts), built-out suburbs with
-  houses round their cul-de-sacs, a dense downtown of party-walled towers
+  rural streets, gravel shoulders, ditches and culverts), built-out suburbs
+  with houses round their cul-de-sacs, a dense downtown of party-walled towers
   and superblocks, superblocks in the other districts too (perimeter blocks
   round courtyards, brutalist estates, industrial compounds), ground
   materials by district, balconies on the apartment blocks, and a raised

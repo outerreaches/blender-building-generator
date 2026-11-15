@@ -36,6 +36,12 @@
   hall; a seeded share of these are joined to the hall by one or two
   service rooms (a corridor ramping to the chamber's floor) and a service
   door, the rest are dead ends with a manhole.
+- **Accesses round a corner.** A second basement storey beside the street
+  just past a hall's end (up to 32 m) is joined to it by a corridor along
+  the street under the road's edge (clear of the trunk and the entrances,
+  ramping 1 in 8 at most), a small room where it turns, and a passage to
+  the basement's wall; the doorway is in the hall's end wall, before the
+  fare line. Accesses through the hall's side walls are as before.
 - **Hallways off the line.** At seeded intervals along its straights, a
   hallway leaves the walkway through the line's wall: to a utility room
   (half with a ladder shaft up to a hatch in the footway), to an emergency
@@ -52,7 +58,8 @@
   station's `kind`, `box_length`, `track_offset`, `fences`, `gates`,
   `booths`, `rooms` (bathrooms), `fixtures` (toilets, sinks) and `links`
   (service rooms in from the sewers); an entrance's `place`, `facing` and `opening`;
-  a utility room's `kind` (`utility` or `exit`) and `size`; `risers`
+  an access's `route` (`straight` or `corner`); a utility room's `kind`
+  (`utility` or `exit`) and `size`; `risers`
   (ladders up to the sewer). In the `underground` graph: `bathroom` and
   `service` nodes, sewer end chambers joined to halls by doors, risers as
   shaft links from the line to the sewer.

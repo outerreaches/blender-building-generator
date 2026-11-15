@@ -33,7 +33,8 @@ from .city_plan import district_at, stream
 from . import sewers as _sewers
 from .meshdata import (U_SERVICE_FLOOR, U_SERVICE_WALL, U_SEWER_SHAFT, U_STATION_BOOTH, U_STATION_CEILING,
                        U_STATION_EDGE, U_STATION_ENTRANCE, U_STATION_FLOOR, U_STATION_PLATFORM, U_STATION_STAIRS,
-                       U_STATION_TILE, U_STATION_WALL, U_SUBWAY_TRACKBED, U_SUBWAY_WALKWAY, U_SUBWAY_WALL)
+                       U_STATION_TILE, U_STATION_WALL, U_SUBWAY_TRACKBED, U_SUBWAY_WALKWAY, U_SUBWAY_WALL,
+                       U_TUNNEL_CEILING, U_TUNNEL_FLOOR, U_TUNNEL_WALL)
 
 TRACK_DEPTH = 14.0        # Track bed under the street.
 LINE = (8.6, 5.0, 1.2)    # Clear width and height of the line's tunnel, and its vaulted upper corners.
@@ -88,7 +89,9 @@ HALLWAY_EVERY = 70.0      # Mean spacing of access hallways along the line,
 HALLWAY_KINDS = (('utility', .45), ('sewer', .3), ('exit', .25))   # and what they lead to.
 HALLWAY_CLEAR = 7.0       # Least distance from a hallway to a junction or a piece's end.
 RISER = (1.2, .2)         # A hallway's ladder shaft up to a sewer: clear depth across the line, walls.
-ACCESS_REACH = 16.0       # Longest passage from a basement into a hall.
+ACCESS_REACH = 16.0       # Longest passage from a basement into a hall,
+ACCESS_ALONG = 32.0       # and how far past a hall's end a basement may be reached round a corner.
+CORNER_ROOM = (2.4, 2.6)  # The room where such an access turns: clear size (square), height.
 ACCESS_DROP_STYLES = ('DOWNTOWN', 'OLD_TOWN', 'BRUTALIST')   # Their first storeys drop into a hall by a ladder.
 PAD_REACH = 6.0           # How far under a site's pad nothing may come (its pad is 0.35 m; the line is deeper).
 LINE_TIERS = {'ARTERIAL': 1.0, 'COLLECTOR': 2.5, 'LOCAL': 4.0}   # Routing cost per junction of each street.
@@ -285,6 +288,14 @@ class Access:
     side: int = 1         # on which side of the hall.
     storey: int = -2
     drop: tuple = None    # A ladder shaft beside the hall, as sewers.drop_shaft takes it.
+    lead: object = None   # Round a corner: a tunnels.Tunnel along the street from the hall's end wall,
+    corner: object = None  # a sewers.ServiceRoom where it turns (``tunnel`` then runs on to the basement),
+    wall: str = ''        # and the hall's end wall it comes through ('a+', 'a-'),
+    door: float = 0.0     # at this world coordinate along it.
+
+    @property
+    def route(self):
+        return 'corner' if self.corner is not None else 'straight'
 
 
 @dataclass
@@ -530,6 +541,10 @@ class Subway:
                     wall, far, zs, _, top = a.drop
                     lo, hi = sorted((wall, far))
                     found.append((_rect(s, a.along - 1.2, a.along + 1.2, lo - s.line, hi - s.line), zs - .2, top))
+                if a.lead is not None:
+                    t, r = a.lead, a.corner
+                    found.append((t.rect(), min(t.za, t.zb) - tunnels.SHELL, max(t.za, t.zb) + tunnels.HEIGHT + tunnels.SHELL))
+                    found.append((r.rect(), r.floor - UTILITY_SHELL, r.floor + r.height + UTILITY_SHELL))
         for u in self.utilities:
             found.append((u.room(), u.floor - UTILITY_SHELL, u.floor + u.size + UTILITY_SHELL))
             found.append((u.corridor.rect(), u.floor - .2, u.floor + 2.4))
@@ -1294,8 +1309,103 @@ def connect(subway, sites, network=None, avoid=()):
             if made is not None:
                 station.accesses.append(made)
                 taken.add(site.id)
+    _plan_corner_accesses(subway, sites, have, boxes, taken, avoid)
     if network is not None:
         _plan_risers(subway, network, avoid)
+
+
+def _plan_corner_accesses(subway, sites, have, boxes, taken, avoid):
+    """Second basement storeys beside the street just past a hall's end:
+    a corridor from a doorway in the hall's end wall along the street (under
+    the road's edge, clear of the trunk and the entrances, ramping 1 in 8 at
+    most), a small room where it turns, and a passage across to the
+    basement's wall."""
+    from . import tunnels
+    own = subway.solids()
+    need = tunnels.WIDTH / 2 + tunnels.SHELL + .4
+    for station in subway.stations:
+        m = 0 if station.axis == 'x' else 1
+        n = 1 - m
+        across_axis = 'y' if station.axis == 'x' else 'x'
+        for sign in (1, -1):
+            if any(a.wall == ('a+' if sign > 0 else 'a-') for a in station.accesses):
+                continue
+            end_face = station.centre + sign * (HALL[0] + HALL_SHELL)
+            for side in (1, -1):
+                made = None
+                # The corridor runs under the road's edge: clear of the trunk (on the centre line) and of the
+                # entrances (beside the footway).
+                c = side * max(station.road_half - 1.2, LINE[0] / 2 - 1.0)
+                wall = 'a+' if sign > 0 else 'a-'
+                if not station.clear(*station.wall_spot(wall, c, SERVICE_DOOR[0] + .4)):
+                    continue
+                line = station.line + c
+                half = CORNER_ROOM[0] / 2 + UTILITY_SHELL
+                for site in have:
+                    if site.id in taken or site.level(-2) is None:
+                        continue
+                    box = boxes[site.id]
+                    face = box[n] if side > 0 else box[n + 2]
+                    gap = (face - (line + side * half)) * side
+                    if gap < 1.0 or gap > ACCESS_REACH:
+                        continue
+                    inner = site.box(site.under.rect)
+                    near_end, far_end = end_face + sign * (half + 2.0), end_face + sign * ACCESS_ALONG
+                    lo = max(min(near_end, far_end), inner[m] + need)
+                    hi = min(max(near_end, far_end), inner[m + 2] - need)
+                    if hi < lo:
+                        continue
+                    zb = site.floor(-2)
+                    alongs = sorted((lo + .5 * k for k in range(int((hi - lo) / .5) + 1)),
+                                    key=lambda a: abs(a - end_face))
+                    for along in alongs:
+                        run = abs(along - end_face) - half
+                        if abs(zb - station.hall_floor) > run * tunnels.SLOPE:
+                            continue
+                        probe = face + side * .6
+                        px, py = (along, probe) if station.axis == 'x' else (probe, along)
+                        room = tunnels._room_behind(site, -2, px, py, across_axis)
+                        if room is None:
+                            continue
+                        ident = f'access_{site.id}__{station.id}'
+                        a0, a1 = sorted((end_face, along - sign * half))
+                        za, zc = (station.hall_floor, zb) if sign > 0 else (zb, station.hall_floor)
+                        lead = tunnels.Tunnel(ident + '_lead', station.id, ident + '_corner', -2, station.axis, line,
+                                              a0, a1, za, zc, '', '', True)
+                        cx, cy = station.point(along, c)
+                        hx, hy = (CORNER_ROOM[0] / 2,) * 2
+                        toward_hall = ('-' if sign > 0 else '+') + station.axis
+                        toward_site = ('+' if side > 0 else '-') + across_axis
+                        corner = _sewers.ServiceRoom(ident + '_corner', cx, cy, hx, hy, zb, CORNER_ROOM[1],
+                                                     [(toward_hall, line), (toward_site, along)])
+                        s0, s1 = sorted((line + side * half, face))
+                        passage = tunnels.Tunnel(ident, site.id, station.id, -2, across_axis, along, s0, s1, zb, zb,
+                                                 room.name, '', True)
+                        parts = [(lead.rect(tunnels.CLEAR), min(za, zc) - tunnels.SHELL,
+                                  max(za, zc) + tunnels.HEIGHT + tunnels.SHELL),
+                                 (corner.rect(), zb - UTILITY_SHELL, zb + CORNER_ROOM[1] + UTILITY_SHELL),
+                                 (passage.rect(tunnels.CLEAR), zb - tunnels.SHELL, zb + tunnels.HEIGHT + tunnels.SHELL)]
+                        if any(_overlap(r, b) for r, _, _ in parts for i, b in boxes.items() if i != site.id):
+                            continue
+                        # (Not its own hall: the corridor comes through its wall.)
+                        if any(_overlap(r, r2) and lo2 < high and low < hi2 for r, low, high in parts
+                               for r2, lo2, hi2 in list(avoid) + own if r2 != station.hall()):
+                            continue
+                        if any(_overlap(r, piece) for r, _, _ in parts for st in subway.stations for other in st.accesses
+                               for piece in [other.tunnel.rect()] + ([other.lead.rect()] if other.lead else [])):
+                            continue
+                        made = Access(ident, site.id, room.name, passage, along, side, -2, None, lead, corner, wall, line)
+                        point = (along, face) if station.axis == 'x' else (face, along)
+                        door_side, door_centre = tunnels._side(site, *point)
+                        site.doors.append((-2, door_side, door_centre, tunnels.DOOR[0], tunnels.DOOR[1]))
+                        station.take(*station.wall_spot(wall, c, SERVICE_DOOR[0] + .4))
+                        break
+                    if made is not None:
+                        break
+                if made is not None:
+                    station.accesses.append(made)
+                    taken.add(made.site)
+                    break
 
 
 def _plan_risers(subway, network, avoid):
@@ -1442,6 +1552,13 @@ def build(mesh, subway):
         _station(mesh, station)
         for access in station.accesses:
             tunnels.build(mesh, access.tunnel)
+            if access.lead is not None:
+                tunnels.build(mesh, access.lead)
+                r = access.corner
+                _room(mesh, r.x, r.y, r.hx, r.hy, r.floor, r.height, UTILITY_SHELL,
+                      {side: [(c, lambda u, f=r.floor: _rect_opening(u, tunnels.WIDTH, f, tunnels.HEIGHT,
+                                                                     U_TUNNEL_WALL))] for side, c in r.doors},
+                      U_TUNNEL_WALL, U_TUNNEL_FLOOR, ceiling_material=U_TUNNEL_CEILING)
             if access.drop is not None:
                 _sewers.drop_shaft(mesh, station, access.along, access.side, access.drop, _sewers.OPENING['trunk'],
                                    U_SERVICE_WALL, U_SERVICE_FLOOR)
@@ -1607,6 +1724,10 @@ def _hall(mesh, s, hall_holes):
                                                                                        U_STATION_WALL)))
     for access in s.accesses:
         t = access.tunnel
+        if access.lead is not None:
+            openings.setdefault(_hall_wall_side(s, access.wall), []).append(
+                (access.door, lambda u, f=s.hall_floor: _rect_opening(u, 1.6, f, 2.1, U_STATION_WALL)))
+            continue
         hall_side = ('+' if access.side > 0 else '-') + ('y' if s.axis == 'x' else 'x')
         if access.drop is not None:
             factory = lambda u, f=s.hall_floor: _rect_opening(u, tunnels.WIDTH, f, _sewers.OPENING['trunk'],  # noqa: E731

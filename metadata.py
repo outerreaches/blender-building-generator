@@ -516,11 +516,19 @@ class CityMetadata:
             accesses = []
             for a in s.accesses:
                 t = a.tunnel
-                wall = s.line + (s.side_half + sub.HALL_SHELL) * a.side
-                x, y = (t.line, wall) if s.axis == 'x' else (wall, t.line)
+                if a.lead is not None:
+                    # Round a corner: through the hall's end wall.
+                    sign = 1 if a.wall[1] == '+' else -1
+                    x, y = s.point(s.centre + sign * (sub.HALL[0] + sub.HALL_SHELL / 2), a.door - s.line)
+                    length = a.lead.length + 2 * a.corner.hx + t.length
+                else:
+                    wall = s.line + (s.side_half + sub.HALL_SHELL) * a.side
+                    x, y = (t.line, wall) if s.axis == 'x' else (wall, t.line)
+                    length = t.length
                 link(f'{a.site}/{a.room}', hall, 'door', passages.DOOR[0], at(x, y, f), ladder=a.drop is not None)
-                entry = {'id': a.id, 'building': a.site, 'room': a.room, 'length': _r(t.length), 'storey': a.storey,
-                         'drop': a.drop is not None, 'ladder_bottom': [], 'ladder_top': [], 'ladder_facing': []}
+                entry = {'id': a.id, 'building': a.site, 'room': a.room, 'length': _r(length), 'storey': a.storey,
+                         'route': a.route, 'drop': a.drop is not None, 'ladder_bottom': [], 'ladder_top': [],
+                         'ladder_facing': []}
                 if a.drop is not None:
                     from .sewers import DROP
                     _, far, zs, zb, _ = a.drop

@@ -695,6 +695,10 @@ they are meant to:
     last corridor ramping to the chamber's floor.
   - Second basement storeys beside a hall get a doorway into it; the first
     storeys of downtown, old town and brutalist buildings a ladder drop.
+    Second storeys beside the street just past a hall's end (up to 32 m) are
+    reached round a corner: a corridor along the street under the road's
+    edge from a doorway in the hall's end wall, a small room where it turns,
+    and a passage to the basement.
   - **Hallways** leave the walkway through the line's wall at seeded
     intervals (about 70 m) along its straights: to a utility room under the
     footway (half with a ladder shaft up to a hatch in the footway), to an
@@ -861,7 +865,7 @@ the same way.
 | `sewers` | Each section: kind (`trunk`, `lateral`), its two chambers, `start`, `end`, `points` (the walkways' level along its centre line), sizes, `profile` (`octagon`), trench width and depth, `clearance`, `condition` (`clear` or `collapsed`, with `plug_start` and `plug_end`) |
 | `manholes` | Each shaft's top (the middle of its rim, the lid's seat) and bottom, `size` across the flats, `shape`, depth, `open`, `kind` (`sewer` or `exit`) and its chamber and street nodes |
 | `breaches` | Passages from basements to the sewers: building, room, storey, sewer node, ends, sizes; for a drop the ladder's `ladder_bottom`, `ladder_top` and `ladder_facing` (towards the sewer) |
-| `subway` | `lines` (track bed centre `points` end to end round the curves, `tracks` (the two tracks' centre lines, parting round island platforms), `curves` (radius, centre, length), stations in order, sizes); `stations` (`kind` `side` or `island`, track-bed position, forward, sizes, hall floor, `stairs` as foot and head per stair, `entrances` with their foot, head, `place`, `facing` and `opening`, `accesses` with drops' ladders, the fare lines' `fences`, `gates` and `booths`, `rooms` (bathrooms), `fixtures` (toilets, sinks), `links` (service rooms from a sewer chamber)); `utilities` (`kind` `utility` or `exit`, room position and size, its exit's id); `risers` (ladders from the line up to the sewer: bottom, top, facing, the sewer node) |
+| `subway` | `lines` (track bed centre `points` end to end round the curves, `tracks` (the two tracks' centre lines, parting round island platforms), `curves` (radius, centre, length), stations in order, sizes); `stations` (`kind` `side` or `island`, track-bed position, forward, sizes, hall floor, `stairs` as foot and head per stair, `entrances` with their foot, head, `place`, `facing` and `opening`, `accesses` with their `route` and drops' ladders, the fare lines' `fences`, `gates` and `booths`, `rooms` (bathrooms), `fixtures` (toilets, sinks), `links` (service rooms from a sewer chamber)); `utilities` (`kind` `utility` or `exit`, room position and size, its exit's id); `risers` (ladders from the line up to the sewer: bottom, top, facing, the sewer node) |
 | `counts` | Totals per section and per marker type |
 
 Objects also carry custom properties that the FBX passes to Unity as user

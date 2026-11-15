@@ -1,5 +1,28 @@
 # Changelog
 
+## v0.29.0: Tunnels between basements
+
+- **Tunnels** (new city setting, on by default, with Basements). Basements
+  whose walls face each other are joined by a straight tunnel on the first
+  or the second storey below ground:
+  - through the wall where two buildings stand side by side;
+  - under the open ground of a block, up to 26 m;
+  - under a street, up to 34 m (not under a highway or a rural street with
+    ditches, nor under a site's pad).
+
+  Each basement offers its two nearest neighbours per storey; 60% of the
+  offers within a block and 35% of those across a street are built. A
+  tunnel is 2 m wide and 2.2 m high, its floor running from one basement's
+  floor to the other's (no steeper than 1 in 8), with at least 0.3 m of
+  ground over it. Each end is a doorway (1.6 by 2.1 m) through the basement
+  wall into a room. They are one object, `City_Tunnels`.
+- **Metadata.** `tunnels`: each with its two buildings and rooms, storey,
+  end points, sizes and whether it passes under a street (the doorways are
+  where the game hangs doors). In the `underground` graph each tunnel is a
+  node with a `tunnel` link to the room at either end.
+- A basement is planned before its building is built (the same plan), so a
+  rubble-filled lot never has one, whatever its fill came to.
+
 ## v0.28.0: Basements, part one
 
 - **Basements** (new city setting, on by default). Many buildings have a

@@ -11,7 +11,8 @@ from .metadata import SPACES as METADATA_SPACES, CityMetadata
 from .spec import BuildingSpec
 from .sites import (KINDS as SITE_KINDS, PAD_THICKNESS, VARIANTS as SITE_VARIANTS,
                     compose as compose_site, compose_yard)
-from . import cutouts, ground_cover
+from . import cutouts, ground_cover, tunnels
+from .meshdata import MAT_FLOOR, MAT_WALLS, MeshData
 from .streets import (Grading, approach_reach, build_culvert_mesh, build_freeway_mesh,
                       build_ground_mesh, build_outer_road_mesh, build_stair_mesh,
                       build_street_mesh, build_viaduct_mesh, build_wall_mesh, footprint,
@@ -19,7 +20,8 @@ from .streets import (Grading, approach_reach, build_culvert_mesh, build_freeway
                       site_footprint)
 from .styles import NO_STRUCTURE, STYLE_ITEMS, STYLE_COLORS, building_recipe
 from .city_export import store_city_metadata
-from .building_assets import (add_site_material_slots, addon_version, create_rubble,
+from .building_assets import (add_material_slots, add_site_material_slots, addon_version, create_rubble,
+                              mesh_object_from_data,
                               create_shell, create_shelter, create_site, create_site_preview,
                               material, mesh_object_from_data)
 
@@ -582,6 +584,9 @@ class MESH_OT_generate_city(bpy.types.Operator):
     basements: BoolProperty(name='Basements', default=True,
                             description='A storey below ground (two under downtown towers) under '
                                         'many buildings, reached by their own stair carried on down')
+    tunnels: BoolProperty(name='Tunnels', default=True,
+                          description='Tunnels between neighbouring basements: through a shared wall, '
+                                      'under the open ground of a block, under a street')
     district_ground: BoolProperty(name='District Ground', default=True,
                                   description='Open ground by district: paving downtown with strips of '
                                               'dirt and dry grass, patchier paving further out, grass '
@@ -621,6 +626,8 @@ class MESH_OT_generate_city(bpy.types.Operator):
         layout.prop(self, 'lane_markings')
         layout.prop(self, 'district_ground')
         layout.prop(self, 'basements')
+        if self.basements:
+            layout.prop(self, 'tunnels')
         layout.prop(self, 'route_guides')
         layout.label(text='Streets meet at grade; only the raised highway bridges them.',
                      icon='INFO')
@@ -673,6 +680,30 @@ class MESH_OT_generate_city(bpy.types.Operator):
             root['district_ground'] = self.district_ground
             root['basements'] = self.basements
             openings = []
+            # Basements are planned first: the tunnels between them put doorways in their walls.
+            recipes, doorways, dug = {}, {}, []
+            if self.detail == 'SHELLS':
+                for lot in plan.lots:
+                    recipes[lot.id] = building_recipe(lot.style, lot.width, lot.depth, lot.floors,
+                                                      lot.seed, lot.damage, lot.interiors,
+                                                      lot.condition, lot.party_walls,
+                                                      basements=self.basements)
+                if self.basements and self.tunnels:
+                    sites = [site for site in (tunnels.site_of(lot, recipes[lot.id], self.curb_height)
+                                               for lot in plan.lots if lot.condition != 'COLLAPSED')
+                             if site is not None]
+                    pads = []
+                    for poi in plan.pois:
+                        corners = site_footprint(poi)
+                        pads.append((min(p[0] for p in corners), min(p[1] for p in corners),
+                                     max(p[0] for p in corners), max(p[1] for p in corners)))
+                    lowest = None
+                    if plan.heights:
+                        ground_level = Grading(plan)
+                        lowest = lambda r: ground_level.lowest([(r[0], r[1]), (r[2], r[1]), (r[2], r[3]), (r[0], r[3])])  # noqa: E731
+                    dug = tunnels.plan(sites, plan, lowest, pads)
+                    doorways = {site.id: site.doors for site in sites if site.doors}
+            root['tunnels'] = len(dug)
             build_culverts(plan, root, origin)
             if plan.terraces:
                 build_terrace_works(plan, root, origin)
@@ -684,10 +715,11 @@ class MESH_OT_generate_city(bpy.types.Operator):
                                 addon_version(), root.name, self.interior_metadata, self.water)
             for index, lot in enumerate(plan.lots):
                 col = districts[lot.district]
-                params = building_recipe(lot.style, lot.width, lot.depth, lot.floors,
-                                         lot.seed, lot.damage, lot.interiors,
-                                         lot.condition, lot.party_walls,
-                                         basements=self.basements)
+                params = recipes.get(lot.id) or building_recipe(
+                    lot.style, lot.width, lot.depth, lot.floors, lot.seed, lot.damage, lot.interiors,
+                    lot.condition, lot.party_walls, basements=self.basements)
+                if lot.id in doorways:
+                    params['basement_doors'] = doorways[lot.id]
                 facts = {}
                 if self.detail == 'SHELLS':
                     if lot.condition == 'COLLAPSED':
@@ -736,6 +768,15 @@ class MESH_OT_generate_city(bpy.types.Operator):
                              params.get('structure', 'NONE'),
                              (params.get('footprint_shape', 'RECT'), params.get('footprint')))
                 context.window_manager.progress_update(index + 1)
+            if dug:
+                bored = MeshData()
+                for tunnel in dug:
+                    tunnels.build(bored, tunnel, MAT_WALLS, MAT_FLOOR)
+                tunnel_object = mesh_object_from_data('City_Tunnels', bored, root, merge=False)
+                add_material_slots(tunnel_object)
+                tunnel_object['surface_role'] = 'tunnels'
+                tunnel_object.location = origin
+                meta.add_tunnels(dug)
             ground_faces, _ = cutouts.cut(ground_vertices, ground_faces, openings)
             ground = mesh_object('City_Ground', ground_vertices, ground_faces,
                                  root, material('City_Ground', (.23, .21, .17, 1)))

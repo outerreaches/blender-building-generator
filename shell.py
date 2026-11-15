@@ -83,7 +83,7 @@ def build_building(params):
         fill_top = fill.bounds()[1][2]
         plan = layouts.above(plan, spec, fill_top)
     # A basement under a building whose ground floor is not buried.
-    under = basements.plan(spec, plan, params) if fill_top is None else None
+    under = basements.plan(spec, plan, params)
     mesh = MeshData()
     # Whole solids are either part of the shell level of detail or not; the
     # order they are built in is unchanged.
@@ -127,7 +127,7 @@ def build_building(params):
     if params.get('floor_rubble'):
         rubble.floor_debris(mesh, random.Random((spec.seed * 40503) ^ 0xDEB5), spec, field, plan)
     if under is not None:
-        _basement(mesh, spec, under)
+        _basement(mesh, spec, under, params.get('basement_doors') or ())
     built = Building(mesh, spec, plan, field, fill_top, _joined(outside), params)
     built.basement = under
     return built
@@ -159,17 +159,37 @@ class _Whole:
         return []
 
 
-def _basement(mesh, spec, under):
+def _basement(mesh, spec, under, doors=()):
     """Walls under the building's own down to the lowest floor, a floor slab
-    per storey (open over the stair from below), partitions and stairs."""
+    per storey (open over the stair from below), partitions and stairs.
+    ``doors``: doorways through the outer walls into tunnels, as (storey
+    index, side, centre along the wall in building coordinates, width,
+    height)."""
     whole = _Whole()
     x0, y0, x1, y1 = spec.levels[0].rect
     ix0, iy0, ix1, iy1 = under.rect
     low = under.depth
-    for a, b, c, d in ((x0, y0, x1, iy0), (x0, iy1, x1, y1), (x0, iy0, ix0, iy1), (ix1, iy0, x1, iy1)):
-        if c - a > 1e-6 and d - b > 1e-6:
-            # Up to the underside of the door thresholds, which reach that far below the floor.
-            solids.box(mesh, a, b, low, c, d, -dims.GROUND_SLAB, MAT_FLOOR)
+    top = -dims.GROUND_SLAB     # The underside of the door thresholds, which reach that far below the floor.
+    # Side: its box, and as a wall: outer origin, direction, thickness, extent along it, and
+    # where a building coordinate falls along it.
+    walls = {'front': ((x0, y0, x1, iy0), (x0, y0), (1.0, 0.0), iy0 - y0, 0.0, x1 - x0, lambda c: c - x0),
+             'back': ((x0, iy1, x1, y1), (x1, y1), (-1.0, 0.0), y1 - iy1, 0.0, x1 - x0, lambda c: x1 - c),
+             'left': ((x0, iy0, ix0, iy1), (x0, y1), (0.0, -1.0), ix0 - x0, y1 - iy1, y1 - iy0, lambda c: y1 - c),
+             'right': ((ix1, iy0, x1, iy1), (x1, y0), (0.0, 1.0), x1 - ix1, iy0 - y0, iy1 - y0, lambda c: c - y0)}
+    for side, (rect, origin, direction, thickness, ua, ub, along) in walls.items():
+        if thickness < 1e-6:
+            continue
+        openings = []
+        for index, door_side, centre, width, height in doors:
+            if door_side == side:
+                u, z = along(centre), under.z(index)
+                openings.append(solids.Opening.rect(u - width / 2, u + width / 2, z, z + height,
+                                                    MAT_DOOR_FRAME, 'door'))
+        if openings:
+            solids.wall_solid(mesh, origin, direction, thickness, ua, ub, low, [(ua, top), (ub, top)],
+                              sorted(openings, key=lambda o: o.u0), MAT_FLOOR)
+        else:
+            solids.box(mesh, rect[0], rect[1], low, rect[2], rect[3], top, MAT_FLOOR)
     for level in under.levels:
         z = under.z(level.index)
         slab(mesh, whole, under.rect, z - dims.SLAB, z, level.holes, clearance=0.0)

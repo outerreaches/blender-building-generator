@@ -156,6 +156,7 @@ class CityMetadata:
         self.markers = []
         self.under_nodes = []           # The underground graph: rooms below ground
         self.under_links = []           # and what joins them.
+        self.tunnels = []
 
     # -- transforms ------------------------------------------------------
     def lot_transform(self, lot):
@@ -247,6 +248,33 @@ class CityMetadata:
                 self.under_links.append({'a': upper, 'b': ident(stairs[floor]['name']),
                                          'kind': 'stair', 'width': 0.0,
                                          'position': point(centre(stairs[floor]))})
+
+    def add_tunnels(self, built):
+        """Tunnels between basements: a node each in the underground graph,
+        a ``tunnel`` link to the room at either end, and their own list
+        (where the game hangs doors)."""
+        from .tunnels import DOOR, HEIGHT, WIDTH
+        from .basement import LAYERS
+        ox, oy, oz = self.origin
+        point = self.space.point
+        for tunnel in built:
+            def at(along, z):
+                x, y = (along, tunnel.line) if tunnel.axis == 'x' else (tunnel.line, along)
+                return point((ox + x, oy + y, oz + z))
+            middle = at((tunnel.start + tunnel.end) / 2, (tunnel.za + tunnel.zb) / 2)
+            self.under_nodes.append({'id': tunnel.id, 'kind': 'tunnel', 'building': '', 'room': '',
+                                     'floor': tunnel.index, 'layer': LAYERS[tunnel.index],
+                                     'position': middle, 'area': _r(tunnel.length * WIDTH)})
+            ends = ((tunnel.a, tunnel.room_a, tunnel.start, tunnel.za), (tunnel.b, tunnel.room_b, tunnel.end, tunnel.zb))
+            for building, room, along, z in ends:
+                self.under_links.append({'a': f'{building}/{room}', 'b': tunnel.id, 'kind': 'tunnel',
+                                         'width': _r(DOOR[0]), 'position': at(along, z)})
+            self.tunnels.append({'id': tunnel.id, 'a': tunnel.a, 'b': tunnel.b, 'room_a': tunnel.room_a,
+                                 'room_b': tunnel.room_b, 'floor': tunnel.index,
+                                 'start': at(tunnel.start, tunnel.za), 'end': at(tunnel.end, tunnel.zb),
+                                 'width': _r(WIDTH), 'height': _r(HEIGHT), 'door_width': _r(DOOR[0]),
+                                 'door_height': _r(DOOR[1]), 'length': _r(tunnel.length),
+                                 'under_street': tunnel.street})
 
     def _interior(self, facts):
         """Rooms, lifts and railings in building space."""
@@ -530,6 +558,7 @@ class CityMetadata:
                      'plateau_height': settings.plateau_height, 'podiums': settings.podiums,
                      'highway': settings.highway},
             'underground': {'nodes': self.under_nodes, 'links': self.under_links},
+            'tunnels': self.tunnels,
             'districts': [{'id': loc.id, 'role': loc.role, 'style': loc.style,
                            'position': node_point(loc.node)} for loc in plan.locations],
             'roads': roads,

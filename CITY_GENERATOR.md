@@ -56,6 +56,7 @@ The original single-building and bulk operators remain available. Architecture u
 | Worn Lane Markings | Optional broken paint on highway/arterial/collector roads |
 | Show Driving Route Guides | Colored curves, excluded from FBX export |
 | Basements | A storey below ground (two under downtown towers) under many buildings, reached by their own stair (default on) |
+| Tunnels | Tunnels between neighbouring basements, under open ground and streets (default on, with Basements) |
 | District Ground | Open ground by district: paved downtown with strips of dirt and grass, patchier further out, grass round apartment blocks, gravel in industry, dirt round houses and in the wasteland (default on; off: one material) |
 
 | Starting layout | Core radius | Core density | Outskirts density | Local roads |

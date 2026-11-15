@@ -128,6 +128,8 @@ def plan(spec, building_plan, params):
     storeys = int(params.get('basement', 0) or 0)
     if storeys <= 0 or getattr(spec, 'compound', False) or not building_plan.levels:
         return None
+    if params.get('interior_fill', 'NONE') in ('FILLED', 'PARTIAL'):
+        return None                     # The ground floor is buried.
     ground = building_plan.levels[0]
     stair = next((room for room in ground.rooms if room.kind == 'stair'), None)
     if ground.index != 0 or ground.stair is None or stair is None or not stair.stair:

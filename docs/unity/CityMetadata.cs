@@ -50,6 +50,7 @@ namespace Ares.CityGen
         public string[] missing_objects;
         public Delivery delivery;       // What this export wrote for the engine (v0.26).
         public Underground underground; // Rooms below ground and what joins them (v0.28).
+        public Tunnel[] tunnels;        // Between basements (v0.29); also nodes of the graph.
     }
 
     // A graph for reachability below ground. Node ids are "<building object>/<room name>";
@@ -72,6 +73,22 @@ namespace Ares.CityGen
         public string layer;            // basement_1, basement_2, surface.
         public float[] position;        // City space, at floor level.
         public float area;              // Square metres.
+    }
+
+    // A straight tunnel from a doorway in building `a`'s basement wall to one
+    // in `b`'s. `start` and `end` are at floor level in the middle of each
+    // doorway, in city space.
+    [Serializable]
+    public class Tunnel
+    {
+        public string id;               // Its node in the underground graph.
+        public string a, b;             // Building objects.
+        public string room_a, room_b;   // The rooms the doorways open into.
+        public int floor;               // -1 or -2.
+        public float[] start, end;
+        public float width, height, length;
+        public float door_width, door_height;
+        public bool under_street;
     }
 
     [Serializable]

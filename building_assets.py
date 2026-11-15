@@ -41,6 +41,41 @@ SITE_MATERIALS = (
 )
 
 
+# Underground slots, in meshdata.U_* order. City_* names: the game's material
+# library makes each from a texture that looks the part.
+UNDERGROUND_MATERIALS = (
+    ('City_Tunnel_Walls', (.55, .53, .50, 1)),        # Cast concrete: basement tunnels and passages.
+    ('City_Tunnel_Floor', (.42, .41, .39, 1)),
+    ('City_Tunnel_Ceiling', (.50, .49, .47, 1)),
+    ('City_Sewer_Walls', (.42, .30, .24, 1)),         # Old brick.
+    ('City_Sewer_Walkway', (.36, .35, .33, 1)),
+    ('City_Sewer_Channel', (.16, .17, .12, 1)),       # Wet sludge along the trench.
+    ('City_Sewer_Shaft', (.40, .39, .37, 1)),         # Precast rings.
+    ('City_Sewer_Collapse', (.35, .32, .28, 1)),
+    ('City_Subway_Walls', (.33, .33, .34, 1)),        # Dark tunnel lining.
+    ('City_Subway_TrackBed', (.30, .27, .24, 1)),     # Ballast.
+    ('City_Subway_Walkway', (.45, .44, .42, 1)),
+    ('City_Station_Walls', (.70, .68, .62, 1)),       # Tiled walls.
+    ('City_Station_Floor', (.52, .50, .46, 1)),       # Terrazzo.
+    ('City_Station_Ceiling', (.60, .60, .58, 1)),
+    ('City_Station_Platform', (.48, .47, .44, 1)),
+    ('City_Station_PlatformEdge', (.78, .62, .16, 1)),  # The yellow strip along a platform's edge.
+    ('City_Station_Stairs', (.44, .43, .40, 1)),
+    ('City_Station_Tile', (.82, .82, .80, 1)),        # White tiles: bathrooms.
+    ('City_Station_Booth', (.36, .37, .38, 1)),       # Ticket booths: painted steel.
+    ('City_Station_Entrance', (.50, .48, .44, 1)),    # Stairwells up to the street, their parapets.
+    ('City_Service_Walls', (.58, .58, .56, 1)),       # Painted block: utility rooms and hallways.
+    ('City_Service_Floor', (.40, .40, .39, 1)),
+)
+
+
+def add_underground_slots(obj, used):
+    """Slots for an underground object: those of UNDERGROUND_MATERIALS its
+    faces use (``MeshData.compact_materials``), in that order."""
+    for index in used:
+        obj.data.materials.append(material(*UNDERGROUND_MATERIALS[index]))
+
+
 def material(name, color):
     mat = bpy.data.materials.get(name)
     if mat is None:

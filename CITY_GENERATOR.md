@@ -58,7 +58,7 @@ The original single-building and bulk operators remain available. Architecture u
 | Basements | A storey below ground (two under downtown towers) under many buildings, reached by their own stair (default on) |
 | Tunnels | Tunnels between neighbouring basements, under open ground and streets (default on, with Basements) |
 | Sewers | Walkable sewers under the streets: trunks, crouch-height laterals, a chamber and a manhole at every junction, collapses, breaches into deep basements (default on) |
-| Subway | A line under the arterials through the centre: stations with platforms, a ticket hall and street entrances, utility branches with exits; the sewers meet the halls (default on) |
+| Subway | A line under the arterials through the centre, curving round its turns: side or island stations with a ticket hall (fare lines, booths, bathrooms) and entrances in the open ground, hallways to utility rooms, emergency exits and the sewer above; the sewers end beside the halls (default on) |
 | District Ground | Open ground by district: paved downtown with strips of dirt and grass, patchier further out, grass round apartment blocks, gravel in industry, dirt round houses and in the wasteland (default on; off: one material) |
 
 | Starting layout | Core radius | Core density | Outskirts density | Local roads |
@@ -626,9 +626,9 @@ they are meant to:
 | --- | --- | --- |
 | First basement storey, tunnels off it | about 3.2 m | rooms 3.2 m a storey; tunnels 2 m wide, 2.2 m high |
 | Sewer laterals | 5.5 m | 1.6 m octagon (a crouch), trench 0.3 by 0.12 m |
-| Second basement storey, subway ticket halls | 6.4 m | halls 28 m by 15 m, 3.5 m high |
+| Second basement storey, subway ticket halls | 6.4 m | halls 40 m by 20 m or more, 3.5 m high |
 | Sewer trunks | 7 m | 3 m wide, 2.6 m high, walkways either side of a 0.6 by 0.3 m trench |
-| Subway line and stations | 14 m (track bed) | line 8.6 m wide, 5 m high; stations 46 m long, 5.5 m high |
+| Subway line and stations | 14 m (track bed) | line 8.6 m wide, 5 m high, curves of 84 m (56 m) radius; platforms 46 m long, 5.5 m high |
 
 - **Basements** (v0.28). A storey below ground under many buildings,
   reached by the building's own stair carried on down: under 50-60% of
@@ -660,24 +660,53 @@ they are meant to:
   from the first storey of an old town or brutalist building a level
   passage to a ladder shaft beside the trunk or lateral, opening into it at
   its floor (a drop, v0.31).
-- **Subway** (v0.31). One line under the arterials, from a far district
-  through the centre to another on the other side, the track bed 14 m
-  under the street and following its grade, its upper corners vaulted, an
-  evacuation walkway along one side stepping down to the track bed at both
-  ends; a turning box where it turns at a junction. Stations under
-  junctions on straight arterial runs (every four junctions or so, every
-  two downtown, and at the ends): side platforms either side of the tracks
-  with steps at their ends down to the track bed, a ticket hall above in
-  place of the junction's sewer chamber (the sewers of that junction end in
-  it), a stair from each platform up into the hall, and up to two street
-  entrances: stairwells from the hall's ends up into the kerb lanes (the
-  footways are too narrow), their openings cut in the street with a parapet
-  round them. Second basement storeys beside a hall get a doorway into it;
-  the first storeys of downtown, old town and brutalist buildings a ladder
-  drop. Midway between stations a utility branch leaves the walkway: a
-  short corridor to a room, half of them with a ladder shaft up to a hatch
-  in the footway (listed with the manholes as `exit`). One object,
-  `City_Subway`. A second line with a transfer station is next.
+- **Subway** (v0.31, reworked in v0.32). One line under the arterials
+  (collectors and local streets where it must), from a far district through the centre to
+  another on the other side, the track bed 14 m under the street and
+  following its grade, its upper corners vaulted, an evacuation walkway
+  along its left side. Where it turns at a junction it curves round under
+  the corner block, 84 m in radius, or 56 m where turns come two junctions
+  apart (never closer); a city whose streets offer no route a train could
+  take gets no line. Its two tracks are 3.8 m apart (`tracks` in the
+  metadata).
+  - **Stations** under junctions on straight runs, clear of the curves
+    (every four junctions or so, every two downtown, and at the ends). Side
+    platforms 5 m wide either side of the tracks, the stairs against their
+    back walls; or, for half of the stations between the ends, an island
+    platform 8 m wide between the tracks, which part round it over 30 m at
+    each end. A platform's edge over a track is painted (a material of its
+    own); steps at its ends lead down to the track bed.
+  - **Ticket hall** above the platforms, 40 m long and at least 20 m wide, a
+    stair up into it from each platform (two from an island). Across each
+    end with an entrance, a fare line: a ticket booth in the middle, its
+    window towards the entrance and its door behind, a gate either side and
+    a fence on to the walls (the fence is listed for the game, not
+    modelled). Inside the fare lines two bathrooms against a side wall, a
+    door each and two stalls; their toilets and sinks are listed.
+  - **Entrances**, up to two: stairwells from the hall's ends rising along
+    the street into the open ground between the footway and the buildings
+    (never on the street or in a lot's yard, at least 1.8 m from any
+    building, never on a site's pad), the ground cut round their opening and
+    a parapet round it. A station with no such ground gets them in the
+    footway, 1.4 m wide on a 2 m footway.
+  - **The sewers** of a station's junction each end in a chamber of their
+    own outside the hall. A seeded share of those (40% by two service rooms,
+    35% by one, 25% none) are joined to the hall through a service door, the
+    last corridor ramping to the chamber's floor.
+  - Second basement storeys beside a hall get a doorway into it; the first
+    storeys of downtown, old town and brutalist buildings a ladder drop.
+  - **Hallways** leave the walkway through the line's wall at seeded
+    intervals (about 70 m) along its straights: to a utility room under the
+    footway (half with a ladder shaft up to a hatch in the footway), to an
+    emergency exit's small room and ladder shaft up to a hatch (both listed
+    with the manholes as `exit`), or to a ladder shaft beside the line up to
+    a passage over its roof into the trunk sewer running above it.
+
+  One object, `City_Subway`. A second line with a transfer station is next.
+- **Materials.** Tunnels, sewers, the subway, stations and service rooms
+  carry materials of their own (`City_Tunnel_*`, `City_Sewer_*`,
+  `City_Subway_*`, `City_Station_*`, `City_Service_*`; each object has the
+  slots it uses), so a game can dress each.
 
 Everything below ground is one graph in the metadata (`underground`), so a
 game can check what is reachable from the street, and how far.
@@ -827,12 +856,12 @@ the same way.
 | `railings` (per building) | Base lines on the walking surface (flat points) with a rail height: `stair` handrails along the well side of each switchback, `guard` rails at the stair opening of the top floor, `ramp` rails along parking ramps |
 | `transit_stops` | Shelters and stops: object, variant, road edge |
 | `markers` | Placements for game assets: every small prop (`bench`, `lamp`, `bollard`, `gas_pump`, `dumpster`, `table`, `booth`, `play_structure`, `swings`, `goal`, `trash_bin`, `air_pump`, `hydrant`, `cart_corral`, `tyre_stack`, `speaker_post`; `modelled` says whether the city mesh has it), `tree` spots, `flagpole` plinths, `fence` lines (post line points and a suggested height) and `parking_stall`s (centre and nose-in direction, for wrecked cars), fixtures inside buildings (`reception_desk`, `shop_counter`, `service_counter`, `bar_counter`, facing the customers, and cinema `seat`s on their tier, facing the screen; with `building` and `floor`; never modelled), and `water` surfaces (centre at the surface, `shape`, `size` = width, depth and water depth; modelled only with **Water** on). Each has its site id and, where it applies, `size` (width, depth, height), `height`, `scale` (trees), `umbrella` or `barrier` |
-| `underground` | Everything below ground as one graph (v0.28+). `nodes`: id, kind (a basement room's kind, `surface` for a building's ground floor, `tunnel`, `chamber`, `sewer`, `street` for a manhole's or entrance's top, `station_hall`, `platform`, `subway` for the line between stations, `utility`), building and room, floor, layer, position, area, `depth` (links to the nearest street-level node, -1 if none) and `exits` (street-level nodes in its connected part). Node ids of rooms are `<building object>/<room name>`. `links`: a, b, kind (`door`, `open`, `stair`, `tunnel`, `sewer`, `shaft`, `breach`, `subway`), width, height, position, and `bridge` (taking it away splits the graph); a sewer link's `clearance` (`walk` or `crouch`), a shaft's `open`, a breach's or access's `ladder` |
+| `underground` | Everything below ground as one graph (v0.28+). `nodes`: id, kind (a basement room's kind, `surface` for a building's ground floor, `tunnel`, `chamber`, `sewer`, `street` for a manhole's or entrance's top, `station_hall`, `platform`, `subway` for the line between stations, `utility`, `bathroom`, `service` for the rooms between a sewer and a hall), building and room, floor, layer, position, area, `depth` (links to the nearest street-level node, -1 if none) and `exits` (street-level nodes in its connected part). Node ids of rooms are `<building object>/<room name>`. `links`: a, b, kind (`door`, `open`, `stair`, `tunnel`, `sewer`, `shaft`, `breach`, `subway`), width, height, position, and `bridge` (taking it away splits the graph); a sewer link's `clearance` (`walk` or `crouch`), a shaft's `open`, a breach's or access's `ladder` |
 | `tunnels` | Each tunnel: its two buildings and rooms, storey, `start` and `end` at floor level in the middle of each doorway, sizes and whether it passes under a street |
 | `sewers` | Each section: kind (`trunk`, `lateral`), its two chambers, `start`, `end`, `points` (the walkways' level along its centre line), sizes, `profile` (`octagon`), trench width and depth, `clearance`, `condition` (`clear` or `collapsed`, with `plug_start` and `plug_end`) |
 | `manholes` | Each shaft's top (the middle of its rim, the lid's seat) and bottom, `size` across the flats, `shape`, depth, `open`, `kind` (`sewer` or `exit`) and its chamber and street nodes |
 | `breaches` | Passages from basements to the sewers: building, room, storey, sewer node, ends, sizes; for a drop the ladder's `ladder_bottom`, `ladder_top` and `ladder_facing` (towards the sewer) |
-| `subway` | `lines` (track bed centre `points` through each junction of the path, stations in order, sizes); `stations` (track-bed position, forward, sizes, hall floor, `stairs` as foot and head per stair, `entrances` with their foot and head, `accesses` with drops' ladders); `utilities` (room position and its exit's id) |
+| `subway` | `lines` (track bed centre `points` end to end round the curves, `tracks` (the two tracks' centre lines, parting round island platforms), `curves` (radius, centre, length), stations in order, sizes); `stations` (`kind` `side` or `island`, track-bed position, forward, sizes, hall floor, `stairs` as foot and head per stair, `entrances` with their foot, head, `place`, `facing` and `opening`, `accesses` with drops' ladders, the fare lines' `fences`, `gates` and `booths`, `rooms` (bathrooms), `fixtures` (toilets, sinks), `links` (service rooms from a sewer chamber)); `utilities` (`kind` `utility` or `exit`, room position and size, its exit's id); `risers` (ladders from the line up to the sewer: bottom, top, facing, the sewer node) |
 | `counts` | Totals per section and per marker type |
 
 Objects also carry custom properties that the FBX passes to Unity as user

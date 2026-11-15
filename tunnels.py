@@ -270,11 +270,18 @@ def plan(sites, city, ground=None, avoid=(), below=()):
     return built
 
 
-def build(mesh, tunnel, material, floor_material):
+def build(mesh, tunnel, material=None, floor_material=None, ceiling_material=None):
     """A tunnel's solids, in world coordinates: floor, two walls and roof from
     wall face to wall face, following the floor's slope. Nothing for a
-    doorway straight through two walls that touch."""
+    doorway straight through two walls that touch. Materials: the tunnel's
+    own (meshdata.U_TUNNEL_*) unless given; the roof takes the floor's when
+    only those two are."""
     from . import solids
+    from .meshdata import U_TUNNEL_CEILING, U_TUNNEL_FLOOR, U_TUNNEL_WALL
+    if material is None:
+        material, floor_material, ceiling_material = U_TUNNEL_WALL, U_TUNNEL_FLOOR, U_TUNNEL_CEILING
+    if ceiling_material is None:
+        ceiling_material = floor_material
     if tunnel.length < .05:
         return
     half = WIDTH / 2
@@ -296,4 +303,4 @@ def build(mesh, tunnel, material, floor_material):
     piece(line - half - SHELL, line + half + SHELL, -SHELL, 0.0, floor_material)
     piece(line - half - SHELL, line - half, 0.0, HEIGHT, material)
     piece(line + half, line + half + SHELL, 0.0, HEIGHT, material)
-    piece(line - half - SHELL, line + half + SHELL, HEIGHT, HEIGHT + SHELL, floor_material)
+    piece(line - half - SHELL, line + half + SHELL, HEIGHT, HEIGHT + SHELL, ceiling_material)

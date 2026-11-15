@@ -49,6 +49,11 @@ OPENING = {'trunk': 2.2, 'lateral': 1.2}  # Height of a breach's gap in a sewer'
 CLEAR = .5                 # Least distance to a basement.
 TRUNK_TIERS = ('ARTERIAL', 'COLLECTOR')
 PAVING = (0, 1)            # Street mesh materials a manhole may cut: road, footway.
+LINK_KINDS = (('rooms', .4), ('room', .35), ('none', .25))   # How a sewer ending by a station's hall reaches it.
+LINK_ROOM = (3.0, 3.0, 2.6)  # A service room on the way: clear length (along the link), width, height.
+LINK_SHELL = .25
+LINK_CORRIDOR = 2.0        # Between two service rooms.
+LINK_DOOR = (1.2, 2.1)     # A service doorway.
 
 
 @dataclass
@@ -62,7 +67,8 @@ class Chamber:
     doors: list = field(default_factory=list)    # (side, kind); side '-x', '+x', '-y', '+y'.
     manhole: object = None
     extent: tuple = None  # Half sizes (x, y) when not a square of its kind's size.
-    hall: bool = False    # A subway station's hall standing in for it (the subway builds it).
+    hall: bool = False    # (Before v0.32: a subway hall standing in for it. Always False now.)
+    station: str = ''     # The subway station whose hall it ends beside, if any.
 
     def half(self, axis):
         if self.extent is not None:
@@ -176,11 +182,54 @@ class Manhole:
 
 
 @dataclass
+class ServiceRoom:
+    """A room between a sewer's end chamber and a station's hall: clear
+    half sizes about (x, y), doors [(side, world coordinate along it)]."""
+    id: str
+    x: float
+    y: float
+    hx: float
+    hy: float
+    floor: float
+    height: float
+    doors: list = field(default_factory=list)
+
+    def rect(self, grow=0.0):
+        g = LINK_SHELL + grow
+        return (self.x - self.hx - g, self.y - self.hy - g, self.x + self.hx + g, self.y + self.hy + g)
+
+
+@dataclass
+class Link:
+    """Service rooms and corridors from a sewer's end chamber into a
+    station's hall, through a doorway in the hall's ``wall`` ('a+', 'a-',
+    'c+', 'c-') at world coordinate ``door`` along it."""
+    id: str
+    station: str
+    chamber: str
+    kind: str             # 'rooms' (two) or 'room' (one).
+    wall: str
+    door: float
+    coordinate: float = 0.0   # The doorway along the hall's wall, in hall coordinates.
+    toward: str = ''      # The chamber's wall it leaves by: '-x', '+x', '-y', '+y'.
+    rooms: list = field(default_factory=list)
+    corridors: list = field(default_factory=list)
+
+    def solids(self):
+        from . import tunnels
+        found = [(r.rect(), r.floor - LINK_SHELL, r.floor + r.height + LINK_SHELL) for r in self.rooms]
+        found += [(c.rect(), min(c.za, c.zb) - tunnels.SHELL, max(c.za, c.zb) + tunnels.HEIGHT + tunnels.SHELL)
+                  for c in self.corridors]
+        return found
+
+
+@dataclass
 class Network:
     chambers: dict
     sewers: list
     manholes: list
     breaches: list = field(default_factory=list)
+    links: list = field(default_factory=list)
 
     def solids(self):
         """World boxes with their height ranges that nothing else may enter:
@@ -193,6 +242,8 @@ class Network:
             found.append((sewer.rect(), *sewer.span()))
         for manhole in self.manholes:
             found.append((manhole.rect(), manhole.base, manhole.rim))
+        for link in self.links:
+            found += link.solids()
         return found
 
     def openings(self):
@@ -433,7 +484,9 @@ def plan(city, surface=None, sites=(), street=None, avoid=(), halls=None, below=
         return any(_overlap(rect, box) and low < top + CLEAR and bottom - CLEAR < high
                    for box, bottom, top in boxes)
 
-    # Chambers: under every junction a sewer reaches, trunk-sized where a trunk does.
+    # Chambers: under every junction a sewer reaches, trunk-sized where a trunk does; none where a station's
+    # hall stands (the sewers end short of it, each in a chamber of its own).
+    stations = halls or {}
     kinds = {}
     for key, kind in edges.items():
         for node in key:
@@ -441,21 +494,26 @@ def plan(city, surface=None, sites=(), street=None, avoid=(), halls=None, below=
                 kinds[node] = kind
     chambers = {}
     for node, kind in sorted(kinds.items()):
-        x, y = node[0] * size, node[1] * size
-        if halls and node in halls:
-            ident, hx, hy, floor, ex, ey = halls[node]
-            chambers[node] = Chamber(ident, node, hx, hy, kind, floor, extent=(ex, ey), hall=True)
+        if node in stations:
             continue
+        x, y = node[0] * size, node[1] * size
         depth = (TRUNK if kind == 'trunk' else LATERAL)[2]
         chamber = Chamber(f'sewer_c_{_key(node)}', node, x, y, kind, level(x, y) - depth)
         if blocked(chamber.rect(CLEAR), chamber.floor - SHELL, chamber.top):
             continue
         chambers[node] = chamber
+    links = []
+    ends = {}
+    for (a, b), kind in sorted(edges.items()):
+        for this, other in ((a, b), (b, a)):
+            if this in stations and (this, other) not in ends:
+                ends[(this, other)] = _station_end(stations[this], this, other, kind, size, seed, level, blocked, links)
     sewers = []
     for (a, b), kind in sorted(edges.items()):
-        if a not in chambers or b not in chambers:
+        ca = ends.get((a, b)) if a in stations else chambers.get(a)
+        cb = ends.get((b, a)) if b in stations else chambers.get(b)
+        if ca is None or cb is None:
             continue
-        ca, cb = chambers[a], chambers[b]
         axis = 'x' if a[1] == b[1] else 'y'
         k = 0 if axis == 'x' else 1
         if (a[k] > b[k]):
@@ -466,7 +524,7 @@ def plan(city, surface=None, sites=(), street=None, avoid=(), halls=None, below=
         if end - start < 2.0:
             continue
         own = (TRUNK if kind == 'trunk' else LATERAL)[2]
-        # At either end the floor ramps (1 in 8) to the chamber's or hall's own depth.
+        # At either end the floor ramps (1 in 8) to the chamber's own depth.
         targets = [(level(c.x, c.y) - c.floor, start if c is ca else end, 1 if c is ca else -1) for c in (ca, cb)]
         ramps = [(t, at, sense, abs(t - own) / SLOPE) for t, at, sense in targets if abs(t - own) > 1e-6]
 
@@ -480,14 +538,21 @@ def plan(city, surface=None, sites=(), street=None, avoid=(), halls=None, below=
         marks = [start + TRENCH_END, end - TRENCH_END] + [at + sense * run for _, at, sense, run in ramps
                                                            if 0 < run < end - start]
         sections = _sections(start, end, line, axis, depth_at, level, ca.floor, cb.floor, False, False, marks)
-        sewer = Sewer(f'sewer_{_key(ca.node)}__{_key(cb.node)}', ca.id, cb.id, kind, axis, line,
-                      start, end, sections)
+        sewer = Sewer(f'sewer_{_key(ca.node)}__{_key(cb.node)}', ca.id, cb.id, kind, axis, line, start, end, sections)
         if blocked(sewer.rect(CLEAR), *sewer.span()):
             continue
         sewers.append(sewer)
+        for c in (ca, cb):
+            chambers.setdefault(('end', c.id), c)
     # Chambers no sewer reaches any more are not built.
     used = {s.a for s in sewers} | {s.b for s in sewers}
     chambers = {c.id: c for c in chambers.values() if c.id in used}
+    # Links into halls whose chamber no sewer reaches are not built either.
+    links = [link for link in links if link.chamber in chambers]
+    for link in links:
+        chambers[link.chamber].doors.append((link.toward, 'service'))
+        station = next(st for st in stations.values() if st.id == link.station)
+        station.take(*station.wall_spot(link.wall, link.coordinate))
     for sewer in sewers:
         ca, cb = chambers[sewer.a], chambers[sewer.b]
         sign = '+x' if sewer.axis == 'x' else '+y'
@@ -532,7 +597,91 @@ def plan(city, surface=None, sites=(), street=None, avoid=(), halls=None, below=
             chamber.manhole = manhole
             manholes.append(manhole)
             break
-    return Network(chambers, sewers, manholes)
+    return Network(chambers, sewers, manholes, links=links)
+
+
+def _station_end(station, node, other, kind, size, seed, level, blocked, links):
+    """The chamber a sewer ends in beside a station's hall, on the street
+    towards ``other``, and the service rooms joining it to the hall (added
+    to ``links``); None if it cannot be built."""
+    from . import tunnels
+    d = (other[0] - node[0], other[1] - node[1])
+    axis = 'x' if d[1] == 0 else 'y'
+    sign = d[0] + d[1]
+    x0, y0 = node[0] * size, node[1] * size
+    hall_l, hall_shell = 20.0, .25
+    try:
+        from .subway import HALL, HALL_SHELL
+        hall_l, hall_shell = HALL[0], HALL_SHELL
+    except ImportError:
+        pass
+    lengthwise = axis == station.axis
+    face = (hall_l if lengthwise else station.side_half) + hall_shell
+    wall = ('a' if lengthwise else 'c') + ('+' if sign > 0 else '-')
+    depth = (TRUNK if kind == 'trunk' else LATERAL)[2]
+    half = CHAMBER[kind] / 2
+    ident = f'sewer_c_{_key(node)}_{"xy"[axis == "y"]}{"+" if sign > 0 else "-"}'
+    pick = stream(seed, 'station-link', ident).random()
+    total, variant = 0.0, 'none'
+    for name, share in LINK_KINDS:
+        total += share
+        if pick < total:
+            variant = name
+            break
+    if variant != 'none' and not station.clear(*station.wall_spot(wall, 0.0)):
+        variant = 'none'
+
+    def at(distance):
+        return (x0 + sign * distance, y0) if axis == 'x' else (x0, y0 + sign * distance)
+
+    toward = ('-' if sign > 0 else '+') + axis
+    line = y0 if axis == 'x' else x0
+    length, width, height = LINK_ROOM
+    for attempt in ((variant, 'none') if variant != 'none' else ('none',)):
+        # Outwards from the hall's wall: rooms with corridors between them, a ramp, the chamber.
+        count = {'rooms': 2, 'room': 1, 'none': 0}[attempt]
+        reach, rooms, spans = face, [], []
+        for k in range(count):
+            if k:
+                spans.append((reach, reach + LINK_CORRIDOR))
+                reach += LINK_CORRIDOR
+            cx, cy = at(reach + LINK_SHELL + length / 2)
+            hx, hy = (length / 2, width / 2) if axis == 'x' else (width / 2, length / 2)
+            rooms.append(ServiceRoom(f'{ident}_room_{k}', cx, cy, hx, hy, station.hall_floor, height,
+                                     [(toward, line), (('+' if sign > 0 else '-') + axis, line)]))
+            reach += length + 2 * LINK_SHELL
+        if count:
+            # The last corridor ramps, 1 in 8 at most, from the rooms' floor to the chamber's.
+            run = 2.0
+            for _ in range(4):
+                cx, cy = at(reach + run + SHELL + half)
+                need = max(2.0, abs(level(cx, cy) - depth - station.hall_floor) / tunnels.SLOPE + .2)
+                if need <= run + 1e-6:
+                    break
+                run = need
+            spans.append((reach, reach + run))
+        else:
+            cx, cy = at(reach + CLEAR + SHELL + half)
+        chamber = Chamber(ident, node, cx, cy, kind, level(cx, cy) - depth, station=station.id)
+        corridors = []
+        base = x0 if axis == 'x' else y0
+        for j, (d0, d1) in enumerate(spans):
+            last = j == len(spans) - 1
+            ends = sorted((base + sign * d0, base + sign * d1))
+            z_near, z_far = station.hall_floor, chamber.floor if last else station.hall_floor
+            za, zb = (z_near, z_far) if sign > 0 else (z_far, z_near)
+            corridors.append(tunnels.Tunnel(f'{ident}_corridor_{j}', rooms[j].id, ident if last else rooms[j + 1].id,
+                                            -2, axis, line, ends[0], ends[1], za, zb, '', '', True))
+        parts = [(chamber.rect(CLEAR), chamber.floor - SHELL, chamber.top)]
+        parts += [(r.rect(CLEAR), r.floor - LINK_SHELL, r.floor + r.height + LINK_SHELL) for r in rooms]
+        parts += [(c.rect(), min(c.za, c.zb) - tunnels.SHELL, max(c.za, c.zb) + tunnels.HEIGHT + tunnels.SHELL)
+                  for c in corridors]
+        if any(blocked(*part) for part in parts):
+            continue
+        if count:
+            links.append(Link(f'{ident}_link', station.id, ident, attempt, wall, line, 0.0, toward, rooms, corridors))
+        return chamber
+    return None
 
 
 def breach(network, sites, seed, avoid=()):
@@ -700,22 +849,23 @@ def drop_shaft(mesh, stretch, along, side, drop, opening, material, floor_materi
     box(lo, hi, a - half - t, a + half + t, top - t, top, floor_material)
 
 
-def build(mesh, network, material, floor_material, plug_material=None):
-    """The network's solids in world coordinates."""
+def build(mesh, network):
+    """The network's solids in world coordinates, in the sewers' materials
+    (meshdata.U_SEWER_*; breach passages in the tunnels')."""
     from . import tunnels
-    plug_material = floor_material if plug_material is None else plug_material
+    from .meshdata import U_SEWER_SHAFT, U_SEWER_WALKWAY, U_SEWER_WALL
     for chamber in network.chambers.values():
         if not chamber.hall:
-            _chamber(mesh, chamber, material, floor_material, floor_material)
+            _chamber(mesh, chamber, U_SEWER_WALL, U_SEWER_WALKWAY, U_SEWER_WALKWAY)
     for sewer in network.sewers:
-        _sewer(mesh, sewer, material, floor_material, plug_material)
+        _sewer(mesh, sewer)
     for item in network.breaches:
-        tunnels.build(mesh, item.tunnel, material, floor_material)
+        tunnels.build(mesh, item.tunnel)
         if item.drop is not None:
             sewer = next(x for x in network.sewers if x.id == item.sewer)
-            _drop(mesh, sewer, item, material, floor_material)
+            _drop(mesh, sewer, item, U_SEWER_SHAFT, U_SEWER_WALKWAY)
     for manhole in network.manholes:
-        _shaft(mesh, manhole, material)
+        _shaft(mesh, manhole, U_SEWER_SHAFT)
 
 
 def _volume(first, second):
@@ -779,26 +929,30 @@ def _chamber(mesh, chamber, material, floor_material, frame):
     for side, (origin, direction, length, centre) in walls.items():
         kinds = [kind for door_side, kind in chamber.doors if door_side == side]
         if kinds:
-            kind = 'trunk' if 'trunk' in kinds else 'lateral'
+            if 'service' in kinds:
+                opening = solids.Opening.rect(centre - LINK_DOOR[0] / 2, centre + LINK_DOOR[0] / 2, f,
+                                              f + LINK_DOOR[1], frame, 'door')
+            else:
+                opening = _doorway('trunk' if 'trunk' in kinds else 'lateral', centre, f, frame)
             solids.wall_solid(mesh, origin, direction, s, 0.0, length, f, [(0.0, top), (length, top)],
-                              [_doorway(kind, centre, f, frame)], material)
+                              [opening], material)
         else:
             b = boxes[side]
             solids.box(mesh, b[0], b[1], f, b[2], b[3], top, material)
     # The roof, round the shaft's octagonal opening if it has a manhole.
     m = chamber.manhole
     if m is None:
-        solids.box(mesh, x0, y0, top, x1, y1, top + s, floor_material)
+        solids.box(mesh, x0, y0, top, x1, y1, top + s, material)
         return
     c = SHAFT / 2
     hx0, hy0, hx1, hy1 = m.x - c, m.y - c, m.x + c, m.y + c
-    solids.box(mesh, x0, y0, top, x1, hy0, top + s, floor_material)
-    solids.box(mesh, x0, hy1, top, x1, y1, top + s, floor_material)
-    solids.box(mesh, x0, hy0, top, hx0, hy1, top + s, floor_material)
-    solids.box(mesh, hx1, hy0, top, x1, hy1, top + s, floor_material)
+    solids.box(mesh, x0, y0, top, x1, hy0, top + s, material)
+    solids.box(mesh, x0, hy1, top, x1, y1, top + s, material)
+    solids.box(mesh, x0, hy0, top, hx0, hy1, top + s, material)
+    solids.box(mesh, hx1, hy0, top, x1, hy1, top + s, material)
     ring = octagon(m.x, m.y, SHAFT)
     for k, corner in zip((0, 2, 4, 6), ((hx1, hy1), (hx0, hy1), (hx0, hy0), (hx1, hy0))):
-        _flat(mesh, [ring[k], corner, ring[k + 1]], top, top + s, floor_material)
+        _flat(mesh, [ring[k], corner, ring[k + 1]], top, top + s, material)
 
 
 def _shaft(mesh, manhole, material):
@@ -852,8 +1006,10 @@ def _gap_pieces(kind, sign, roof=None):
     return dropped, [p for p in (floor, lintel) if p]
 
 
-def _sewer(mesh, sewer, material, floor_material, plug_material):
+def _sewer(mesh, sewer):
     from . import tunnels
+    from .meshdata import U_SEWER_CHANNEL, U_SEWER_COLLAPSE, U_SEWER_WALKWAY, U_SEWER_WALL
+    material, floor_material, plug_material = U_SEWER_WALL, U_SEWER_WALKWAY, U_SEWER_COLLAPSE
     kind = sewer.kind
     full, plain = _ring(section(kind), SHELL), _ring(section(kind, trench=False), SHELL)
     tw, td = TRENCH[kind]
@@ -887,7 +1043,8 @@ def _sewer(mesh, sewer, material, floor_material, plug_material):
                 extra += added
         for quad in quads:
             on_floor = quad[0][1] <= 1e-6 and quad[1][1] <= 1e-6
-            extrude(quad, a0, a1, floor_material if on_floor else material)
+            in_trench = on_floor and min(quad[0][1], quad[1][1]) < -1e-6
+            extrude(quad, a0, a1, U_SEWER_CHANNEL if in_trench else floor_material if on_floor else material)
         for polygon in extra:
             extrude(polygon, a0, a1, floor_material)
         if sewer.plug is not None and sewer.plug[0] - 1e-6 <= a0 and a1 <= sewer.plug[1] + 1e-6:

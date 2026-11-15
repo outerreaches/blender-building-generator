@@ -1,6 +1,61 @@
 # Changelog
 
-## v0.31.0: Subway
+## v0.32.0: Subway, part two
+
+- **Curves.** The line no longer turns in a square box: where it turns at a
+  junction it curves round under the corner block, 84 m in radius (56 m
+  where turns come two junctions apart), so a train could take it. Turns are
+  at least two junctions apart, and the line prefers long straights. Its
+  route is the farthest pair of districts it can reach that way (a pair only
+  reached by streets turning at every junction is passed over), along
+  arterials where it can, collectors and local streets where it must; a
+  city whose streets offer no such route gets no line. It passes under
+  sites' pads (only what comes near the surface keeps off them).
+- **Two kinds of station.** Side platforms either side of the tracks, as
+  before but 5 m wide (3.5 m in v0.31) with the stairs against the back
+  wall, leaving 2.9 m in front of them; or (half of the stations between the
+  ends) an island platform 8 m wide between the tracks, which part round it
+  over 30 m at each end of the station. Stations may stand on collectors as
+  well as arterials (never on local streets). The painted strip along a
+  platform's edge is a material of its own.
+- **Ticket halls.** 40 m by 20 m or more (wide enough for their entrances).
+  A fare line across each end with an entrance: a ticket booth in the middle
+  (its window towards the entrance, its door behind), a gate either side and
+  a fence to the walls (the fence is a game prop: listed, not modelled).
+  Inside the fare lines, two bathrooms against a side wall: tiled walls, a
+  door each, two stalls; their toilets and sinks are listed for the game.
+- **Entrances in the open ground.** The stairwells no longer come up in the
+  kerb lane: they rise along the street from the hall's ends into the open
+  ground between the footway and the buildings, outside every lot's yard
+  (a forecourt is the lot's own foundation), at least 1.8 m from any
+  building and off site pads, a parapet round their opening. A station with
+  no such ground gets them in the footway itself, 1.4 m wide on a 2 m
+  footway (the entrance's `place`).
+- **Sewers end beside the halls.** No sewer opens into a hall any more. At a
+  station's junction each sewer ends in a chamber of its own outside the
+  hall; a seeded share of these are joined to the hall by one or two
+  service rooms (a corridor ramping to the chamber's floor) and a service
+  door, the rest are dead ends with a manhole.
+- **Hallways off the line.** At seeded intervals along its straights, a
+  hallway leaves the walkway through the line's wall: to a utility room
+  (half with a ladder shaft up to a hatch in the footway), to an emergency
+  exit's ladder shaft up to a hatch, or to a ladder shaft beside the line up
+  to a passage over its roof, through a gap in the wall of the trunk sewer
+  running above it. The walkway runs on through curves and steps down to
+  the track bed at the stations.
+- **Materials.** Tunnels, sewers, the subway, stations and service rooms
+  have materials of their own (22 `City_Tunnel_*`, `City_Sewer_*`,
+  `City_Subway_*`, `City_Station_*` and `City_Service_*` slots, each object
+  with those it uses) instead of the buildings' walls and floors.
+- **Metadata.** The line's `points` follow its curves; `tracks` (the two
+  tracks' centre lines, parting round island platforms) and `curves`. A
+  station's `kind`, `box_length`, `track_offset`, `fences`, `gates`,
+  `booths`, `rooms` (bathrooms), `fixtures` (toilets, sinks) and `links`
+  (service rooms in from the sewers); an entrance's `place`, `facing` and `opening`;
+  a utility room's `kind` (`utility` or `exit`) and `size`; `risers`
+  (ladders up to the sewer). In the `underground` graph: `bathroom` and
+  `service` nodes, sewer end chambers joined to halls by doors, risers as
+  shaft links from the line to the sewer.
 
 - **Subway** (new city setting, on by default). A line under the arterials
   from one far district through the city's centre to another, one object,

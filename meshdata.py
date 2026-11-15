@@ -18,6 +18,16 @@ MAT_INTERIOR_WALL = 5
 MAT_STAIRS = 6
 MAT_RUBBLE = 7
 
+# Underground slot indices (match building_assets.UNDERGROUND_MATERIALS): the
+# tunnels, the sewers and the subway each look like what they are.
+(U_TUNNEL_WALL, U_TUNNEL_FLOOR, U_TUNNEL_CEILING,
+ U_SEWER_WALL, U_SEWER_WALKWAY, U_SEWER_CHANNEL, U_SEWER_SHAFT, U_SEWER_COLLAPSE,
+ U_SUBWAY_WALL, U_SUBWAY_TRACKBED, U_SUBWAY_WALKWAY,
+ U_STATION_WALL, U_STATION_FLOOR, U_STATION_CEILING, U_STATION_PLATFORM, U_STATION_EDGE, U_STATION_STAIRS,
+ U_STATION_TILE, U_STATION_BOOTH, U_STATION_ENTRANCE,
+ U_SERVICE_WALL, U_SERVICE_FLOOR) = range(22)
+UNDERGROUND_SLOTS = 22
+
 
 class MeshData:
     """Vertices and polygon faces; faces are (vertex indices, material)."""
@@ -38,6 +48,14 @@ class MeshData:
                    if index != indices[position - 1]]
         if len(cleaned) >= 3 and len(set(cleaned)) == len(cleaned):
             self.faces.append((tuple(cleaned), material))
+
+    def compact_materials(self):
+        """Renumber the faces' materials to the slots they use, in order:
+        returns the original indices of the new slots."""
+        used = sorted({material for _, material in self.faces})
+        number = {material: k for k, material in enumerate(used)}
+        self.faces = [(face, number[material]) for face, material in self.faces]
+        return used
 
     def extend(self, other):
         offset = len(self.verts)

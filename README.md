@@ -48,9 +48,12 @@ sized for the game's 2 m player capsule.
   neighbouring basements, walkable sewers under the streets (octagonal
   trunks and crouch-height laterals, chambers, manhole shafts cut through
   the street, collapses, breaches and ladder drops from basements) and a
-  subway line with stations, platforms, ticket halls, street entrances and
-  utility exits. The sewers end in the subway's halls, and everything below
-  ground is one reachability graph in the metadata.
+  subway line that curves round its turns, with side and island stations,
+  ticket halls (fare lines, booths, bathrooms), entrances in the open ground,
+  and hallways to utility rooms, emergency exits and the sewers. Sewers reach
+  the halls through service rooms; everything below ground is one
+  reachability graph in the metadata, with the tracks' centre lines for
+  track and train assets, and has materials of its own.
 - **Points of interest.** Eighteen kinds of site, each with two to four
   layouts: gas stations, fast food, auto repair, schools, hospitals, police
   and fire stations, transit stations, parks, parking lots and garages, strip

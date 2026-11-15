@@ -241,7 +241,7 @@ class CityMetadata:
         self.sewers = []
         self.manholes = []
         self.breaches = []
-        self.subway = {'lines': [], 'stations': [], 'utilities': []}
+        self.subway = {'lines': [], 'stations': [], 'utilities': [], 'risers': []}
 
     # -- transforms ------------------------------------------------------
     def lot_transform(self, lot):
@@ -455,11 +455,12 @@ class CityMetadata:
                                      'position': position, 'ladder': item.drop is not None})
             self.breaches.append(entry)
 
-    def add_subway(self, transit):
-        """The subway: per station a hall and a platform node, the line
-        between stations as runs, utility rooms; stair, subway, door, shaft
-        and access links; and its own lists. Utility exits join the
-        manholes (kind ``exit``)."""
+    def add_subway(self, transit, network=None):
+        """The subway: per station a hall and a platform node (and its
+        bathrooms and the service rooms in from the sewers), the line between
+        stations as runs, the rooms at the end of its hallways, the ladder
+        shafts up to the sewer; stair, subway, door and shaft links; and its
+        own lists. Exits join the manholes (kind ``exit``)."""
         from . import subway as sub
         from . import tunnels as passages
         ox, oy, oz = self.origin
@@ -476,37 +477,48 @@ class CityMetadata:
             self.under_links.append(dict({'a': a, 'b': b, 'kind': kind, 'width': _r(width), 'position': position},
                                          **extra))
 
+        def axis_dir(axis, sign):
+            return self.space.direction(*((float(sign), 0.0) if axis == 'x' else (0.0, float(sign))))
+
         order = {n: k for k, n in enumerate(transit.path)}
-        stops = sorted((order[s.node], s) for s in transit.stations)
+        stops = sorted(transit.stations, key=lambda s: order[s.node])
         halls, platforms = {}, {}
-        for k, s in stops:
+        for s in stops:
             key = sub._key(s.node)
             hall, platform = f'subway_hall_{key}', f'subway_platform_{key}'
-            halls[s.node], platforms[s.node] = hall, platform
-            node(hall, 'station_hall', at(s.x, s.y, s.hall_floor), 4 * sub.HALL[0] * sub.HALL_SIDE, -2)
-            node(platform, 'platform', at(s.x, s.y, s.track + sub.PLATFORM[1]), 2 * sub.STATION * sub.PLATFORM[0], -4)
+            halls[s.id], platforms[s.id] = hall, platform
+
+            def in_hall(a, c, z, s=s):
+                return at(*s.point(s.centre + a, c), z)
+
+            f = s.hall_floor
+            node(hall, 'station_hall', at(s.x, s.y, f), 4 * sub.HALL[0] * s.side_half, -2)
+            area = sum(c1 - c0 for c0, c1 in s.platforms()) * sub.STATION
+            node(platform, 'platform', at(s.x, s.y, s.track + sub.PLATFORM_HEIGHT), area, -4)
             stairs = []
             for sign, across, bottom, steps, rise in s.stairs():
                 top = bottom + sign * steps * sub.STAIR[2]
                 x, y = s.point(top, across)
-                link(hall, platform, 'stair', sub.STAIR[0], at(x, y, s.hall_floor), height=_r(s.hall_floor - s.track))
-                stairs.extend(at(*s.point(bottom, across), s.track + sub.PLATFORM[1]) + at(x, y, s.hall_floor))
+                link(hall, platform, 'stair', sub.STAIR[0], at(x, y, f), height=_r(f - s.track))
+                stairs.extend(at(*s.point(bottom, across), s.track + sub.PLATFORM_HEIGHT) + at(x, y, f))
             entrances = []
             for e in s.entrances:
                 head = s.point(e.start + e.sign * e.run, sum(e.across) / 2)
                 street = f'street_{e.id}'
                 node(street, 'street', at(*head, e.top), 0.0, 0)
-                link(hall, street, 'stair', sub.ENTRANCE[0], at(*head, e.top), height=_r(e.top - e.floor))
+                width = e.across[1] - e.across[0]
+                link(hall, street, 'stair', width, at(*head, e.top), height=_r(e.top - e.floor))
                 foot = s.point(e.start, sum(e.across) / 2)
+                x0, y0, x1, y1 = sub._entrance_surface(s, e)
                 entrances.append({'id': e.id, 'street': street, 'foot': at(*foot, e.floor), 'head': at(*head, e.top),
-                                  'width': _r(sub.ENTRANCE[0])})
+                                  'width': _r(width), 'place': e.place, 'facing': axis_dir(s.axis, e.sign),
+                                  'opening': _flat([at(x0, y0, e.top), at(x1, y1, e.top)])})
             accesses = []
             for a in s.accesses:
                 t = a.tunnel
-                wall = s.line + (sub.HALL_SIDE + sub.HALL_SHELL) * a.side
+                wall = s.line + (s.side_half + sub.HALL_SHELL) * a.side
                 x, y = (t.line, wall) if s.axis == 'x' else (wall, t.line)
-                link(f'{a.site}/{a.room}', hall, 'door', passages.DOOR[0], at(x, y, s.hall_floor),
-                     ladder=a.drop is not None)
+                link(f'{a.site}/{a.room}', hall, 'door', passages.DOOR[0], at(x, y, f), ladder=a.drop is not None)
                 entry = {'id': a.id, 'building': a.site, 'room': a.room, 'length': _r(t.length), 'storey': a.storey,
                          'drop': a.drop is not None, 'ladder_bottom': [], 'ladder_top': [], 'ladder_facing': []}
                 if a.drop is not None:
@@ -518,36 +530,73 @@ class CityMetadata:
                     entry['ladder_facing'] = self.space.direction(*((0.0, -a.side) if t.axis == 'y'
                                                                     else (-a.side, 0.0)))
                 accesses.append(entry)
-            forward = (1.0, 0.0) if s.axis == 'x' else (0.0, 1.0)
+            # The fare lines: fences (game props) with gates either side of a booth.
+            fences, gates, booths = [], [], []
+            for fare in s.fares:
+                for c0, c1 in fare.fences:
+                    fences.append({'points': _flat([in_hall(fare.at, c0, f), in_hall(fare.at, c1, f)]),
+                                   'height': _r(sub.FENCE)})
+                for c0, c1 in fare.gates:
+                    gates.append({'position': in_hall(fare.at, (c0 + c1) / 2, f), 'width': _r(c1 - c0),
+                                  'facing': axis_dir(s.axis, fare.sign)})
+                booths.append({'id': f'{s.id}_booth_{"a" if fare.sign > 0 else "b"}',
+                               'position': in_hall(fare.at, fare.booth, f), 'width': _r(sub.BOOTH[0]),
+                               'depth': _r(sub.BOOTH[1]), 'height': _r(sub.BOOTH[2]),
+                               'facing': axis_dir(s.axis, fare.sign)})
+            rooms, fixtures = [], []
+            if s.baths is not None:
+                b = s.baths
+                depth = s.side_half - abs(b.c0) - sub.PARTITION
+                for k, (r0, r1) in enumerate(b.rooms()):
+                    ident = f'{s.id}_bathroom_{k}'
+                    middle = in_hall((r0 + r1) / 2, b.c0 + b.side * (sub.PARTITION + depth / 2), f)
+                    door = in_hall(r0 + .6 + sub.SMALL_DOOR[0] / 2, b.c0, f)
+                    node(ident, 'bathroom', middle, (r1 - r0) * depth, -2)
+                    link(hall, ident, 'door', sub.SMALL_DOOR[0], door)
+                    rooms.append({'id': ident, 'kind': 'bathroom', 'position': middle, 'length': _r(r1 - r0),
+                                  'width': _r(depth), 'height': _r(sub.HALL[1]), 'door': door})
+                for kind, a, c, facing in sub.stall_fixtures(s):
+                    direction = (0.0, float(facing)) if s.axis == 'x' else (float(facing), 0.0)
+                    fixtures.append({'type': kind, 'position': in_hall(a, c, f),
+                                     'facing': self.space.direction(*direction)})
+            links = []
+            for item in s.links:
+                chain = [hall] + [room.id for room in item.rooms] + [item.chamber]
+                spots = [self._link_door(s, item, at)] + [at(*self._room_face(room, item), room.floor)
+                                                          for room in item.rooms]
+                for room in item.rooms:
+                    node(room.id, 'service', at(room.x, room.y, room.floor), 4 * room.hx * room.hy, -2)
+                for (a, b), position in zip(zip(chain, chain[1:]), spots):
+                    link(a, b, 'door', sub.SERVICE_DOOR[0], position)
+                links.append({'id': item.id, 'chamber': item.chamber, 'kind': item.kind,
+                              'rooms': [{'id': r.id, 'position': at(r.x, r.y, r.floor), 'width': _r(2 * r.hx),
+                                         'depth': _r(2 * r.hy), 'height': _r(r.height)} for r in item.rooms]})
             self.subway['stations'].append({
-                'id': s.id, 'hall': hall, 'platform': platform, 'position': at(s.x, s.y, s.track),
-                'forward': self.space.direction(*forward), 'length': _r(sub.STATION),
-                'platform_width': _r(sub.PLATFORM[0]), 'platform_height': _r(sub.PLATFORM[1]),
-                'track_width': _r(sub.LINE[0]), 'hall_floor': _r(s.hall_floor + oz), 'hall_length': _r(2 * sub.HALL[0]),
-                'hall_width': _r(2 * sub.HALL_SIDE), 'stairs': stairs, 'entrances': entrances, 'accesses': accesses})
-        # The line between stations (and past the last ones, if it goes on): one node per run.
-        cuts = [k for k, _ in stops]
-        bounds = sorted(set([0] + cuts + [len(transit.path) - 1]))
-        runs = []
-        for k0, k1 in zip(bounds, bounds[1:]):
-            ident = f'subway_run_{k0}_{k1}'
-            mid = transit.path[(k0 + k1) // 2]
-            size = self.plan.settings.block_size
-            mx, my = mid[0] * size, mid[1] * size
-            track = next((e.floor_at(e.start) for e in transit.edges if mid in (e.a, e.b)), 0.0)
-            node(ident, 'subway', at(mx, my, track), (k1 - k0) * size * sub.LINE[0], -4)
-            for k in (k0, k1):
-                if k in cuts:
-                    link(ident, platforms[transit.path[k]], 'subway', sub.LINE[0], at(mx, my, track))
-            runs.append((k0, k1, ident))
+                'id': s.id, 'kind': s.kind, 'hall': hall, 'platform': platform, 'position': at(s.x, s.y, s.track),
+                'forward': axis_dir(s.axis, s.heading), 'length': _r(sub.STATION),
+                'box_length': _r(2 * s.half_length), 'platform_width': _r(s.platforms()[0][1] - s.platforms()[0][0]),
+                'platform_height': _r(sub.PLATFORM_HEIGHT), 'track_offset': _r(s.track_offset),
+                'track_width': _r(sub.LINE[0]), 'hall_floor': _r(f + oz), 'hall_length': _r(2 * sub.HALL[0]),
+                'hall_width': _r(2 * s.side_half), 'stairs': stairs, 'entrances': entrances, 'accesses': accesses,
+                'fences': fences, 'gates': gates, 'booths': booths, 'rooms': rooms, 'fixtures': fixtures,
+                'links': links})
+        # The line between stations: one node per run.
+        runs = {}
+        for run in transit.runs:
+            frames = run.frames()
+            middle = frames[len(frames) // 2]
+            node(run.id, 'subway', at(*middle[:3]), run.length * sub.LINE[0], -4)
+            for station in (run.a, run.b):
+                link(run.id, platforms[station.id], 'subway', sub.LINE[0], at(*middle[:3]))
+            for piece in run.pieces:
+                runs[id(piece)] = run.id
         for u in transit.utilities:
-            ka, kb = order[u.edge.a], order[u.edge.b]
-            run = next(ident for k0, k1, ident in runs if k0 <= min(ka, kb) and max(ka, kb) <= k1)
-            x, y = u.edge.point(u.along, u.across)
-            node(u.id, 'utility', at(x, y, u.floor), sub.UTILITY ** 2, -4)
-            dx, dy = u.edge.point(u.along, sub.LINE[0] / 2)
+            run = runs[id(u.piece)]
+            x, y = u.piece.point(u.along, u.across)
+            node(u.id, 'utility', at(x, y, u.floor), u.size ** 2, -4)
+            dx, dy = u.piece.point(u.along, u.piece.left * sub.LINE[0] / 2)
             link(run, u.id, 'door', passages.WIDTH, at(dx, dy, u.floor))
-            entry = {'id': u.id, 'position': at(x, y, u.floor), 'exit': ''}
+            entry = {'id': u.id, 'kind': u.kind, 'position': at(x, y, u.floor), 'size': _r(u.size), 'exit': ''}
             if u.exit is not None:
                 m = u.exit
                 street = f'street_{m.id}'
@@ -558,15 +607,53 @@ class CityMetadata:
                                       'depth': _r(m.rim - u.floor), 'open': m.open, 'kind': 'exit'})
                 entry['exit'] = m.id
             self.subway['utilities'].append(entry)
-        size = self.plan.settings.block_size
+        plugs = {sw.id: sw.plug for sw in (network.sewers if network is not None else ())}
+        for r in transit.risers:
+            run = runs[id(r.piece)]
+            plug = plugs.get(r.sewer)
+            sewer_node = r.sewer if plug is None else r.sewer + (':a' if r.along < plug[0] else ':b')
+            face = r.far - r.side * sub.RISER[1]
+            bottom = at(*r.piece.point(r.along, face), r.floor)
+            top = at(*r.piece.point(r.along, face), r.top_floor)
+            facing = (0.0, -float(r.side)) if r.piece.axis == 'x' else (-float(r.side), 0.0)
+            link(run, sewer_node, 'shaft', passages.WIDTH, top, height=_r(r.top_floor - r.floor), ladder=True)
+            self.subway['risers'].append({'id': r.id, 'sewer': sewer_node, 'ladder_bottom': bottom,
+                                          'ladder_top': top, 'ladder_facing': self.space.direction(*facing)})
+        # The line: its centre and both tracks at the track bed, end to end; its curves.
         points = []
-        for n in transit.path:
-            x, y = n[0] * size, n[1] * size
-            track = next((e.floor_at(e.start if (e.a == n) == (e.start <= e.end) else e.end)
-                          for e in transit.edges if n in (e.a, e.b)), 0.0)
-            points.append(at(x, y, track))
-        self.subway['lines'].append({'id': 'line_1', 'stations': [s.id for _, s in stops],
-                                     'points': _flat(points), 'width': _r(sub.LINE[0]), 'height': _r(sub.LINE[1])})
+        for kind_, item in [('s', stops[0])] + [x for run in transit.runs for x in (('r', run), ('s', run.b))]:
+            if kind_ == 's':
+                points.append(at(item.x, item.y, item.track))
+            else:
+                points.extend(at(*f[:3]) for f in item.frames())
+        left, right = sub.tracks(transit)
+        curves = [{'id': b.id, 'radius': _r(b.radius), 'centre': at(b.cx, b.cy, (b.z0 + b.z1) / 2),
+                   'length': _r(b.length)} for b in transit.bends]
+        self.subway['lines'].append({'id': 'line_1', 'stations': [s.id for s in stops], 'points': _flat(points),
+                                     'tracks': [{'id': 'line_1_left', 'points': _flat(at(*p) for p in left)},
+                                                {'id': 'line_1_right', 'points': _flat(at(*p) for p in right)}],
+                                     'curves': curves, 'width': _r(sub.LINE[0]), 'height': _r(sub.LINE[1])})
+
+    @staticmethod
+    def _link_door(station, item, at):
+        """Where a service link comes through a hall's wall: the doorway's
+        middle at the hall's floor."""
+        from . import subway as sub
+        side, sign = item.wall[0], 1 if item.wall[1] == '+' else -1
+        if side == 'a':
+            x, y = station.point(station.centre + sign * (sub.HALL[0] + sub.HALL_SHELL / 2), item.coordinate)
+        else:
+            x, y = station.point(station.centre + item.coordinate, sign * (station.side_half + sub.HALL_SHELL / 2))
+        return at(x, y, station.hall_floor)
+
+    @staticmethod
+    def _room_face(room, item):
+        """The doorway out of a service room on its far side (towards the
+        chamber): its plan point."""
+        side = item.toward.replace('-', '#').replace('+', '-').replace('#', '+')
+        if side[1] == 'x':
+            return (room.x + (room.hx if side[0] == '+' else -room.hx), room.y)
+        return (room.x, room.y + (room.hy if side[0] == '+' else -room.hy))
 
     def _interior(self, facts):
         """Rooms, lifts and railings in building space."""

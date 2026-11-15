@@ -293,7 +293,7 @@ City placement (`city_plan._place_pois`):
 - **Stops.** Transit stops go mid-block on arterial and collector footways,
   clear of lot and site fronts.
 
-## Underground (v0.28-v0.31)
+## Underground (v0.28-v0.32)
 
 Basements are planned with the building (`basement.plan`, level plans with
 index -1 and -2 that reuse the floor tiling) and built by `shell` under its
@@ -301,13 +301,19 @@ walls. Everything between buildings is planned city-wide before any
 building is built, because it puts doorways in their basement walls
 (`params['basement_doors']`):
 
-1. `subway.plan`: the line, its stations (their halls take the place of the
-   junctions' sewer chambers), entrances, utility branches.
-2. `sewers.plan(halls=...)`: trunks, laterals, chambers, manholes, plugs.
+1. `subway.plan`: the line (routed so its turns are at least two junctions
+   apart, then laid out as straights and curves, `Run` of `Straight` and
+   `Bend`), its stations and their halls' fittings, entrances, the hallways
+   to utility rooms and emergency exits.
+2. `sewers.plan(halls=...)`: trunks, laterals, chambers, manholes, plugs;
+   where a station's hall stands, each sewer ends in a chamber of its own
+   outside it, and the service rooms joining it to the hall (`Link`) are
+   planned there.
 3. `tunnels.plan(below=...)`: tunnels between basements, keeping clear in
    3D of the subway, the sewers and deep foundations.
 4. `sewers.breach` and `subway.connect`: passages from basements to the
-   sewers and halls, clear of all of the above.
+   sewers and halls, and the hallways' ladder shafts up into the trunk over
+   the line, clear of all of the above.
 
 Each system keeps its own depth under the street (see
 [CITY_GENERATOR.md](CITY_GENERATOR.md#underground)), so they cross without
@@ -315,7 +321,10 @@ meeting. Sections that are not boxes (the sewers' octagons with a trench,
 the line's vaulted box) are built as a ring of solids, one per edge of the
 section, mitred at the corners (`sewers._ring`), extruded along the floor's
 centre line; every piece is a closed solid and neighbours touch only face
-to face. Openings in the street, the ground and the lane paint
+to face. Along a curve the section is swept between frames (a point and the
+left normal) at each step of the arc: the frames all turn about the curve's
+centre, so a piece's sides are chords of circles and neighbours share their
+end faces exactly. Openings in the street, the ground and the lane paint
 (`cutouts.cut`, rectangles or convex polygons) are cut once everything is
 planned.
 

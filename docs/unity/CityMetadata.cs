@@ -155,15 +155,22 @@ namespace Ares.CityGen
         public bool under_street;
     }
 
-    // The subway (v0.31). A line's `points` run along its track bed's centre
-    // through each junction of its path. A station's `stairs` are flat
+    // The subway (v0.31; reworked in v0.32). A line's `points` run along its
+    // track bed's centre from end to end, round its curves; `tracks` are the
+    // two tracks' centre lines at the track bed (left and right looking along
+    // the line), parting round island platforms. A station's `stairs` are flat
     // (foot x, y, z, head x, y, z) per stair from a platform up to the hall.
+    // Fences, gates, booths, rooms and fixtures are on the hall's floor; the
+    // fences and fixtures are game props (the city mesh has the booths and the
+    // bathrooms' walls). `facing` of a gate or booth points to the entrance's
+    // side of the fare line; of a fixture, into its room.
     [Serializable]
     public class Subway
     {
         public SubwayLine[] lines;
         public SubwayStation[] stations;
         public SubwayUtility[] utilities;
+        public SubwayRiser[] risers;    // Hallways' ladder shafts up to the sewer (v0.32).
     }
 
     [Serializable]
@@ -172,29 +179,56 @@ namespace Ares.CityGen
         public string id;
         public string[] stations;
         public float[] points;
+        public SubwayTrack[] tracks;    // v0.32.
+        public SubwayCurve[] curves;    // v0.32.
         public float width, height;
+    }
+
+    [Serializable]
+    public class SubwayTrack
+    {
+        public string id;
+        public float[] points;
+    }
+
+    [Serializable]
+    public class SubwayCurve
+    {
+        public string id;
+        public float radius, length;
+        public float[] centre;
     }
 
     [Serializable]
     public class SubwayStation
     {
         public string id;
+        public string kind;             // "side" platforms or an "island" (v0.32).
         public string hall, platform;   // Graph node ids.
         public float[] position;        // Track bed level, under the junction.
         public float[] forward;         // Along the line.
-        public float length, platform_width, platform_height, track_width;
+        public float length, box_length, platform_width, platform_height, track_offset, track_width;
         public float hall_floor, hall_length, hall_width;
         public float[] stairs;
         public SubwayEntrance[] entrances;
         public SubwayAccess[] accesses;
+        public SubwayFence[] fences;    // The fare lines (v0.32).
+        public SubwayGate[] gates;
+        public SubwayBooth[] booths;
+        public SubwayRoom[] rooms;      // Bathrooms.
+        public SubwayFixture[] fixtures;  // Toilets and sinks.
+        public SubwayLink[] links;      // Service rooms in from the sewers.
     }
 
     [Serializable]
     public class SubwayEntrance
     {
         public string id, street;       // Its street node.
-        public float[] foot, head;      // At the hall's floor; at the street.
+        public float[] foot, head;      // At the hall's floor; at the ground.
         public float width;
+        public string place;            // "ground" beside the footway, or "footway" where there is no open ground (v0.32).
+        public float[] facing;          // The way up (v0.32).
+        public float[] opening;         // Its open stairwell at the ground: two corners, flat (v0.32).
     }
 
     [Serializable]
@@ -208,11 +242,72 @@ namespace Ares.CityGen
     }
 
     [Serializable]
+    public class SubwayFence
+    {
+        public float[] points;          // From, to (flat).
+        public float height;
+    }
+
+    [Serializable]
+    public class SubwayGate
+    {
+        public float[] position, facing;
+        public float width;
+    }
+
+    [Serializable]
+    public class SubwayBooth
+    {
+        public string id;
+        public float[] position, facing;  // Middle of its floor; out of its window.
+        public float width, depth, height;
+    }
+
+    [Serializable]
+    public class SubwayRoom
+    {
+        public string id, kind;         // A graph node; "bathroom".
+        public float[] position, door;
+        public float length, width, height;
+    }
+
+    [Serializable]
+    public class SubwayFixture
+    {
+        public string type;             // "toilet" or "sink".
+        public float[] position, facing;
+    }
+
+    [Serializable]
+    public class SubwayLink
+    {
+        public string id, chamber, kind;  // The sewer chamber it starts from; "rooms" or "room".
+        public SubwayServiceRoom[] rooms;
+    }
+
+    [Serializable]
+    public class SubwayServiceRoom
+    {
+        public string id;               // A graph node ("service").
+        public float[] position;
+        public float width, depth, height;
+    }
+
+    [Serializable]
     public class SubwayUtility
     {
         public string id;
+        public string kind;             // "utility" or "exit" (an emergency exit's room) (v0.32).
         public string exit;             // Its exit's manhole id, or "".
         public float[] position;
+        public float size;
+    }
+
+    [Serializable]
+    public class SubwayRiser
+    {
+        public string id, sewer;        // The sewer node it opens into.
+        public float[] ladder_bottom, ladder_top, ladder_facing;
     }
 
     [Serializable]

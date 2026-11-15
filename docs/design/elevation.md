@@ -301,11 +301,12 @@ The megacity's stacked decks (§7) build on it.
 
 ## 5. Underground
 
-> **Built** (v0.28-v0.31): basements, tunnels between them, walkable sewers
+> **Built** (v0.28-v0.32): basements, tunnels between them, walkable sewers
 > (trunks under arterials and collectors, crouch-height laterals under
 > local streets, chambers and manholes at junctions, collapses, breaches
-> into basements) and a subway line with stations; the sewers meet the
-> subway in its ticket halls rather than breaking into its tunnels. See
+> into basements) and a subway line with side and island stations that
+> curves round its turns; the sewers reach its ticket halls through service
+> rooms, and its hallways climb into the trunk sewers above it. See
 > [CITY_GENERATOR.md](../../CITY_GENERATOR.md#underground). The plan below
 > is kept as it was written.
 

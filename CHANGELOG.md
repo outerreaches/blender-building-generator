@@ -24,14 +24,14 @@
   stairs run down its middle, their feet towards the platform's ends, rising
   towards the middle (their heads 6 m apart). Where a stair comes up through
   the hall's floor, a parapet like an entrance's runs along its sides and
-  across its low end.
+  across its low end. Stations may stand on collectors as well as arterials
+  (never on local streets). The painted strip along a platform's edge is a
+  material of its own.
 - **Turning loops.** Past each end station the line goes on: a level box
   where the tracks part, then a single-track loop out and back (curves of
   50 m), so a train turns without reversing. It keeps to the line's grade;
   where it cannot be built either way round, the line ends at the station's
-  wall as before. Stations may stand on collectors as
-  well as arterials (never on local streets). The painted strip along a
-  platform's edge is a material of its own.
+  wall as before.
 - **Ticket halls.** 40 m by 20 m or more (wide enough for their entrances).
   A fare line across each end with an entrance: a ticket booth in the middle
   (its window towards the entrance, its door behind), a gate either side and

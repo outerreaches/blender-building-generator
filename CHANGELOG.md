@@ -92,6 +92,8 @@
   chamber beside a hall is named after the chamber (`street_<chamber>`), so
   node ids stay unique.
 
+## v0.31.0: Subway
+
 - **Subway** (new city setting, on by default). A line under the arterials
   from one far district through the city's centre to another, one object,
   `City_Subway`:

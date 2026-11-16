@@ -28,7 +28,7 @@
 | v0.29 | Tunnels between basements: through shared walls, under open ground and under streets, on two storeys, in the underground graph |
 | v0.30 | Sewers: trunks, crouch-height laterals, chambers and manhole shafts cut through the street, collapses and breaches into basements; graph facts (depth, exits, bridges) |
 | v0.31 | Subway: a line with stations, platforms, ticket halls and street entrances, utility branches with exits, sewers ending in the halls, basement accesses; drops from old town and brutalist basements into the sewers; ditches only in the suburbs |
-| v0.32 | Subway, part two: curves instead of square turns; side and island stations with wider platforms; ticket halls with fare lines, booths and bathrooms; entrances in the open ground beside the footway; sewers ending beside the halls through service rooms; hallways off the line to utility rooms, emergency exits and the sewer above; track centre lines; underground materials of their own |
+| v0.32 | Subway, part two: curves instead of square turns; side and island stations with wider platforms; ticket halls with fare lines, booths and bathrooms; entrances in the open ground beside the footway; sewers ending beside the halls through service rooms; hallways off the line to utility rooms, emergency exits and the sewer above; track centre lines; underground materials of their own; turning loops past the end stations; kiosks, benches and bins; basins in the sewers' chambers |
 
 See [CHANGELOG.md](CHANGELOG.md) for the details.
 

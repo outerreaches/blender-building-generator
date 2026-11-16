@@ -50,9 +50,14 @@ TRACK_WALL = 2.4          # Track centre to a station's wall.
 CURVE = (84.0, 56.0)      # Radius of a curve where the line turns: wanted, and where turns come two junctions apart.
 CURVE_STEP = math.pi / 48  # Angle of a curve's pieces.
 TURN_GAP = 2              # Fewest junctions from a turn to the next (or to a station).
+LOOP = (5.0, 5.0, 1.0)    # The turning loop past an end station: a single track's tunnel (width, height, vault),
+LOOP_RADIUS = 50.0        # its curves' radius,
+LOOP_TRACKS = 3.0         # its two ends either side of the line's centre,
+SPLIT_LENGTH = 20.0       # beyond a box this long past the station where the tracks part.
 TURN_COST = 4.0           # Routing: a turn costs as much as this many junctions of arterial.
-STATION = 46.0            # A platform's length.
-SPLAY = 30.0              # Island stations: the tracks part round the platform over this much at each end.
+STATION = 46.0            # A side platform's length,
+ISLAND_LENGTH = 56.0      # an island's (its two stairs stand end to end along it).
+SPLAY = 27.0              # Island stations: the tracks part round the platform over this much at each end.
 SIDE_PLATFORM = 5.0       # Side platforms' width,
 ISLAND = 8.0              # an island platform's,
 PLATFORM_HEIGHT = 1.0     # their height over the track bed,
@@ -66,7 +71,8 @@ HALL_SIDE = 10.0          # Least half width of a hall across the line (wider to
 SPACING = 4               # Junctions from one station to the next, about,
 SPACING_DOWNTOWN = 2      # and downtown.
 STAIR = (2.0, .17, .28)   # Stairs: clear width, rise and going of a step.
-STAIR_TOP = {'side': 10.0, 'island': 12.0}   # Along the hall from its middle: where a platform stair arrives.
+STAIR_TOP = {'side': 10.0, 'island': 3.0}    # Along the hall from its middle: where a platform stair arrives
+                                              # (an island's two rise from the platform's ends towards the middle).
 HEADROOM_STAIR = 2.2
 ENTRANCE = (1.8, .2, 2.4) # Street entrance: clear width, wall thickness, headroom.
 VERGE = .2                # Earth left between a footway and an entrance's wall.
@@ -74,6 +80,7 @@ FACADE = 1.8              # Least ground left between an entrance and a building
 FOOTWAY_ENTRANCE = 1.2    # Narrowest stair for an entrance in the footway (where there is no open ground),
 FOOTWAY_EDGE = .1         # kept this far in from the footway's edges (clear of the curb's riser and the skirt).
 PARAPET = 1.0             # Height of the parapet round an entrance's opening.
+STAIR_PARAPET = 1.0       # and round a platform stair's opening in the hall's floor.
 FARE = 4.5                # The fare line: this far in from a hall's end wall,
 GATE = 1.4                # with a gate (a gap in the fence) either side of its booth.
 FENCE = 2.0               # Height of the fare line's fence (a game prop).
@@ -84,6 +91,12 @@ BATH = (4.2, 4.8)         # Each of the two bathrooms: along the hall, across it
 PARTITION = .15           # Their walls.
 STALL = (1.0, 1.6, 2.0, .05, .7)  # Stalls: width, depth, height, panels, door gap.
 SERVICE_DOOR = (1.2, 2.1)  # Doors into service rooms, hallways and halls.
+KIOSK = (3.0, 2.0, 2.6, .1)   # Kiosks against a hall's side wall: along it, deep, high, walls;
+KIOSK_WINDOW = (2.0, .9, 2.0)  # their serving window: width, sill, head;
+KIOSK_KINDS = ('newsstand', 'convenience')   # what they sell (one, sometimes two, per hall).
+BENCH = (1.8, .5)         # Benches (game props): length, depth;
+BENCH_EVERY = 7.0         # along a platform about this far apart,
+BIN_SHARE = .5            # a bin beside about half of them.
 UTILITY = 2.4             # Utility room off a hallway, square, clear (as high);
 EXIT_ROOM = 2.4           # the room at the foot of an emergency exit (wider than the 2 m corridor and its walls).
 UTILITY_SHELL = .25
@@ -199,10 +212,15 @@ class Bend:
     a1: float
     z0: float
     z1: float
+    width: float = LINE[0]    # The tunnel's clear width (a turning loop's is one track's).
 
     @property
     def length(self):
         return self.radius * abs(self.a1 - self.a0)
+
+    @property
+    def loop(self):
+        return self.width < LINE[0] - 1e-6
 
     def frames(self):
         count = max(1, math.ceil(abs(self.a1 - self.a0) / CURVE_STEP - 1e-9))
@@ -222,13 +240,29 @@ class Bend:
         """Per chord a plan box round it and its height range: (rect, low, high)."""
         found = []
         frames = self.frames()
-        half = LINE[0] / 2 + SHELL + grow
+        half = self.width / 2 + SHELL + grow
         for f0, f1 in zip(frames, frames[1:]):
             xs = [f[0] + s * half * f[3] for f in (f0, f1) for s in (-1, 1)]
             ys = [f[1] + s * half * f[4] for f in (f0, f1) for s in (-1, 1)]
             found.append(((min(xs), min(ys), max(xs), max(ys)), min(f0[2], f1[2]) - SHELL,
                           max(f0[2], f1[2]) + LINE[1] + SHELL))
         return found
+
+
+@dataclass
+class Loop:
+    """A turning loop past ``station``'s ``sign`` end: a level box from its
+    end wall where the tracks part (along ``split``), then single-track
+    ``bends`` from the box's left opening round and back into its right."""
+    station: object
+    sign: int
+    split: tuple
+    bends: list
+
+    def rect(self):
+        s = self.station
+        half = LOOP_TRACKS + LOOP[0] / 2 + SHELL
+        return _rect(s, min(self.split), max(self.split), -half, half)
 
 
 @dataclass
@@ -332,6 +366,18 @@ class Bathrooms:
 
 
 @dataclass
+class Kiosk:
+    """A kiosk against one of a hall's side walls (hall coordinates): along
+    ``a0``..``a1``, its front (with the serving window) at ``c0``."""
+    id: str
+    kind: str
+    side: int
+    a0: float
+    a1: float
+    c0: float
+
+
+@dataclass
 class Station(Stretch):
     id: str = ''
     node: tuple = None
@@ -350,6 +396,9 @@ class Station(Stretch):
     links: list = field(default_factory=list)      # sewers.Link: service rooms from the sewers.
     fares: list = field(default_factory=list)
     baths: object = None
+    kiosks: list = field(default_factory=list)
+    loop_sign: int = 0             # The end (along its axis) a turning loop leaves from, if it has one.
+    furniture: list = field(default_factory=list)  # (type, along from the middle, across, level, facing (along, across)).
     taken: list = field(default_factory=list)      # Hall floor in use: (a0, a1, c0, c1) in hall coordinates.
 
     @property
@@ -357,8 +406,12 @@ class Station(Stretch):
         return self.x if self.axis == 'x' else self.y
 
     @property
+    def platform_length(self):
+        return ISLAND_LENGTH if self.kind == 'island' else STATION
+
+    @property
     def half_length(self):
-        return STATION / 2 + (SPLAY if self.kind == 'island' else 0.0)
+        return self.platform_length / 2 + (SPLAY if self.kind == 'island' else 0.0)
 
     @property
     def half_across(self):
@@ -405,13 +458,15 @@ class Station(Stretch):
         run = steps * STAIR[2]
         found = []
         for sign in (1, -1):
+            top = self.centre + sign * STAIR_TOP[self.kind]
             if self.kind == 'island':
-                across = 0.0
+                # Down the middle of the island, its foot towards the platform's end: it climbs back towards the
+                # middle, the two stairs' heads apart.
+                found.append((-sign, 0.0, top + sign * run, steps, rise_total / steps))
             else:
                 # Against the platform's back wall, leaving its front free.
                 across = sign * (self.half_across - .1 - STAIR[0] / 2)
-            top = self.centre + sign * STAIR_TOP[self.kind]
-            found.append((sign, across, top - sign * run, steps, rise_total / steps))
+                found.append((sign, across, top - sign * run, steps, rise_total / steps))
         return found
 
     def stair_holes(self):
@@ -424,6 +479,19 @@ class Station(Stretch):
             top = bottom + sign * steps * STAIR[2]
             a0, a1 = sorted((bottom + sign * opening - self.centre, top - self.centre))
             found.append((a0, a1, across - STAIR[0] / 2, across + STAIR[0] / 2))
+        return found
+
+    def stair_openings(self):
+        """Each stair's opening in the hall's floor: (along from, to (world),
+        across from, to, climbing direction)."""
+        found = []
+        for sign, across, bottom, steps, rise in self.stairs():
+            slope = rise / STAIR[2]
+            opening = max(0.0, (self.hall_floor - HALL_SHELL - HEADROOM_STAIR - (self.track + PLATFORM_HEIGHT))
+                          / slope - STAIR[2])
+            top = bottom + sign * steps * STAIR[2]
+            a0, a1 = sorted((bottom + sign * opening, top))
+            found.append((a0, a1, across - STAIR[0] / 2, across + STAIR[0] / 2, sign))
         return found
 
     def clear(self, a0, a1, c0, c1):
@@ -512,6 +580,7 @@ class Subway:
     utilities: list = field(default_factory=list)
     risers: list = field(default_factory=list)
     size: float = 56.0        # The lattice's block size.
+    loops: list = field(default_factory=list)
 
     @property
     def exits(self):
@@ -536,6 +605,10 @@ class Subway:
         found = [(p.rect(), *p.span()) for p in self.straights if p.length > 1e-6]
         for b in self.bends:
             found += b.pieces()
+        for loop in self.loops:
+            found.append((loop.rect(), loop.station.track - SHELL, loop.station.track + LINE[1] + SHELL))
+            for b in loop.bends:
+                found += b.pieces()
         for s in self.stations:
             found.append((s.box(), s.track - SHELL, s.roof))
             if halls:
@@ -742,6 +815,7 @@ def plan(city, surface=None, sites=(), street=None, avoid=(), below=()):
     for station in subway.stations:
         _plan_entrances(station, level, index, blocked, lots, avoid, yards)
         _plan_hall(station, seed)
+        _plan_furniture(station, seed)
     _plan_hallways(subway, level, index, blocked, seed)
     return subway
 
@@ -857,7 +931,82 @@ def _layout(city, graph, path, level, blocked):
         if any(blocked(p.rect(), *p.span()) for p in run.straights if p.length > 1e-6):
             return None
         runs.append(run)
-    return Subway([path[k] for k in path_k], stations, runs, size=size)
+    subway = Subway([path[k] for k in path_k], stations, runs, size=size)
+    ends = [(runs[0].a, -runs[0].a.heading), (runs[-1].b, runs[-1].b.heading)]
+    for station, sign in ends:
+        loop = _plan_loop(station, sign, level, blocked)
+        if loop is not None:
+            subway.loops.append(loop)
+    return subway
+
+
+def _plan_loop(station, sign, level, blocked):
+    """A turning loop past an end station's ``sign`` end (along its axis),
+    turning left first or (if that is blocked) right first; None if neither
+    can be built (the line then ends at the station's wall)."""
+    s = station
+    face = s.centre + sign * (s.half_length + SHELL)
+    far = face + sign * SPLIT_LENGTH
+    split = (face, far)
+    box = _rect(s, min(split), max(split), -LOOP_TRACKS - LOOP[0] / 2 - SHELL, LOOP_TRACKS + LOOP[0] / 2 + SHELL)
+    if blocked(box, s.track - SHELL, s.track + LINE[1] + SHELL):
+        return None
+    ex, ey = s.point(far)
+    hx, hy = (float(sign), 0.0) if s.axis == 'x' else (0.0, float(sign))
+    for hand in (1, -1):
+        bends = _loop_bends(s, (ex, ey), (hx, hy), hand, level)
+        if bends is None:
+            continue
+        if not any(blocked(*piece) for b in bends for piece in b.pieces()):
+            s.loop_sign = sign
+            return Loop(s, sign, split, bends)
+    return None
+
+
+def _loop_bends(s, end, heading, hand, level):
+    """Three arcs from the splitter's ``hand`` opening (+1: the left one,
+    looking out) round and back into the other: out by alpha towards that
+    side, round by 180 degrees and twice alpha the other way, back by alpha.
+    Alpha is what brings it back exactly."""
+    r, t = LOOP_RADIUS, LOOP_TRACKS
+    cos_a = (t + r) / (2 * r)
+    if not -1 < cos_a < 1:
+        return None
+    alpha = math.acos(cos_a)
+    hx, hy = heading
+    nx, ny = -hy, hx                          # Left of the heading.
+    px, py = end[0] + hand * t * nx, end[1] + hand * t * ny
+    arcs = []
+    for turn, angle in ((hand, alpha), (-hand, math.pi + 2 * alpha), (hand, alpha)):
+        lx, ly = -hy, hx
+        cx, cy = px + turn * r * lx, py + turn * r * ly
+        a0 = math.atan2(py - cy, px - cx)
+        a1 = a0 + turn * angle
+        arcs.append((cx, cy, a0, a1))
+        px, py = cx + r * math.cos(a1), cy + r * math.sin(a1)
+        c, sn = math.cos(turn * angle), math.sin(turn * angle)
+        hx, hy = hx * c - hy * sn, hx * sn + hy * c
+    # It must come back to the other opening, heading home.
+    qx, qy = end[0] - hand * t * nx, end[1] - hand * t * ny
+    if math.hypot(px - qx, py - qy) > 1e-6 or hx * heading[0] + hy * heading[1] > -1 + 1e-6:
+        return None
+    total = sum(r * abs(a1 - a0) for _, _, a0, a1 in arcs)
+
+    def bed(at, x, y):
+        ideal = level(x, y) - TRACK_DEPTH
+        upper = min(ideal, s.track + LINE_GRADE * at, s.track + LINE_GRADE * (total - at))
+        return max(upper, s.track - LINE_GRADE * at, s.track - LINE_GRADE * (total - at))
+
+    bends, run = [], 0.0
+    for k, (cx, cy, a0, a1) in enumerate(arcs):
+        length = r * abs(a1 - a0)
+        x0, y0 = cx + r * math.cos(a0), cy + r * math.sin(a0)
+        x1, y1 = cx + r * math.cos(a1), cy + r * math.sin(a1)
+        z0 = s.track if k == 0 else bed(run, x0, y0)
+        z1 = s.track if k == len(arcs) - 1 else bed(run + length, x1, y1)
+        bends.append(Bend(f'{s.id}_loop_{k}', s.node, cx, cy, r, a0, a1, z0, z1, LOOP[0]))
+        run += length
+    return bends
 
 
 def _run(path, ka, kb, a, b, radius, level, size, widths):
@@ -1193,6 +1342,87 @@ def _plan_hall(station, seed):
             break
 
 
+def _plan_furniture(station, seed):
+    """A kiosk or two against the hall's side walls inside the fare lines;
+    benches (a bin by about half) along the platforms, clear of the stairs
+    and the end steps, and two in the hall."""
+    rng = stream(seed, 'subway-furniture', station.id)
+    s = station
+    width = s.side_half
+    # Keep the middle of each wall free: the sewers' service rooms come in there (planned after this).
+    reserved = []
+    for wall in ('a+', 'a-', 'c+', 'c-'):
+        a0, a1, c0, c1 = s.wall_spot(wall, 0.0, SERVICE_DOOR[0] + 1.0)
+        reserved.append((min(a0, a1), max(a0, a1), min(c0, c1), max(c0, c1)))
+    s.taken.extend(reserved)
+    limit = HALL[0] - FARE - 1.0
+    w, d, h, t = KIOSK
+    sides = (1, -1) if rng.random() < .5 else (-1, 1)
+    count = 1 + (rng.random() < .5)
+    for k in range(count):
+        made = False
+        for side in sides:
+            c0 = side * (width - d)
+            for j in range(int((2 * limit - w) / .5) + 1):
+                a0 = (-limit + .5 * j) if (j + k) % 2 == 0 else (limit - w - .5 * j)
+                if not s.clear(a0 - .3, a0 + w + .3, c0 - side * 1.2, side * width):
+                    continue
+                kind = KIOSK_KINDS[int(rng.random() * len(KIOSK_KINDS))]
+                s.kiosks.append(Kiosk(f'{s.id}_kiosk_{k}', kind, side, a0, a0 + w, c0))
+                s.take(a0 - .3, a0 + w + .3, c0 - side * 1.2, side * width)
+                made = True
+                break
+            if made:
+                break
+    # Benches in the hall, against the side walls, facing the middle.
+    length, depth = BENCH
+    for k in range(2):
+        for side in (sides if k == 0 else sides[::-1]):
+            c = side * (width - depth / 2 - .05)
+            spot = None
+            for j in range(int(2 * limit)):
+                a = (j // 2 + .5) * (1 if j % 2 else -1)
+                if s.clear(a - length / 2 - .3, a + length / 2 + .3, c - side * (depth / 2 + .9), side * width):
+                    spot = a
+                    break
+            if spot is not None:
+                s.furniture.append(('bench', spot, c, 'hall', (0.0, -float(side))))
+                s.take(spot - length / 2 - .3, spot + length / 2 + .3, c - side * (depth / 2 + .9), side * width)
+                bin_at = spot + length / 2 + .5
+                if s.clear(bin_at - .3, bin_at + .3, c - side * .3, side * width):
+                    s.furniture.append(('trash_bin', bin_at, c, 'hall', (0.0, -float(side))))
+                    s.take(bin_at - .3, bin_at + .3, c - side * .3, side * width)
+                break
+    # (The service doors' places are free again for the sewers' plan.)
+    s.taken = [t for t in s.taken if t not in reserved]
+    # Benches along the platforms.
+    count_steps, going = END_STEPS
+    stop = s.platform_length / 2 - count_steps * going - 1.0
+    stairs = [(min(bottom, bottom + sign * steps * STAIR[2]) - s.centre - 1.0,
+               max(bottom, bottom + sign * steps * STAIR[2]) - s.centre + 1.0, across)
+              for sign, across, bottom, steps, rise in s.stairs()]
+    rows = []
+    if s.kind == 'island':
+        rows = [(depth / 2 + .02, 1.0), (-depth / 2 - .02, -1.0)]       # Back to back down the middle.
+    else:
+        for c0, c1 in s.platforms():
+            back = c1 if c0 > 0 else c0
+            sign = 1.0 if c0 > 0 else -1.0
+            rows.append((back - sign * (depth / 2 + .05), -sign))       # Against the back wall, facing the track.
+    for across, facing in rows:
+        a = -stop + length / 2 + BENCH_EVERY * rng.random() * .5
+        while a + length / 2 <= stop:
+            free = not any(a0 - length / 2 < a < a1 + length / 2 and abs(c - across) < STAIR[0] / 2 + depth
+                           for a0, a1, c in stairs)
+            if free:
+                s.furniture.append(('bench', a, across, 'platform', (0.0, facing)))
+                bin_at = a + length / 2 + .5
+                if rng.random() < BIN_SHARE and bin_at < stop and not any(
+                        a0 < bin_at < a1 and abs(c - across) < STAIR[0] / 2 + depth for a0, a1, c in stairs):
+                    s.furniture.append(('trash_bin', bin_at, across, 'platform', (0.0, facing)))
+            a += BENCH_EVERY
+
+
 def _plan_hallways(subway, level, index, blocked, seed):
     """Access hallways off the walkway at seeded intervals along each
     straight: utility rooms and emergency exits now, the sewer's for
@@ -1521,8 +1751,9 @@ def _plan_risers(subway, network, avoid):
 # -- geometry ------------------------------------------------------------------
 
 
-def _profile():
-    width, height, vault = LINE
+def _profile(width=None, vault=None):
+    width = LINE[0] if width is None else width
+    height, vault = LINE[1], LINE[2] if vault is None else vault
     half = width / 2
     return [(-half, 0.0), (half, 0.0), (half, height - vault), (half - vault, height), (-half + vault, height),
             (-half, height - vault)]
@@ -1617,6 +1848,10 @@ def build(mesh, subway):
                 _bend(mesh, piece)
             else:
                 _straight_solids(mesh, piece)
+    for loop in subway.loops:
+        _splitter(mesh, loop)
+        for bend in loop.bends:
+            _bend(mesh, bend)
     for station in subway.stations:
         _station(mesh, station)
         for access in station.accesses:
@@ -1668,12 +1903,55 @@ def _line_pieces():
 
 
 def _bend(mesh, bend):
-    shell, _, _, walkway = _line_pieces()
+    if bend.loop:
+        # A turning loop: one track's tunnel, no walkway.
+        ring = _sewers._ring(_profile(bend.width, LOOP[2]), SHELL)
+        shell = [(quad, U_SUBWAY_TRACKBED if i == 0 else U_SUBWAY_WALL) for i, quad in enumerate(ring)]
+        walkway = None
+    else:
+        shell, _, _, walkway = _line_pieces()
     frames = bend.frames()
     for f0, f1 in zip(frames, frames[1:]):
         for polygon, material in shell:
             _sweep(mesh, polygon, f0, f1, material)
-        _sweep(mesh, walkway, f0, f1, U_SUBWAY_WALKWAY)
+        if walkway is not None:
+            _sweep(mesh, walkway, f0, f1, U_SUBWAY_WALKWAY)
+
+
+def _splitter(mesh, loop):
+    """The level box past an end station where the tracks part: floor,
+    side walls and roof from the station's end wall, and a wall across its
+    far end with an opening for each end of the loop."""
+    from . import solids
+    s, track = loop.station, loop.station.track
+    half = LOOP_TRACKS + LOOP[0] / 2
+    face, far = loop.split
+    top = track + LINE[1]
+    a0, a1 = sorted((face, far))
+    w0, w1 = sorted((far, far - loop.sign * SHELL))
+    for c0, c1, z0, z1, mat in ((-half - SHELL, half + SHELL, track - SHELL, track, U_SUBWAY_TRACKBED),
+                                (-half - SHELL, half + SHELL, top, top + SHELL, U_SUBWAY_WALL),
+                                (-half - SHELL, -half, track, top, U_SUBWAY_WALL),
+                                (half, half + SHELL, track, top, U_SUBWAY_WALL)):
+        r = _rect(s, a0, a1, c0, c1)
+        solids.box(mesh, r[0], r[1], z0, r[2], r[3], z1, mat)
+    # The far wall, between the side walls; its thickness towards the station.
+    reverse = (loop.sign > 0) == (s.axis == 'y')
+    c_start, c_end = (half, -half) if reverse else (-half, half)
+    ox, oy = s.point(far, c_start)
+    qx, qy = s.point(far, c_end)
+    length = math.hypot(qx - ox, qy - oy)
+    direction = ((qx - ox) / length, (qy - oy) / length)
+    lw, lh, lv = LOOP
+    openings = []
+    for c in sorted((-LOOP_TRACKS, LOOP_TRACKS), key=lambda c: abs(c - c_start)):
+        u = abs(c - c_start)
+        openings.append(solids.Opening(u - lw / 2, u + lw / 2, [(u - lw / 2, track), (u + lw / 2, track)],
+                                       [(u - lw / 2, track + lh - lv), (u - lw / 2 + lv, track + lh),
+                                        (u + lw / 2 - lv, track + lh), (u + lw / 2, track + lh - lv)],
+                                       U_SUBWAY_WALL, 'door'))
+    solids.wall_solid(mesh, (ox, oy), direction, SHELL, 0.0, length, track, [(0.0, top), (length, top)],
+                      openings, U_SUBWAY_WALL)
 
 
 def _straight_solids(mesh, piece):
@@ -1720,9 +1998,13 @@ def _station(mesh, station):
     hx, hy = (L, half) if s.axis == 'x' else (half, L)
     end_sides = ('-x', '+x') if s.axis == 'x' else ('-y', '+y')
     openings = {}
-    for side, leaves in zip(end_sides, s.ends):
+    for side, leaves, sign in zip(end_sides, s.ends, (-1, 1)):
         if leaves:
             openings[side] = [(s.line, lambda u, f=track: _line_opening(u, f, U_STATION_WALL))]
+        elif s.loop_sign == sign:
+            # Into the box past it where the tracks part for the turning loop.
+            openings[side] = [(s.line, lambda u, f=track: _rect_opening(u, 2 * LOOP_TRACKS + LOOP[0], f, LINE[1],
+                                                                          U_STATION_WALL))]
     roof_holes, hall_holes = [], []
     for sign, across, bottom, steps, rise in s.stairs():
         slope = rise / STAIR[2]
@@ -1750,8 +2032,33 @@ def _station(mesh, station):
           roof_holes=roof_holes, ceiling_material=U_STATION_CEILING)
     _platforms(mesh, s)
     _hall(mesh, s, hall_holes)
+    _stair_parapets(mesh, s)
     for e in s.entrances:
         _entrance(mesh, s, e)
+
+
+def _stair_parapets(mesh, s):
+    """A parapet round each stair's opening in the hall's floor, as round an
+    entrance's at the street: along both sides and across its low end, the
+    head (where the stair arrives) open."""
+    if STAIR_PARAPET <= 0:
+        return
+    w = ENTRANCE[1]
+    f = s.hall_floor
+    for a0, a1, c0, c1, climb in s.stair_openings():
+        lo, hi = a0 - s.centre, a1 - s.centre
+        low_end = lo if climb > 0 else hi
+        for b0, b1, u0, u1 in ((lo, hi, c0 - w, c0), (lo, hi, c1, c1 + w)):
+            r = s.hall_rect(b0, b1, u0, u1)
+            mesh_box(mesh, r, f, f + STAIR_PARAPET)
+        e0, e1 = sorted((low_end, low_end - climb * w))
+        r = s.hall_rect(e0, e1, c0 - w, c1 + w)
+        mesh_box(mesh, r, f, f + STAIR_PARAPET)
+
+
+def mesh_box(mesh, r, z0, z1):
+    from . import solids
+    solids.box(mesh, r[0], r[1], z0, r[2], r[3], z1, U_STATION_ENTRANCE)
 
 
 def _platforms(mesh, s):
@@ -1760,7 +2067,7 @@ def _platforms(mesh, s):
     from . import solids
     track = s.track
     count, going = END_STEPS
-    stop = STATION / 2 - count * going
+    stop = s.platform_length / 2 - count * going
     for c0, c1 in s.platforms():
         # The edges over a track: a side platform's inner one, both of an island's.
         edges = [c0, c1] if s.kind == 'island' else ([c0] if c0 > 0 else [c1])
@@ -1814,6 +2121,8 @@ def _hall(mesh, s, hall_holes):
         _booth(mesh, s, fare)
     if s.baths is not None:
         _bathrooms(mesh, s, s.baths)
+    for kiosk in s.kiosks:
+        _kiosk(mesh, s, kiosk)
 
 
 def _wall(mesh, s, a0, a1, c0, c1, z0, z1, material, holes=()):
@@ -1881,6 +2190,44 @@ def _bathrooms(mesh, s, baths):
             middle = b0 + width / 2
             _wall(mesh, s, b0, b0 + width, back - side * panel, back, f, f + height, U_STATION_BOOTH,
                   [(middle - gap / 2, middle + gap / 2, f, f + height)])
+
+
+def _kiosk(mesh, s, k):
+    """A kiosk against the hall's side wall (its back): a serving window
+    in its front, a door in one end, a roof."""
+    from . import solids
+    w, d, h, t = KIOSK
+    f = s.hall_floor
+    wall = k.side * s.side_half
+    mid = (k.a0 + k.a1) / 2
+    window = (mid - KIOSK_WINDOW[0] / 2, mid + KIOSK_WINDOW[0] / 2, f + KIOSK_WINDOW[1], f + KIOSK_WINDOW[2])
+    _wall(mesh, s, k.a0, k.a1, k.c0, k.c0 + k.side * t, f, f + h - t, U_STATION_BOOTH, [window])
+    inner = k.c0 + k.side * t
+    c_door = (inner + wall) / 2
+    door = (c_door - SMALL_DOOR[0] / 2, c_door + SMALL_DOOR[0] / 2, f, f + SMALL_DOOR[1])
+    _wall(mesh, s, k.a0, k.a0 + t, inner, wall, f, f + h - t, U_STATION_BOOTH, [door])
+    _wall(mesh, s, k.a1 - t, k.a1, inner, wall, f, f + h - t, U_STATION_BOOTH)
+    r = s.hall_rect(k.a0, k.a1, k.c0, wall)
+    solids.box(mesh, r[0], r[1], f + h - t, r[2], r[3], f + h, U_STATION_BOOTH)
+
+
+def furniture(s):
+    """Every prop of a station as (type, x, y, z, facing x, facing y): its
+    bathrooms' toilets and sinks, kiosks' counters, benches and bins."""
+    found = []
+
+    def put(kind, along, across, z, fa, fc):
+        x, y = s.point(s.centre + along, across)
+        fx, fy = (fa, fc) if s.axis == 'x' else (fc, fa)
+        found.append((kind, x, y, z, fx, fy))
+
+    for kind, a, c, facing in stall_fixtures(s):
+        put(kind, a, c, s.hall_floor, 0.0, float(facing))
+    for k in s.kiosks:
+        put('shop_counter', (k.a0 + k.a1) / 2, k.c0 + k.side * (KIOSK[3] + .45), s.hall_floor, 0.0, -float(k.side))
+    for kind, a, c, level, (fa, fc) in s.furniture:
+        put(kind, a, c, s.hall_floor if level == 'hall' else s.track + PLATFORM_HEIGHT, fa, fc)
+    return found
 
 
 def stall_fixtures(s):
@@ -2007,16 +2354,39 @@ def tracks(subway):
         s = item
         nx, ny = (0.0, float(_left(s.axis, s.heading))) if s.axis == 'x' else (float(_left(s.axis, s.heading)), 0.0)
         L = s.half_length
-        count = max(2, int(2 * L / 2.0) + 1)
+        # Past an end station with a turning loop, on through the box where the tracks part to its openings.
+        reach = SHELL + SPLIT_LENGTH
+        lo = -L - (reach if s.loop_sign == -s.heading else 0.0)
+        hi = L + (reach if s.loop_sign == s.heading else 0.0)
+        count = max(2, int((hi - lo) / 2.0) + 1)
         for k in range(count):
-            a = -L + 2 * L * k / (count - 1)
+            a = lo + (hi - lo) * k / (count - 1)
             along = s.centre + s.heading * a
             x, y = s.point(along)
             d = abs(a)
-            if s.kind == 'island' and d > STATION / 2:
-                t = min(1.0, (d - STATION / 2) / SPLAY)
+            if d > L:
+                t = min(1.0, (d - L) / reach)
+                offset = s.track_offset + (LOOP_TRACKS - s.track_offset) * (1 - math.cos(math.pi * t)) / 2
+            elif s.kind == 'island' and d > s.platform_length / 2:
+                t = min(1.0, (d - s.platform_length / 2) / SPLAY)
                 offset = TRACK + (s.track_offset - TRACK) * (1 + math.cos(math.pi * t)) / 2
             else:
                 offset = s.track_offset
             add((x, y, s.track, nx, ny), offset)
     return [left, right]
+
+
+def loop_lines(subway):
+    """Each turning loop's track centre line, from the box's opening it
+    leaves by round to the one it comes back in by: [(station id, [(x, y,
+    z)])]."""
+    found = []
+    for loop in subway.loops:
+        points = []
+        for bend in loop.bends:
+            for x, y, z, _, _ in bend.frames():
+                if points and math.dist((x, y, z), points[-1]) < 1e-6:
+                    continue
+                points.append((x, y, z))
+        found.append((loop.station.id, points))
+    return found

@@ -33,7 +33,8 @@ SLOPE = 1 / 8              # A lateral's fall into a trunk chamber.
 STEP = 8.0                 # Longest straight piece along a sewer.
 CHAMFERS = {'trunk': (.4, .7), 'lateral': (.4, .4)}   # Lower and upper chamfers of the octagonal section.
 TRENCH = {'trunk': (.6, .3), 'lateral': (.3, .12)}    # Width and depth of the trench along the floor,
-TRENCH_END = .5            # which stops this far short of a chamber.
+TRENCH_END = 0.0           # which runs on into the chamber (its channels lead to a basin in the middle):
+BASIN = {'trunk': 1.6, 'lateral': 1.0}   # an octagonal basin in a chamber's floor, across the flats.
 SHAFT = .9                 # A manhole's clear opening (an octagon, across the flats),
 SHAFT_WALL = .15           # its walls,
 RIM = .02                  # and how far its rim stands above the street.
@@ -915,12 +916,12 @@ def _doorway(kind, centre, floor, frame):
     return solids.Opening(centre - half, centre + half, bottom, top, frame, 'door')
 
 
-def _chamber(mesh, chamber, material, floor_material, frame):
+def _chamber(mesh, chamber, material, floor_material, frame, basins=True):
     from . import solids
     h, s = chamber.size / 2, SHELL
     x0, y0, x1, y1 = chamber.x - h - s, chamber.y - h - s, chamber.x + h + s, chamber.y + h + s
     f, top = chamber.floor, chamber.floor + chamber.height
-    solids.box(mesh, x0, y0, f - s, x1, y1, f, floor_material)
+    _chamber_floor(mesh, chamber, floor_material, basins)
     # Walls: south and north full width, west and east between them.
     walls = {'-y': ((x0, y0), (1.0, 0.0), x1 - x0, h + s),
              '+y': ((x1, y1), (-1.0, 0.0), x1 - x0, h + s),
@@ -955,6 +956,70 @@ def _chamber(mesh, chamber, material, floor_material, frame):
     ring = octagon(m.x, m.y, SHAFT)
     for k, corner in zip((0, 2, 4, 6), ((hx1, hy1), (hx0, hy1), (hx0, hy0), (hx1, hy0))):
         _flat(mesh, [ring[k], corner, ring[k + 1]], top, top + s, material)
+
+
+def _chamber_floor(mesh, chamber, floor_material, basins=True):
+    """A chamber's floor: a slab under an octagonal basin in the middle and
+    under a channel from each sewer's doorway into it (as wide and deep as
+    that sewer's trench, so the trench runs on into the basin); the walkway
+    round them. Without ``basins``, one plain slab."""
+    from . import solids
+    from .meshdata import U_SEWER_CHANNEL
+    h, s = chamber.size / 2, SHELL
+    x0, y0, x1, y1 = chamber.x - h - s, chamber.y - h - s, chamber.x + h + s, chamber.y + h + s
+    f = chamber.floor
+    if not basins:
+        solids.box(mesh, x0, y0, f - s, x1, y1, f, floor_material)
+        return
+    depth = TRENCH[chamber.kind][1]
+    r = BASIN[chamber.kind] / 2
+    cx, cy = chamber.x, chamber.y
+    channels = []                     # (rect, depth)
+    for side in ('-x', '+x', '-y', '+y'):
+        kinds = [kind for door_side, kind in chamber.doors if door_side == side and kind != 'service']
+        if not kinds:
+            continue
+        tw, td = TRENCH['trunk' if 'trunk' in kinds else 'lateral']
+        td = min(td, depth)
+        if side == '-x':
+            rect = (x0, cy - tw / 2, cx - r, cy + tw / 2)
+        elif side == '+x':
+            rect = (cx + r, cy - tw / 2, x1, cy + tw / 2)
+        elif side == '-y':
+            rect = (cx - tw / 2, y0, cx + tw / 2, cy - r)
+        else:
+            rect = (cx - tw / 2, cy + r, cx + tw / 2, y1)
+        channels.append((rect, td))
+    # The slab under it all, its top the basin's bottom (the sludge).
+    solids.box(mesh, x0, y0, f - depth - s, x1, y1, f - depth, U_SEWER_CHANNEL)
+    # Layers up to the walkway, each open over the basin and over the channels as deep as it.
+    levels = sorted({f - depth, f} | {f - td for _, td in channels})
+    square = (cx - r, cy - r, cx + r, cy + r)
+    ring = octagon(cx, cy, 2 * r)
+    corners = [[ring[k], corner, ring[k + 1]] for k, corner in
+               zip((0, 2, 4, 6), ((cx + r, cy + r), (cx - r, cy + r), (cx - r, cy - r), (cx + r, cy - r)))]
+    for z0, z1 in zip(levels, levels[1:]):
+        holes = [square] + [rect for rect, td in channels if f - td <= z0 + 1e-6]
+        _slab_around(mesh, (x0, y0, x1, y1), z0, z1, floor_material, holes)
+        for triangle in corners:
+            _flat(mesh, triangle, z0, z1, floor_material)
+
+
+def _slab_around(mesh, rect, z0, z1, material, holes):
+    """A slab over a plan rect round rectangular holes (cells of the grid
+    their edges make)."""
+    from . import solids
+    x0, y0, x1, y1 = rect
+    xs = sorted({x0, x1} | {min(max(v, x0), x1) for h in holes for v in (h[0], h[2])})
+    ys = sorted({y0, y1} | {min(max(v, y0), y1) for h in holes for v in (h[1], h[3])})
+    for a0, a1 in zip(xs, xs[1:]):
+        for b0, b1 in zip(ys, ys[1:]):
+            if a1 - a0 < 1e-5 or b1 - b0 < 1e-5:
+                continue
+            mx, my = (a0 + a1) / 2, (b0 + b1) / 2
+            if any(hx0 < mx < hx1 and hy0 < my < hy1 for hx0, hy0, hx1, hy1 in holes):
+                continue
+            solids.box(mesh, a0, b0, z0, a1, b1, z1, material)
 
 
 def _shaft(mesh, manhole, material):

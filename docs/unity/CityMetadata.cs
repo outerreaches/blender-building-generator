@@ -181,6 +181,7 @@ namespace Ares.CityGen
         public float[] points;
         public SubwayTrack[] tracks;    // v0.32.
         public SubwayCurve[] curves;    // v0.32.
+        public SubwayLoop[] loops;      // Turning loops past the end stations (v0.32).
         public float width, height;
     }
 
@@ -188,6 +189,16 @@ namespace Ares.CityGen
     public class SubwayTrack
     {
         public string id;
+        public float[] points;
+    }
+
+    // A turning loop's single track centre line, from the box past the end
+    // station (where the tracks part) round and back into it.
+    [Serializable]
+    public class SubwayLoop
+    {
+        public string station;
+        public float radius;
         public float[] points;
     }
 
@@ -216,7 +227,8 @@ namespace Ares.CityGen
         public SubwayGate[] gates;
         public SubwayBooth[] booths;
         public SubwayRoom[] rooms;      // Bathrooms.
-        public SubwayFixture[] fixtures;  // Toilets and sinks.
+        public SubwayFixture[] fixtures;  // Toilets, sinks, benches, bins, kiosks' counters.
+        public SubwayKiosk[] kiosks;    // Newsstands and convenience stalls in the hall (modelled).
         public SubwayLink[] links;      // Service rooms in from the sewers.
     }
 
@@ -275,8 +287,16 @@ namespace Ares.CityGen
     [Serializable]
     public class SubwayFixture
     {
-        public string type;             // "toilet" or "sink".
+        public string type;             // "toilet", "sink", "bench", "trash_bin" or "shop_counter".
         public float[] position, facing;
+    }
+
+    [Serializable]
+    public class SubwayKiosk
+    {
+        public string id, kind;         // "newsstand" or "convenience".
+        public float[] position, facing;  // Middle of its floor; out of its serving window.
+        public float width, depth, height;
     }
 
     [Serializable]

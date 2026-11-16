@@ -647,8 +647,9 @@ they are meant to:
 - **Sewers** (v0.30). Trunks under every arterial and collector; laterals
   under 40% of the local streets, grown from the trunks so every one
   reaches a trunk, falling to the trunk's depth over their last 12 m.
-  Octagonal sections with a trench down the floor, which stops 0.5 m short
-  of a chamber. A chamber under every junction a sewer reaches, entered
+  Octagonal sections with a trench down the floor, which runs on under the
+  chamber's wall into a channel to an octagonal basin in the middle of the
+  chamber's floor. A chamber under every junction a sewer reaches, entered
   through octagonal doorways. A manhole over every chamber whose shaft
   comes up wholly on the road or footway (never on a curb): an octagonal
   shaft 0.9 m across the flats, the street, the ground and the lane paint
@@ -675,8 +676,10 @@ they are meant to:
     (every four junctions or so, every two downtown, and at the ends). Side
     platforms 5 m wide either side of the tracks, the stairs against their
     back walls; or, for half of the stations between the ends, an island
-    platform 8 m wide between the tracks, which part round it over 30 m at
-    each end. A platform's edge over a track is painted (a material of its
+    platform 8 m wide and 56 m long between the tracks, which part round it
+    over 27 m at each end; its two stairs run down its middle, feet towards
+    the platform's ends, rising towards the middle. A stair's opening in
+    the hall's floor has a parapet along its sides and across its low end. A platform's edge over a track is painted (a material of its
     own); steps at its ends lead down to the track bed.
   - **Ticket hall** above the platforms, 40 m long and at least 20 m wide, a
     stair up into it from each platform (two from an island). Across each
@@ -684,7 +687,13 @@ they are meant to:
     window towards the entrance and its door behind, a gate either side and
     a fence on to the walls (the fence is listed for the game, not
     modelled). Inside the fare lines two bathrooms against a side wall, a
-    door each and two stalls; their toilets and sinks are listed.
+    door each and two stalls; their toilets and sinks are listed. A kiosk or
+    two (newsstand, convenience stall) against a side wall with a serving
+    window, a counter listed inside; benches along the platforms (a bin by
+    about half) and two in the hall, listed for the game.
+  - **Turning loops** past the end stations: a level box where the tracks
+    part, then a single-track loop out and back (50 m curves), so a train
+    turns without reversing (`loops` in the metadata).
   - **Entrances**, up to two: stairwells from the hall's ends rising along
     the street into the open ground between the footway and the buildings
     (never on the street or in a lot's yard, at least 1.8 m from any

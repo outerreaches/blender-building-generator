@@ -496,7 +496,7 @@ class CityMetadata:
 
             f = s.hall_floor
             node(hall, 'station_hall', at(s.x, s.y, f), 4 * sub.HALL[0] * s.side_half, -2)
-            area = sum(c1 - c0 for c0, c1 in s.platforms()) * sub.STATION
+            area = sum(c1 - c0 for c0, c1 in s.platforms()) * s.platform_length
             node(platform, 'platform', at(s.x, s.y, s.track + sub.PLATFORM_HEIGHT), area, -4)
             stairs = []
             for sign, across, bottom, steps, rise in s.stairs():
@@ -566,10 +566,14 @@ class CityMetadata:
                     link(hall, ident, 'door', sub.SMALL_DOOR[0], door)
                     rooms.append({'id': ident, 'kind': 'bathroom', 'position': middle, 'length': _r(r1 - r0),
                                   'width': _r(depth), 'height': _r(sub.HALL[1]), 'door': door})
-                for kind, a, c, facing in sub.stall_fixtures(s):
-                    direction = (0.0, float(facing)) if s.axis == 'x' else (float(facing), 0.0)
-                    fixtures.append({'type': kind, 'position': in_hall(a, c, f),
-                                     'facing': self.space.direction(*direction)})
+            for kind, x, y, z, fx, fy in sub.furniture(s):
+                fixtures.append({'type': kind, 'position': at(x, y, z), 'facing': self.space.direction(fx, fy)})
+            kiosks = []
+            for k in s.kiosks:
+                middle = in_hall((k.a0 + k.a1) / 2, (k.c0 + k.side * s.side_half) / 2, f)
+                facing = (0.0, -float(k.side)) if s.axis == 'x' else (-float(k.side), 0.0)
+                kiosks.append({'id': k.id, 'kind': k.kind, 'position': middle, 'facing': self.space.direction(*facing),
+                               'width': _r(k.a1 - k.a0), 'depth': _r(sub.KIOSK[1]), 'height': _r(sub.KIOSK[2])})
             links = []
             for item in s.links:
                 chain = [hall] + [room.id for room in item.rooms] + [item.chamber]
@@ -584,12 +588,12 @@ class CityMetadata:
                                          'depth': _r(2 * r.hy), 'height': _r(r.height)} for r in item.rooms]})
             self.subway['stations'].append({
                 'id': s.id, 'kind': s.kind, 'hall': hall, 'platform': platform, 'position': at(s.x, s.y, s.track),
-                'forward': axis_dir(s.axis, s.heading), 'length': _r(sub.STATION),
+                'forward': axis_dir(s.axis, s.heading), 'length': _r(s.platform_length),
                 'box_length': _r(2 * s.half_length), 'platform_width': _r(s.platforms()[0][1] - s.platforms()[0][0]),
                 'platform_height': _r(sub.PLATFORM_HEIGHT), 'track_offset': _r(s.track_offset),
                 'track_width': _r(sub.LINE[0]), 'hall_floor': _r(f + oz), 'hall_length': _r(2 * sub.HALL[0]),
                 'hall_width': _r(2 * s.side_half), 'stairs': stairs, 'entrances': entrances, 'accesses': accesses,
-                'fences': fences, 'gates': gates, 'booths': booths, 'rooms': rooms, 'fixtures': fixtures,
+                'fences': fences, 'gates': gates, 'booths': booths, 'rooms': rooms, 'fixtures': fixtures, 'kiosks': kiosks,
                 'links': links})
         # The line between stations: one node per run.
         runs = {}
@@ -641,7 +645,16 @@ class CityMetadata:
         left, right = sub.tracks(transit)
         curves = [{'id': b.id, 'radius': _r(b.radius), 'centre': at(b.cx, b.cy, (b.z0 + b.z1) / 2),
                    'length': _r(b.length)} for b in transit.bends]
+        loops = [{'station': ident, 'radius': _r(sub.LOOP_RADIUS), 'points': _flat(at(*p) for p in pts)}
+                 for ident, pts in sub.loop_lines(transit)]
+        for loop in transit.loops:
+            # The loop is part of the line beyond its end station.
+            ident = f'{loop.station.id}_loop'
+            mid = loop.bends[1].frames()[len(loop.bends[1].frames()) // 2]
+            node(ident, 'subway', at(*mid[:3]), sum(b.length for b in loop.bends) * sub.LOOP[0], -4)
+            link(ident, platforms[loop.station.id], 'subway', sub.LOOP[0], at(*mid[:3]))
         self.subway['lines'].append({'id': 'line_1', 'stations': [s.id for s in stops], 'points': _flat(points),
+                                     'loops': loops,
                                      'tracks': [{'id': 'line_1_left', 'points': _flat(at(*p) for p in left)},
                                                 {'id': 'line_1_right', 'points': _flat(at(*p) for p in right)}],
                                      'curves': curves, 'width': _r(sub.LINE[0]), 'height': _r(sub.LINE[1])})

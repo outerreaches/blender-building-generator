@@ -19,8 +19,17 @@
 - **Two kinds of station.** Side platforms either side of the tracks, as
   before but 5 m wide (3.5 m in v0.31) with the stairs against the back
   wall, leaving 2.9 m in front of them; or (half of the stations between the
-  ends) an island platform 8 m wide between the tracks, which part round it
-  over 30 m at each end of the station. Stations may stand on collectors as
+  ends) an island platform 8 m wide and 56 m long between the tracks, which
+  part round it over 27 m at each end of the station. An island's two
+  stairs run down its middle, their feet towards the platform's ends, rising
+  towards the middle (their heads 6 m apart). Where a stair comes up through
+  the hall's floor, a parapet like an entrance's runs along its sides and
+  across its low end.
+- **Turning loops.** Past each end station the line goes on: a level box
+  where the tracks part, then a single-track loop out and back (curves of
+  50 m), so a train turns without reversing. It keeps to the line's grade;
+  where it cannot be built either way round, the line ends at the station's
+  wall as before. Stations may stand on collectors as
   well as arterials (never on local streets). The painted strip along a
   platform's edge is a material of its own.
 - **Ticket halls.** 40 m by 20 m or more (wide enough for their entrances).
@@ -29,6 +38,10 @@
   a fence to the walls (the fence is a game prop: listed, not modelled).
   Inside the fare lines, two bathrooms against a side wall: tiled walls, a
   door each, two stalls; their toilets and sinks are listed for the game.
+  A kiosk or two (a newsstand or a convenience stall) against a side wall,
+  with a serving window and a door, and a counter listed inside; benches
+  along the platforms (a bin by about half) and two in the hall, listed for
+  the game.
 - **Entrances in the open ground.** The stairwells no longer come up in the
   kerb lane: they rise along the street from the hall's ends into the open
   ground between the footway and the buildings, outside every lot's yard
@@ -36,6 +49,9 @@
   building and off site pads, a parapet round their opening. A station with
   no such ground gets them in the footway itself, 1.4 m wide on a 2 m
   footway (the entrance's `place`).
+- **Basins in the sewers' chambers.** A sewer's trench now runs on under
+  the chamber's wall into a channel to an octagonal basin in the middle of
+  the floor (1.6 m across in a trunk's chamber, 1 m in a lateral's).
 - **Sewers end beside the halls.** No sewer opens into a hall any more. At a
   station's junction each sewer ends in a chamber of its own outside the
   hall; a seeded share of these are joined to the hall by one or two
@@ -61,9 +77,11 @@
   `City_Subway_*`, `City_Station_*` and `City_Service_*` slots, each object
   with those it uses) instead of the buildings' walls and floors.
 - **Metadata.** The line's `points` follow its curves; `tracks` (the two
-  tracks' centre lines, parting round island platforms) and `curves`. A
+  tracks' centre lines, parting round island platforms and into the
+  turning loops' boxes), `curves` and `loops` (each loop's centre line). A
   station's `kind`, `box_length`, `track_offset`, `fences`, `gates`,
-  `booths`, `rooms` (bathrooms), `fixtures` (toilets, sinks) and `links`
+  `booths`, `rooms` (bathrooms), `fixtures` (toilets, sinks, benches,
+  bins, counters), `kiosks` and `links`
   (service rooms in from the sewers); an entrance's `place`, `facing` and `opening`;
   an access's `route` (`straight` or `corner`); a utility room's `kind`
   (`utility` or `exit`) and `size`; `risers`

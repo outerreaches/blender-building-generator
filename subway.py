@@ -36,7 +36,10 @@ from .meshdata import (U_SERVICE_FLOOR, U_SERVICE_WALL, U_SEWER_SHAFT, U_STATION
                        U_STATION_TILE, U_STATION_WALL, U_SUBWAY_TRACKBED, U_SUBWAY_WALKWAY, U_SUBWAY_WALL,
                        U_TUNNEL_CEILING, U_TUNNEL_FLOOR, U_TUNNEL_WALL)
 
-TRACK_DEPTH = 14.0        # Track bed under the street.
+TRACK_DEPTH = 14.0        # Track bed under the street,
+LINE_GRADE = .05          # climbing or falling no more steeply than this away from a station's level.
+SIDE_DEEPER = 3.0         # How much deeper than that a station may be set, to keep the line within that grade:
+ISLAND_DEEPER = .5        # an island's two stairs from the middle of its platform would meet much deeper.
 LINE = (8.6, 5.0, 1.2)    # Clear width and height of the line's tunnel, and its vaulted upper corners.
 SHELL = .4                # Floor, walls and roof of the line and its stations.
 WALKWAY = (.8, .9)        # Evacuation walkway along the line's left side: width, height,
@@ -82,7 +85,7 @@ PARTITION = .15           # Their walls.
 STALL = (1.0, 1.6, 2.0, .05, .7)  # Stalls: width, depth, height, panels, door gap.
 SERVICE_DOOR = (1.2, 2.1)  # Doors into service rooms, hallways and halls.
 UTILITY = 2.4             # Utility room off a hallway, square, clear (as high);
-EXIT_ROOM = 1.6           # the room at the foot of an emergency exit.
+EXIT_ROOM = 2.4           # the room at the foot of an emergency exit (wider than the 2 m corridor and its walls).
 UTILITY_SHELL = .25
 EXIT_SHARE = .5           # Share of utility rooms with a ladder shaft up to the street.
 HALLWAY_EVERY = 70.0      # Mean spacing of access hallways along the line,
@@ -174,7 +177,10 @@ class Straight(Stretch):
         from . import tunnels
         half = tunnels.WIDTH / 2
         level = self.floor_at(along)
-        kept = [(a, f) for a, f in self.sections if not along - half - 1e-6 <= a <= along + half + 1e-6]
+        # (Samples just outside it go too, so no sliver of a slope is left beside the level part.)
+        margin = half + .3
+        kept = [(a, f) for a, f in self.sections if not along - margin - 1e-6 <= a <= along + margin + 1e-6
+                or a in (self.start, self.end)]
         self.sections = sorted(kept + [(along - half, level), (along + half, level)])
         self.doors.append(along)
 
@@ -832,8 +838,9 @@ def _layout(city, graph, path, level, blocked):
             radius[t] = min(radius[t], room)
         if radius[t] < CURVE[1] - 1e-6:
             return ('turn', path[t])
-    runs = []
     order = sorted(at)
+    _settle_stations(order, at, path, radius, size)
+    runs = []
     for ka, kb in zip(order, order[1:]):
         run = _run(path, ka, kb, at[ka], at[kb], radius, level, size, widths)
         for bend in (p for p in run.pieces if isinstance(p, Bend)):
@@ -898,9 +905,67 @@ def _run(path, ka, kb, a, b, radius, level, size, widths):
     first.steps = (heading_start(first), not heading_start(first)) if first is not last else (True, True)
     if first is not last:
         last.steps = (not heading_start(last), heading_start(last))
-    for p in straights:
-        _sections_of(p, level)
+    # The track bed: TRACK_DEPTH under the street or deeper, leaving and reaching the stations' levels at their end
+    # walls (a station is level, set from its junction; on a slope the street at its ends is higher or lower), and
+    # never climbing or falling more steeply than LINE_GRADE away from them.
+    offsets, total = [], 0.0
+    for piece in pieces:
+        offsets.append(total)
+        total += piece.length
+
+    def bed(at, ideal):
+        upper = min(ideal, a.track + LINE_GRADE * at, b.track + LINE_GRADE * (total - at))
+        return max(upper, a.track - LINE_GRADE * at, b.track - LINE_GRADE * (total - at))
+
+    for piece, offset in zip(pieces, offsets):
+        if isinstance(piece, Bend):
+            frames = piece.frames()
+            x0, y0, x1, y1 = frames[0][0], frames[0][1], frames[-1][0], frames[-1][1]
+            piece.z0 = bed(offset, level(x0, y0) - TRACK_DEPTH)
+            piece.z1 = bed(offset + piece.length, level(x1, y1) - TRACK_DEPTH)
+            continue
+
+        def run_at(along, piece=piece, offset=offset):
+            return offset + (along - piece.start if piece.heading > 0 else piece.end - along)
+
+        def depth_at(along, piece=piece, run_at=run_at):
+            ground = level(*piece.point(along))
+            return ground - bed(run_at(along), ground - TRACK_DEPTH)
+
+        # Sample it densely enough near the stations to follow the grade's kinks.
+        marks = [a for a in (_along_at(piece, offset, d) for d in [4.0 * k for k in range(1, 26)] +
+                             [total - 4.0 * k for k in range(1, 26)]) if a is not None]
+        _sections_of(piece, level, depth_at, marks)
     return Run(f'subway_run_{_key(path[ka])}__{_key(path[kb])}', a, b, pieces)
+
+
+def _settle_stations(order, at, path, radius, size):
+    """Set stations deeper where the line could not climb from one to the
+    next within LINE_GRADE over the run between them (their boxes are long
+    and level; on a hill the street at two neighbours differs a lot). Deeper
+    only, and an island at most ISLAND_DEEPER (its two stairs would meet)."""
+    def run_length(ka, kb):
+        # The lattice distance less the boxes, less what each curve cuts off its corner.
+        total = (kb - ka) * size - at[ka].half_length - at[kb].half_length - 2 * SHELL
+        return total - sum((2 - math.pi / 2) * r for k, r in radius.items() if ka < k < kb)
+
+    original = {k: at[k].track for k in order}
+    for _ in range(3):
+        for ka, kb in zip(order, order[1:]):
+            room = LINE_GRADE * max(1.0, run_length(ka, kb))
+            for k, other in ((kb, ka), (ka, kb)):
+                s = at[k]
+                cap = ISLAND_DEEPER if s.kind == 'island' else SIDE_DEEPER
+                want = min(s.track, at[other].track + room)
+                s.track = max(want, original[k] - cap)
+
+
+def _along_at(piece, offset, at):
+    """The along of a straight at run distance ``at``, if it is on it."""
+    d = at - offset
+    if not 1e-6 < d < piece.length - 1e-6:
+        return None
+    return piece.start + d if piece.heading > 0 else piece.end - d
 
 
 def heading_start(piece):
@@ -926,11 +991,12 @@ def _straight(axis, heading, p0, p1, z0, z1, level, size, widths):
     return piece
 
 
-def _sections_of(piece, level):
-    """The track bed along a straight: following the street's grade between
-    its end levels, level where the walkway steps."""
+def _sections_of(piece, level, depth_at=None, marks=()):
+    """The track bed along a straight: ``depth_at(along)`` under the street
+    (TRACK_DEPTH unless given), level where the walkway steps."""
+    depth_at = depth_at or (lambda along: TRACK_DEPTH)
     run = WALKWAY_STEPS[0] * WALKWAY_STEPS[1]
-    breaks = []
+    breaks = list(marks)
     if piece.length > 3 * run:
         if piece.steps[0]:
             breaks.append(piece.start + run)
@@ -938,10 +1004,13 @@ def _sections_of(piece, level):
             breaks.append(piece.end - run)
     else:
         piece.steps = (False, False)
-    f0, f1 = piece.sections[0][1], piece.sections[-1][1]
+    f0 = level(*piece.point(piece.start)) - depth_at(piece.start)
+    f1 = level(*piece.point(piece.end)) - depth_at(piece.end)
     if piece.length > 1e-6:
-        piece.sections = _sewers._sections(piece.start, piece.end, piece.line, piece.axis, lambda along: TRACK_DEPTH,
+        piece.sections = _sewers._sections(piece.start, piece.end, piece.line, piece.axis, depth_at,
                                            level, f0, f1, False, False, breaks)
+    else:
+        piece.sections = [(piece.start, f0), (piece.end, f1)]
 
 
 def _station_ends(path, k, axis):

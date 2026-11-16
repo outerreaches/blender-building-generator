@@ -383,7 +383,10 @@ class CityMetadata:
             m = chamber.manhole
             if m is None:
                 continue
-            street = f'street_{chamber.node[0]}_{chamber.node[1]}'
+            # A junction's manhole is named after it; a sewer's end beside a station's hall has a chamber of its
+            # own at that junction, so its manhole is named after the chamber.
+            street = (f'street_{chamber.id[len("sewer_c_"):]}' if chamber.station else
+                      f'street_{chamber.node[0]}_{chamber.node[1]}')
             self.under_nodes.append({'id': street, 'kind': 'street', 'building': '', 'room': '',
                                      'floor': 0, 'layer': 'street', 'position': at(m.x, m.y, m.rim),
                                      'area': 0.0})
@@ -620,10 +623,11 @@ class CityMetadata:
             run = runs[id(r.piece)]
             plug = plugs.get(r.sewer)
             sewer_node = r.sewer if plug is None else r.sewer + (':a' if r.along < plug[0] else ':b')
-            face = r.far - r.side * sub.RISER[1]
+            # On the shaft's near wall, under the passage, facing into the shaft: its top exit is the passage.
+            face = r.near + r.side * sub.RISER[1]
             bottom = at(*r.piece.point(r.along, face), r.floor)
             top = at(*r.piece.point(r.along, face), r.top_floor)
-            facing = (0.0, -float(r.side)) if r.piece.axis == 'x' else (-float(r.side), 0.0)
+            facing = (0.0, float(r.side)) if r.piece.axis == 'x' else (float(r.side), 0.0)
             link(run, sewer_node, 'shaft', passages.WIDTH, top, height=_r(r.top_floor - r.floor), ladder=True)
             self.subway['risers'].append({'id': r.id, 'sewer': sewer_node, 'ladder_bottom': bottom,
                                           'ladder_top': top, 'ladder_facing': self.space.direction(*facing)})

@@ -630,6 +630,8 @@ def _station_end(station, node, other, kind, size, seed, level, blocked, links):
             break
     if variant != 'none' and not station.clear(*station.wall_spot(wall, 0.0)):
         variant = 'none'
+    if kind != 'trunk':
+        variant = 'none'    # A lateral's chamber is lower than a service corridor (and a crouch): a dead end.
 
     def at(distance):
         return (x0 + sign * distance, y0) if axis == 'x' else (x0, y0 + sign * distance)

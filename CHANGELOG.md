@@ -10,7 +10,12 @@
   reached by streets turning at every junction is passed over), along
   arterials where it can, collectors and local streets where it must; a
   city whose streets offer no such route gets no line. It passes under
-  sites' pads (only what comes near the surface keeps off them).
+  sites' pads (only what comes near the surface keeps off them). Its track
+  bed leaves and reaches each station at the station's level (a station is
+  level, set from its junction) and climbs or falls no more steeply than 5%
+  away from it, 14 m under the street or deeper; a station on a hill is set
+  up to 3 m deeper (an island 0.5 m) to keep it so. It is level across a
+  hallway's doorway.
 - **Two kinds of station.** Side platforms either side of the tracks, as
   before but 5 m wide (3.5 m in v0.31) with the stairs against the back
   wall, leaving 2.9 m in front of them; or (half of the stations between the
@@ -35,7 +40,8 @@
   station's junction each sewer ends in a chamber of its own outside the
   hall; a seeded share of these are joined to the hall by one or two
   service rooms (a corridor ramping to the chamber's floor) and a service
-  door, the rest are dead ends with a manhole.
+  door, the rest are dead ends with a manhole; laterals always are (their
+  chambers are lower than a corridor).
 - **Accesses round a corner.** A second basement storey beside the street
   just past a hall's end (up to 32 m) is joined to it by a corridor along
   the street under the road's edge (clear of the trunk and the entrances,
@@ -45,9 +51,10 @@
 - **Hallways off the line.** At seeded intervals along its straights, a
   hallway leaves the walkway through the line's wall: to a utility room
   (half with a ladder shaft up to a hatch in the footway), to an emergency
-  exit's ladder shaft up to a hatch, or to a ladder shaft beside the line up
-  to a passage over its roof, through a gap in the wall of the trunk sewer
-  running above it. The walkway runs on through curves and steps down to
+  exit's room and its ladder shaft up to a hatch, or to a ladder shaft
+  beside the line (its ladder on the wall under the passage) up to a passage
+  over its roof, through a gap in the wall of the trunk sewer running above
+  it. The walkway runs on through curves and steps down to
   the track bed at the stations.
 - **Materials.** Tunnels, sewers, the subway, stations and service rooms
   have materials of their own (22 `City_Tunnel_*`, `City_Sewer_*`,
@@ -62,7 +69,9 @@
   (`utility` or `exit`) and `size`; `risers`
   (ladders up to the sewer). In the `underground` graph: `bathroom` and
   `service` nodes, sewer end chambers joined to halls by doors, risers as
-  shaft links from the line to the sewer.
+  shaft links from the line to the sewer. The manhole of a sewer's end
+  chamber beside a hall is named after the chamber (`street_<chamber>`), so
+  node ids stay unique.
 
 - **Subway** (new city setting, on by default). A line under the arterials
   from one far district through the city's centre to another, one object,

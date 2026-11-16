@@ -668,7 +668,9 @@ they are meant to:
   the corner block, 84 m in radius, or 56 m where turns come two junctions
   apart (never closer); a city whose streets offer no route a train could
   take gets no line. Its two tracks are 3.8 m apart (`tracks` in the
-  metadata).
+  metadata). The track bed leaves and reaches each station at its level and
+  climbs or falls at most 5% away from it (a station on a hill is set up to
+  3 m deeper, an island 0.5 m, to keep it so).
   - **Stations** under junctions on straight runs, clear of the curves
     (every four junctions or so, every two downtown, and at the ends). Side
     platforms 5 m wide either side of the tracks, the stairs against their
@@ -690,9 +692,10 @@ they are meant to:
     a parapet round it. A station with no such ground gets them in the
     footway, 1.4 m wide on a 2 m footway.
   - **The sewers** of a station's junction each end in a chamber of their
-    own outside the hall. A seeded share of those (40% by two service rooms,
-    35% by one, 25% none) are joined to the hall through a service door, the
-    last corridor ramping to the chamber's floor.
+    own outside the hall. A seeded share of the trunks' (40% by two service
+    rooms, 35% by one, 25% none) are joined to the hall through a service
+    door, the last corridor ramping to the chamber's floor; laterals end
+    there.
   - Second basement storeys beside a hall get a doorway into it; the first
     storeys of downtown, old town and brutalist buildings a ladder drop.
     Second storeys beside the street just past a hall's end (up to 32 m) are

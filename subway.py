@@ -1409,8 +1409,10 @@ def _plan_furniture(station, seed):
             back = c1 if c0 > 0 else c0
             sign = 1.0 if c0 > 0 else -1.0
             rows.append((back - sign * (depth / 2 + .05), -sign))       # Against the back wall, facing the track.
+    # An island's two rows share one start, so its benches stand squarely back to back.
+    start = -stop + length / 2 + BENCH_EVERY * rng.random() * .5 if s.kind == 'island' else None
     for across, facing in rows:
-        a = -stop + length / 2 + BENCH_EVERY * rng.random() * .5
+        a = start if start is not None else -stop + length / 2 + BENCH_EVERY * rng.random() * .5
         while a + length / 2 <= stop:
             free = not any(a0 - length / 2 < a < a1 + length / 2 and abs(c - across) < STAIR[0] / 2 + depth
                            for a0, a1, c in stairs)

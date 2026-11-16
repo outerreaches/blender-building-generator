@@ -649,7 +649,7 @@ they are meant to:
   reaches a trunk, falling to the trunk's depth over their last 12 m.
   Octagonal sections with a trench down the floor, which runs on under the
   chamber's wall into a channel to an octagonal basin in the middle of the
-  chamber's floor. A chamber under every junction a sewer reaches, entered
+  chamber's floor, lined with the sludge like the trench. A chamber under every junction a sewer reaches, entered
   through octagonal doorways. A manhole over every chamber whose shaft
   comes up wholly on the road or footway (never on a curb): an octagonal
   shaft 0.9 m across the flats, the street, the ground and the lane paint
@@ -689,8 +689,9 @@ they are meant to:
     modelled). Inside the fare lines two bathrooms against a side wall, a
     door each and two stalls; their toilets and sinks are listed. A kiosk or
     two (newsstand, convenience stall) against a side wall with a serving
-    window, a counter listed inside; benches along the platforms (a bin by
-    about half) and two in the hall, listed for the game.
+    window, a counter listed inside; benches along the platforms (back to
+    back down an island's middle; a bin by about half) and two in the hall,
+    listed for the game.
   - **Turning loops** past the end stations: a level box where the tracks
     part, then a single-track loop out and back (50 m curves), so a train
     turns without reversing (`loops` in the metadata).

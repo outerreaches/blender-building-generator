@@ -40,8 +40,8 @@
   door each, two stalls; their toilets and sinks are listed for the game.
   A kiosk or two (a newsstand or a convenience stall) against a side wall,
   with a serving window and a door, and a counter listed inside; benches
-  along the platforms (a bin by about half) and two in the hall, listed for
-  the game.
+  along the platforms (on an island two rows back to back, one facing each
+  track; a bin by about half) and two in the hall, listed for the game.
 - **Entrances in the open ground.** The stairwells no longer come up in the
   kerb lane: they rise along the street from the hall's ends into the open
   ground between the footway and the buildings, outside every lot's yard
@@ -51,7 +51,8 @@
   footway (the entrance's `place`).
 - **Basins in the sewers' chambers.** A sewer's trench now runs on under
   the chamber's wall into a channel to an octagonal basin in the middle of
-  the floor (1.6 m across in a trunk's chamber, 1 m in a lateral's).
+  the floor (1.6 m across in a trunk's chamber, 1 m in a lateral's), lined
+  with the sludge's material, sides and bottom, as the trench is.
 - **Sewers end beside the halls.** No sewer opens into a hall any more. At a
   station's junction each sewer ends in a chamber of its own outside the
   hall; a seeded share of these are joined to the hall by one or two

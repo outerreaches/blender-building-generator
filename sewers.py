@@ -958,11 +958,14 @@ def _chamber(mesh, chamber, material, floor_material, frame, basins=True):
         _flat(mesh, [ring[k], corner, ring[k + 1]], top, top + s, material)
 
 
-def _chamber_floor(mesh, chamber, floor_material, basins=True):
+def _chamber_floor(mesh, chamber, floor_material, basins=True, lined=True):
     """A chamber's floor: a slab under an octagonal basin in the middle and
     under a channel from each sewer's doorway into it (as wide and deep as
     that sewer's trench, so the trench runs on into the basin); the walkway
-    round them. Without ``basins``, one plain slab."""
+    round them. The basin and the channels are lined with the sludge's
+    material, sides and bottoms, as a sewer's trench is; only the walkway's
+    top is in ``floor_material`` (without ``lined``, the sides are too).
+    Without ``basins``, one plain slab."""
     from . import solids
     from .meshdata import U_SEWER_CHANNEL
     h, s = chamber.size / 2, SHELL
@@ -998,11 +1001,18 @@ def _chamber_floor(mesh, chamber, floor_material, basins=True):
     ring = octagon(cx, cy, 2 * r)
     corners = [[ring[k], corner, ring[k + 1]] for k, corner in
                zip((0, 2, 4, 6), ((cx + r, cy + r), (cx - r, cy + r), (cx - r, cy - r), (cx + r, cy - r)))]
+    first = len(mesh.faces)
     for z0, z1 in zip(levels, levels[1:]):
         holes = [square] + [rect for rect, td in channels if f - td <= z0 + 1e-6]
-        _slab_around(mesh, (x0, y0, x1, y1), z0, z1, floor_material, holes)
+        _slab_around(mesh, (x0, y0, x1, y1), z0, z1, U_SEWER_CHANNEL, holes)
         for triangle in corners:
-            _flat(mesh, triangle, z0, z1, floor_material)
+            _flat(mesh, triangle, z0, z1, U_SEWER_CHANNEL)
+    # The walkway is the layers' faces lying at the floor's height; every other face of them is the basin's or a
+    # channel's side (or a shallower channel's bottom), or hidden in the ground.
+    for k in range(first, len(mesh.faces)):
+        face, _ = mesh.faces[k]
+        if not lined or all(abs(mesh.verts[i][2] - f) < 1e-6 for i in face):
+            mesh.faces[k] = (face, floor_material)
 
 
 def _slab_around(mesh, rect, z0, z1, material, holes):
